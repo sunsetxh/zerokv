@@ -115,14 +115,15 @@ typedef struct {
 // Connection request callback
 typedef void (*ucp_connection_request_callback_t)(ucp_conn_request_h conn_request, void* arg);
 
-typedef struct {
-    struct sockaddr_storage addr;
+// Socket address (UCS type)
+typedef struct ucs_sock_addr {
+    const struct sockaddr* addr;
     socklen_t addrlen;
-} ucp_sockaddr_t;
+} ucs_sock_addr_t;
 
 typedef struct {
     uint64_t field_mask;
-    ucp_sockaddr_t sockaddr;
+    ucs_sock_addr_t sockaddr;
     union {
         ucp_connection_request_callback_t conn_handler;
         struct {

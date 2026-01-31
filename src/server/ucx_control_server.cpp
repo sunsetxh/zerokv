@@ -270,17 +270,16 @@ bool UCXControlServer::CreateListener() {
     listener_params.conn_handler.cb = connection_request_callback;
     listener_params.conn_handler.arg = this;
 
-    // Set listen address
-    struct sockaddr_in addr;
-    std::memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;  // Listen on all interfaces
-    addr.sin_port = htons(config_.listen_port);
+    // Set listen address (must persist for listener lifetime)
+    static struct sockaddr_in listen_addr;
+    std::memset(&listen_addr, 0, sizeof(listen_addr));
+    listen_addr.sin_family = AF_INET;
+    listen_addr.sin_addr.s_addr = INADDR_ANY;  // Listen on all interfaces
+    listen_addr.sin_port = htons(config_.listen_port);
 
-    // Copy to sockaddr_storage
-    std::memset(&listener_params.sockaddr.addr, 0, sizeof(listener_params.sockaddr.addr));
-    std::memcpy(&listener_params.sockaddr.addr, &addr, sizeof(addr));
-    listener_params.sockaddr.addrlen = sizeof(addr);
+    // Set sockaddr (using pointer)
+    listener_params.sockaddr.addr = (struct sockaddr*)&listen_addr;
+    listener_params.sockaddr.addrlen = sizeof(listen_addr);
 
     // Create listener
     ucs_status_t status = ucp_listener_create(ucp_worker_, &listener_params, &ucp_listener_);
