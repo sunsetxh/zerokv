@@ -1,14 +1,14 @@
 # ZeroKV 开发任务清单
 
-版本: v0.1.0  
-最后更新: 第1次更新
+版本: v0.1.1
+最后更新: 2025-01-31 (第2次更新)
 
 ## 📊 任务概览
 
 - **总任务数**: 11
-- **已完成**: 0 (0%)
+- **已完成**: 1 (9%)
 - **进行中**: 0
-- **待开始**: 11 (100%)
+- **待开始**: 10 (91%)
 
 ## 🎯 里程碑任务
 
@@ -114,36 +114,46 @@
 ## 📋 详细任务列表
 
 ### Task #7: 实现 P2P UCX Mock 核心接口
-**状态**: ⏳ 可开始 (无依赖)  
-**优先级**: P0 ⭐  
-**预计工时**: 3天  
-**负责人**: 待分配
+**状态**: ✅ 已完成
+**优先级**: P0 ⭐
+**实际工时**: 1天
+**负责人**: Claude
+**开始时间**: 2025-01-31
+**完成时间**: 2025-01-31
 
 **需要实现的接口**:
 ```cpp
-- P2PMockInit(bool useRDMA)
-- P2PGetRootInfo(HcclRootInfo* rootInfo)
-- P2PCommInitRootInfo(P2PComm* comm, HcclRootInfo* rootInfo)
-- P2PSend(P2PComm comm, void* buf, size_t bytes, uint32_t rank)
-- P2PRecv(P2PComm comm, void* buf, size_t bytes, uint32_t rank, void* stream)
+- P2PMockInit(bool useRDMA) ✅
+- P2PGetRootInfo(HcclRootInfo* rootInfo) ✅
+- P2PCommInitRootInfo(P2PComm* comm, HcclRootInfo* rootInfo) ✅
+- P2PSend(P2PComm comm, void* buf, size_t bytes, uint32_t rank) ✅
+- P2PRecv(P2PComm comm, void* buf, size_t bytes, uint32_t rank, void* stream) ✅
+- P2PCommDestroy(P2PComm* comm) ✅
+- MockDeviceMalloc/Free/Memcpy系列 ✅
 ```
 
 **技术要点**:
-- 使用UCX ucp_worker和ucp_ep
-- HcclRootInfo存储UCX worker地址
-- 支持RDMA和TCP模式
-- 模拟NPU内存
+- 使用UCX ucp_worker和ucp_ep ✅
+- HcclRootInfo存储UCX worker地址 ✅
+- 支持RDMA和TCP模式 ✅
+- 模拟NPU内存 ✅
 
-**交付文件**:
-- `src/common/p2p_ucx_mock.cpp`
-- `src/common/p2p_ucx_mock.h`
+**已完成文件**:
+- ✅ `src/common/p2p_ucx_mock.h` (接口定义, 157行)
+- ✅ `src/common/p2p_ucx_mock.cpp` (完整实现, 335行)
+- ✅ `src/common/ucx_stub.h` (UCX stub接口, 152行)
+- ✅ `src/common/ucx_stub.cpp` (UCX stub实现, 235行)
+- ✅ `tests/unit/test_p2p_mock.cpp` (完整单元测试, 338行)
+- ✅ `CMakeLists.txt` (更新构建配置)
+
+**测试结果**: ✅ 18/18 测试通过 (105ms)
 
 ---
 
 ### Task #8: 实现 UCX 控制服务器
-**状态**: 🔒 被阻塞 (依赖 #7)  
-**优先级**: P0  
-**预计工时**: 4天  
+**状态**: ⏳ 可开始 (无阻塞依赖)
+**优先级**: P0
+**预计工时**: 4天
 **负责人**: 待分配
 
 **需要实现**:
@@ -160,9 +170,9 @@
 ---
 
 ### Task #9: 实现 UCX 控制客户端
-**状态**: 🔒 被阻塞 (依赖 #7)  
-**优先级**: P0  
-**预计工时**: 3天  
+**状态**: ⏳ 可开始 (无阻塞依赖)
+**优先级**: P0
+**预计工时**: 3天
 **负责人**: 待分配
 
 **需要实现**:
