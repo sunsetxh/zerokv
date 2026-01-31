@@ -32,6 +32,7 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/socket.h>
 
 // UCX status codes
 typedef enum {
@@ -55,6 +56,8 @@ typedef enum {
 typedef struct ucp_context* ucp_context_h;
 typedef struct ucp_worker* ucp_worker_h;
 typedef struct ucp_ep* ucp_ep_h;
+typedef struct ucp_listener* ucp_listener_h;
+typedef struct ucp_conn_request* ucp_conn_request_h;
 typedef struct ucp_address* ucp_address_t;
 typedef struct ucp_config ucp_config_t;
 typedef void* ucs_status_ptr_t;
@@ -65,15 +68,20 @@ typedef void* ucs_status_ptr_t;
 #define UCP_PARAM_FIELD_REQUEST_INIT    (1ULL << 2)
 #define UCP_WORKER_PARAM_FIELD_THREAD_MODE (1ULL << 0)
 #define UCP_EP_PARAM_FIELD_REMOTE_ADDRESS (1ULL << 0)
+#define UCP_EP_PARAM_FIELD_CONN_REQUEST  (1ULL << 1)
 #define UCP_OP_ATTR_FIELD_CALLBACK      (1ULL << 0)
 #define UCP_OP_ATTR_FIELD_FLAGS         (1ULL << 1)
 #define UCP_AM_HANDLER_PARAM_FIELD_ID   (1ULL << 0)
 #define UCP_AM_HANDLER_PARAM_FIELD_CB   (1ULL << 1)
 #define UCP_AM_HANDLER_PARAM_FIELD_ARG  (1ULL << 2)
+#define UCP_LISTENER_PARAM_FIELD_SOCK_ADDR (1ULL << 0)
+#define UCP_LISTENER_PARAM_FIELD_CONN_HANDLER (1ULL << 1)
 
 // Features
 #define UCP_FEATURE_RMA     (1ULL << 0)
 #define UCP_FEATURE_AM      (1ULL << 1)
+#define UCP_FEATURE_STREAM  (1ULL << 2)
+#define UCP_FEATURE_TAG     (1ULL << 3)
 
 // Flags
 #define UCP_EP_CLOSE_FLAG_FORCE (1ULL << 0)
@@ -101,7 +109,33 @@ typedef struct {
 typedef struct {
     uint64_t field_mask;
     const ucp_address_t* address;
+    ucp_conn_request_h conn_request;
 } ucp_ep_params_t;
+
+// Connection request callback
+typedef void (*ucp_connection_request_callback_t)(ucp_conn_request_h conn_request, void* arg);
+
+typedef struct {
+    struct sockaddr_storage addr;
+    socklen_t addrlen;
+} ucp_sockaddr_t;
+
+typedef struct {
+    uint64_t field_mask;
+    ucp_sockaddr_t sockaddr;
+    union {
+        ucp_connection_request_callback_t conn_handler;
+        struct {
+            ucp_connection_request_callback_t cb;
+            void* arg;
+        } conn_handler_struct;
+    };
+} ucp_listener_params_t;
+
+// Tag receive info
+typedef struct {
+    size_t length;
+} ucp_tag_recv_info_t;
 
 typedef struct {
     uint64_t op_attr_mask;
@@ -150,6 +184,11 @@ void ucp_worker_release_address(ucp_worker_h worker, ucp_address_t* address);
 ucs_status_t ucp_ep_create(ucp_worker_h worker, const ucp_ep_params_t* params,
                            ucp_ep_h* ep_p);
 ucs_status_ptr_t ucp_ep_close_nbx(ucp_ep_h ep, const ucp_request_param_t* param);
+
+ucs_status_t ucp_listener_create(ucp_worker_h worker, const ucp_listener_params_t* params,
+                                ucp_listener_h* listener_p);
+void ucp_listener_destroy(ucp_listener_h listener);
+void ucp_listener_reject(ucp_listener_h listener, ucp_conn_request_h conn_request);
 
 ucs_status_ptr_t ucp_am_send_nbx(ucp_ep_h ep, unsigned id,
                                   const void* header, size_t header_length,

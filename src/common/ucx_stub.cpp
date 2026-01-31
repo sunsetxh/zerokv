@@ -45,6 +45,15 @@ struct ucp_ep {
     std::vector<uint8_t> remote_address;
 };
 
+struct ucp_listener {
+    ucp_worker_h worker;
+    uint16_t port;
+};
+
+struct ucp_conn_request {
+    ucp_listener_h listener;
+};
+
 struct ucp_config {
     std::map<std::string, std::string> settings;
 };
@@ -245,6 +254,30 @@ ucs_status_t ucp_request_check_status(void* request) {
 void ucp_request_free(void* request) {
     // Stub: Nothing to free since we return nullptr for immediate completion
     (void)request;
+}
+
+ucs_status_t ucp_listener_create(ucp_worker_h worker, const ucp_listener_params_t* params,
+                                ucp_listener_h* listener_p) {
+    (void)worker;
+    (void)params;
+
+    if (listener_p == nullptr) {
+        return UCS_ERR_INVALID_PARAM;
+    }
+
+    // Stub: Create a mock listener
+    *listener_p = new ucp_listener();
+    return UCS_OK;
+}
+
+void ucp_listener_destroy(ucp_listener_h listener) {
+    delete listener;
+}
+
+void ucp_listener_reject(ucp_listener_h listener, ucp_conn_request_h conn_request) {
+    (void)listener;
+    (void)conn_request;
+    // Stub: Do nothing for now
 }
 
 }  // extern "C"

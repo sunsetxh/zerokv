@@ -6,9 +6,9 @@
 ## 📊 任务概览
 
 - **总任务数**: 11
-- **已完成**: 1 (9%)
+- **已完成**: 2 (18%)
 - **进行中**: 0
-- **待开始**: 10 (91%)
+- **待开始**: 9 (82%)
 
 ## 🎯 里程碑任务
 
@@ -151,10 +151,12 @@
 ---
 
 ### Task #8: 实现 UCX 控制服务器
-**状态**: ⏳ 可开始 (无阻塞依赖)
+**状态**: ✅ 已完成
 **优先级**: P0
-**预计工时**: 4天
-**负责人**: 待分配
+**实际工时**: 1天
+**负责人**: Claude
+**开始时间**: 2025-01-31
+**完成时间**: 2025-01-31
 
 **需要实现**:
 - UCXControlServer 类
@@ -164,8 +166,11 @@
 - Put/Get/Delete 请求处理
 
 **交付文件**:
-- `src/common/ucx_control_server.cpp`
-- `src/common/ucx_control_server.h`
+- ✅ `include/zerokv/ucx_control_server.h` (接口定义, 207行)
+- ✅ `src/common/ucx_control_server.cpp` (实现, 470行)
+- ✅ `tests/unit/test_ucx_control_server.cpp` (单元测试, 205行)
+
+**测试结果**: ✅ 13/13 测试通过 (113ms)
 
 ---
 

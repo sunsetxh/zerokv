@@ -115,6 +115,7 @@ else()
 endif()
 
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # NPU ACL (optional, for real NPU)
 if(USE_REAL_NPU)
@@ -137,7 +138,7 @@ endif()
 # Common source files
 set(COMMON_SRCS
     src/common/p2p_ucx_mock.cpp
-    # src/common/ucx_control_server.cpp  # Task #8 - TODO
+    src/common/ucx_control_server.cpp  # Task #8
     # src/common/ucx_control_client.cpp  # Task #9 - TODO
 )
 
@@ -174,6 +175,9 @@ target_link_libraries(zerokv_common
 set_source_files_properties(${PROTO_SRCS} PROPERTIES
     COMPILE_FLAGS "-Wno-unused-parameter"
 )
+
+# Also add compiler flag to suppress warnings in protobuf headers
+target_compile_options(zerokv_common PRIVATE -Wno-unused-parameter)
 
 # Server and client libraries will be built in later milestones
 # add_library(zerokv_server SHARED ${SERVER_SRCS})
@@ -224,6 +228,11 @@ if(BUILD_TESTS)
     foreach(test_src ${TEST_SRCS})
         get_filename_component(test_name ${test_src} NAME_WE)
         add_executable(${test_name} ${test_src})
+        target_include_directories(${test_name} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/common
+            ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        target_compile_options(${test_name} PRIVATE -Wno-unused-parameter)
         target_link_libraries(${test_name}
             zerokv_common
             GTest::gtest_main
