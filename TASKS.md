@@ -167,10 +167,11 @@
 
 **交付文件**:
 - ✅ `include/zerokv/ucx_control_server.h` (接口定义, 207行)
-- ✅ `src/common/ucx_control_server.cpp` (实现, 470行)
+- ✅ `src/server/ucx_control_server.cpp` (实现, 470行)
 - ✅ `tests/unit/test_ucx_control_server.cpp` (单元测试, 205行)
 
-**测试结果**: ✅ 13/13 测试通过 (113ms)
+**测试结果**: ✅ 13/13 测试通过 (使用真实 UCX 1.20.0)
+**备注**: 代码已移至 `src/server/` 目录，实现 UCX 1.20.0 兼容性
 
 ---
 
