@@ -80,12 +80,9 @@ if(BUILD_UCX_FROM_SOURCE)
     set(UCX_UCS_LIB ${UCX_INSTALL_DIR}/lib/libucs${CMAKE_SHARED_LIBRARY_SUFFIX})
     set(UCX_LIBRARIES ${UCX_UCP_LIB} ${UCX_UCS_LIB})
     set(HAVE_REAL_UCX ON)
+    set(NEED_UCX_DEPENDENCY TRUE)
 
     message(STATUS "UCX will be built and installed to: ${UCX_INSTALL_DIR}")
-
-    # Make our libraries depend on UCX
-    add_dependencies(zerokv_common ucx)
-    add_dependencies(zerokv_server ucx)
 
 elseif(NOT USE_UCX_STUB)
     # Try to find system UCX
@@ -260,6 +257,12 @@ target_include_directories(zerokv_server PUBLIC
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 target_compile_options(zerokv_server PRIVATE -Wno-unused-parameter)
+
+# Add UCX dependency if building from source
+if(NEED_UCX_DEPENDENCY)
+    add_dependencies(zerokv_common ucx)
+    add_dependencies(zerokv_server ucx)
+endif()
 
 # Client library will be built in Task #9
 # add_library(zerokv_client SHARED ${CLIENT_SRCS})
