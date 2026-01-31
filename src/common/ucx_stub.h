@@ -58,7 +58,7 @@ typedef struct ucp_worker* ucp_worker_h;
 typedef struct ucp_ep* ucp_ep_h;
 typedef struct ucp_listener* ucp_listener_h;
 typedef struct ucp_conn_request* ucp_conn_request_h;
-typedef struct ucp_address* ucp_address_t;
+typedef struct ucp_address ucp_address_t;
 typedef struct ucp_config ucp_config_t;
 typedef void* ucs_status_ptr_t;
 
@@ -140,8 +140,11 @@ typedef struct {
 typedef struct {
     uint64_t op_attr_mask;
     union {
-        void (*send)(void* request, ucs_status_t status);
-    } cb;
+        struct {
+            void (*send)(void* request, ucs_status_t status, void* user_data);
+        } cb;
+        void* user_data;
+    };
     uint32_t flags;
 } ucp_request_param_t;
 

@@ -57,7 +57,7 @@ if(BUILD_UCX_FROM_SOURCE)
         URL https://github.com/openucx/ucx/releases/download/1.20.0/ucx-1.20.0.tar.gz
         URL_HASH SHA256=8a2776c3e8d7da8aa45abe640a6956b33f71b59cf4120566a888ee2b0ecfe667
         BUILD_IN_SOURCE 1
-        CONFIGURE_COMMAND ${CMAKE_CURRENT_BINARY_DIR}/ucx/src/configure
+        CONFIGURE_COMMAND ${CMAKE_CURRENT_BINARY_DIR}/ucx-prefix/src/ucx/configure
             --prefix=${CMAKE_CURRENT_BINARY_DIR}/ucx-install
             --enable-shared
             --disable-static
