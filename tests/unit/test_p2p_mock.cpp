@@ -96,7 +96,7 @@ TEST_F(P2PMockTest, CommInitTest) {
 
 // Test: Comm initialization with null pointers
 TEST_F(P2PMockTest, CommInitNullTest) {
-    HcclRootInfo rootInfo;
+    HcclRootInfo rootInfo = {};
     P2PComm comm;
 
     EXPECT_EQ(P2PCommInitRootInfo(nullptr, &rootInfo, 0), HCCL_E_PTR);

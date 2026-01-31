@@ -133,6 +133,11 @@ if(NOT Protobuf_FOUND)
     set(protobuf_BUILD_EXAMPLES OFF CACHE BOOL "Build protobuf examples")
     set(protobuf_WITH_ZLIB OFF CACHE BOOL "Build with zlib support")
 
+    # Add -fPIC for protobuf (required for ARM64 shared libraries)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "PIC" FORCE)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
+
     # Disable -Werror for protobuf to avoid compilation errors
     set(CMAKE_CXX_FLAGS_SAVED "${CMAKE_CXX_FLAGS}")
     string(REPLACE "-Werror" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")

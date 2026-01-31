@@ -267,8 +267,8 @@ bool UCXControlServer::CreateListener() {
     std::memset(&listener_params, 0, sizeof(listener_params));
     listener_params.field_mask = UCP_LISTENER_PARAM_FIELD_SOCK_ADDR |
                                  UCP_LISTENER_PARAM_FIELD_CONN_HANDLER;
-    listener_params.conn_handler_struct.cb = connection_request_callback;
-    listener_params.conn_handler_struct.arg = this;
+    listener_params.conn_handler.cb = connection_request_callback;
+    listener_params.conn_handler.arg = this;
 
     // Set listen address
     struct sockaddr_in addr;

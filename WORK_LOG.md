@@ -382,5 +382,102 @@ target_compile_options(${test_name} PRIVATE -Wno-unused-parameter)
 
 ---
 
-**工作日志结束** - 2025-01-31
-**下次工作从**: 完成Task #7编译验证开始
+## 2025-02-01 - Day 2: UCX 1.20.0 集成
+
+### 📋 今日目标
+- 集成 UCX 1.20.0 作为源码依赖
+- 在 Ubuntu 24.04 Docker 容器中验证编译
+- 修复 stub 与真实 UCX API 兼容性问题
+
+### ✅ 已完成工作
+
+#### 1. CMakeLists.txt UCX 集成
+**文件**: CMakeLists.txt
+
+新增 UCX 1.20.0 源码构建支持：
+- 使用 ExternalProject 下载并构建 UCX 1.20.0
+- URL: `https://github.com/openucx/ucx/releases/download/1.20.0/ucx-1.20.0.tar.gz`
+- SHA256: `8a2776c3e8d7da8aa45abe640a6956b33f71b59cf4120566a888ee2b0ecfe667`
+- 配置选项: `--enable-shared --disable-static --disable-debug --disable-assertions --disable-mt`
+
+三种 UCX 模式：
+1. `BUILD_UCX_FROM_SOURCE=ON` - 下载并构建 UCX 1.20.0
+2. `USE_UCX_STUB=OFF` - 使用系统安装的 UCX
+3. `USE_UCX_STUB=ON` (默认) - 使用 stub 实现
+
+#### 2. Docker 容器验证环境
+启动 Ubuntu 24.04 容器用于验证 Linux 编译：
+```bash
+docker run -d --name zerokv-ucx-test \
+  -v /Users/wangyuchao/code/openyuanrong/zerokv:/workspace \
+  -w /workspace ubuntu:24.04 tail -f /dev/null
+```
+
+编译限制：使用 `-j5`（一半 CPU）避免内存不足
+
+#### 3. API 兼容性修复
+
+**修复 1: ucp_address_t 类型定义**
+- 文件: `src/common/p2p_ucx_mock.h` 第 35 行
+- 文件: `src/common/ucx_stub.h` 第 61 行
+- 修改: `typedef struct ucp_address* ucp_address_t;` → `typedef struct ucp_address ucp_address_t;`
+
+**修复 2: 回调函数签名**
+- 文件: `src/common/p2p_ucx_mock.cpp` 第 207 行
+- 添加 `user_data` 参数: `request_completion_callback(void* request, ucs_status_t status, void* user_data)`
+
+**修复 3: Protobuf -fPIC**
+- 文件: `CMakeLists.txt`
+- 为 ARM64 架构添加 `-fPIC` 编译选项
+- 设置 `CMAKE_POSITION_INDEPENDENT_CODE=ON`
+
+**修复 4: ucp_listener_params_t 结构体**
+- 文件: `src/server/ucx_control_server.cpp` 第 270-271 行
+- 修改: `conn_handler_struct.cb` → `conn_handler.cb`
+
+**修复 5: 测试代码未初始化变量**
+- 文件: `tests/unit/test_p2p_mock.cpp` 第 99 行
+- 修改: `HcclRootInfo rootInfo;` → `HcclRootInfo rootInfo = {};`
+
+### ⏳ 遗留问题
+
+#### 问题 1: ucp_listener_params_t 结构体定义不一致
+- 真实 UCX 1.20.0 中的 `ucp_listener_params_t` 结构与 stub 不同
+- 需要检查真实 UCX 头文件并同步 stub 定义
+- 位置: `src/common/ucx_stub.h` 第 123-133 行
+
+#### 问题 2: Docker 容器内编译未完成
+- 已修复部分兼容性问题
+- 需要重新运行 cmake 和 make 验证
+
+### 📊 代码统计
+
+**修改文件**:
+- CMakeLists.txt: UCX ExternalProject 配置 + Protobuf -fPIC
+- src/common/p2p_ucx_mock.h: ucp_address_t 类型修复
+- src/common/p2p_ucx_mock.cpp: 回调函数签名修复
+- src/common/ucx_stub.h: ucp_address_t 类型修复
+- src/server/ucx_control_server.cpp: conn_handler 成员访问修复
+- tests/unit/test_p2p_mock.cpp: 未初始化变量修复
+- WORK_LOG.md: 本日工作记录
+
+### 📝 明日待办
+
+#### 高优先级
+1. **完成 UCX 兼容性修复**
+   - 检查真实 UCX 1.20.0 的 `ucp_listener_params_t` 定义
+   - 同步 stub 定义使其与真实 API 一致
+
+2. **验证容器内编译**
+   - 重新运行 cmake 配置
+   - 编译并运行所有测试
+   - 确保使用真实 UCX 1.20.0 时测试通过
+
+3. **提交 Task #8 代码**
+   - 所有修复验证通过后创建 Git commit
+   - 更新 TASKS.md
+
+---
+
+**工作日志结束** - 2025-02-01
+**下次工作从**: 修复 ucp_listener_params_t 结构体兼容性问题开始

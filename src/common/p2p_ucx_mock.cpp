@@ -204,9 +204,10 @@ HcclResult P2PCommInitRootInfo(P2PComm* comm, const HcclRootInfo* rootInfo, uint
 }
 
 // Completion callback for non-blocking operations
-static void request_completion_callback(void* request, ucs_status_t status) {
+static void request_completion_callback(void* request, ucs_status_t status, void* user_data) {
     (void)request;
     (void)status;
+    (void)user_data;
     // Nothing to do, request will be freed by caller
 }
 
