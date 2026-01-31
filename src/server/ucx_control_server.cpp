@@ -98,36 +98,38 @@ bool UCXControlServer::Start() {
 }
 
 void UCXControlServer::Stop() {
-    if (!running_) {
-        return;
+    if (!running_ && !initialized_) {
+        return;  // Nothing to clean up
     }
 
     running_ = false;
 
     // Close all client connections
-    std::lock_guard<std::mutex> lock(connections_mutex_);
-    for (auto& [client_id, conn] : client_connections_) {
-        if (conn.endpoint != nullptr) {
-            ucp_request_param_t close_param;
-            std::memset(&close_param, 0, sizeof(close_param));
-            close_param.op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS;
-            close_param.flags = UCP_EP_CLOSE_FLAG_FORCE;
+    {
+        std::lock_guard<std::mutex> lock(connections_mutex_);
+        for (auto& [client_id, conn] : client_connections_) {
+            if (conn.endpoint != nullptr) {
+                ucp_request_param_t close_param;
+                std::memset(&close_param, 0, sizeof(close_param));
+                close_param.op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS;
+                close_param.flags = UCP_EP_CLOSE_FLAG_FORCE;
 
-            ucs_status_ptr_t request = ucp_ep_close_nbx(conn.endpoint, &close_param);
-            if (request != nullptr) {
-                if (!UCS_PTR_IS_ERR(request)) {
-                    // Wait for close to complete
-                    ucs_status_t status;
-                    do {
-                        ucp_worker_progress(ucp_worker_);
-                        status = ucp_request_check_status(request);
-                    } while (status == UCS_INPROGRESS);
-                    ucp_request_free(request);
+                ucs_status_ptr_t request = ucp_ep_close_nbx(conn.endpoint, &close_param);
+                if (request != nullptr) {
+                    if (!UCS_PTR_IS_ERR(request)) {
+                        // Wait for close to complete
+                        ucs_status_t status;
+                        do {
+                            ucp_worker_progress(ucp_worker_);
+                            status = ucp_request_check_status(request);
+                        } while (status == UCS_INPROGRESS);
+                        ucp_request_free(request);
+                    }
                 }
             }
         }
+        client_connections_.clear();
     }
-    client_connections_.clear();
 
     // Destroy listener
     if (ucp_listener_ != nullptr) {
@@ -146,6 +148,8 @@ void UCXControlServer::Stop() {
         ucp_cleanup(ucp_context_);
         ucp_context_ = nullptr;
     }
+
+    initialized_ = false;
 
     initialized_ = false;
     std::cout << "UCX Control Server stopped" << std::endl;
