@@ -20,6 +20,7 @@
  */
 
 #include "p2p_ucx_mock.h"
+#include <zerokv/logger.h>
 
 #ifdef USE_UCX_STUB
 #include "ucx_stub.h"
@@ -31,7 +32,6 @@
 #include <mutex>
 #include <unordered_map>
 #include <memory>
-#include <iostream>
 
 namespace zerokv {
 
@@ -56,8 +56,8 @@ static MockMemoryManager g_mem_manager;
 // Helper function to check UCX status
 static HcclResult CheckUCXStatus(ucs_status_t status, const char* operation) {
     if (status != UCS_OK) {
-        std::cerr << "UCX error in " << operation << ": "
-                  << ucs_status_string(status) << std::endl;
+        LOG_ERROR("UCX error in " << operation << ": "
+                  << ucs_status_string(status));
         return HCCL_E_INTERNAL;
     }
     return HCCL_SUCCESS;
@@ -162,8 +162,8 @@ HcclResult P2PGetRootInfo(HcclRootInfo* rootInfo) {
 
     if (address_length > HCCL_ROOT_INFO_BYTES) {
         ucp_worker_release_address(g_ucx_ctx.worker, address);
-        std::cerr << "Worker address too large: " << address_length
-                  << " > " << HCCL_ROOT_INFO_BYTES << std::endl;
+        LOG_ERROR("Worker address too large: " << address_length
+                  << " > " << HCCL_ROOT_INFO_BYTES);
         return HCCL_E_MEMORY;
     }
 

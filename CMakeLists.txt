@@ -206,7 +206,7 @@ endif()
 # Common source files
 set(COMMON_SRCS
     src/common/p2p_ucx_mock.cpp
-    # src/common/ucx_control_client.cpp  # Task #9 - TODO
+    src/common/logger.cpp
 )
 
 # Add protobuf generated files separately to set compile options
@@ -228,6 +228,7 @@ set(SERVER_SRCS
 
 # Client source files
 set(CLIENT_SRCS
+    src/client/ucx_control_client.cpp  # Task #9
     # src/client/zerokv_client.cpp  # Milestone #2 - TODO
 )
 
@@ -265,14 +266,24 @@ target_compile_options(zerokv_server PRIVATE -Wno-unused-parameter)
 if(NEED_UCX_DEPENDENCY)
     add_dependencies(zerokv_common ucx)
     add_dependencies(zerokv_server ucx)
+    if(TARGET zerokv_client)
+        add_dependencies(zerokv_client ucx)
+    endif()
 endif()
 
-# Client library will be built in Task #9
-# add_library(zerokv_client SHARED ${CLIENT_SRCS})
-# target_link_libraries(zerokv_client
-#     zerokv_common
-#     ${NPU_LIBRARIES}
-# )
+# Build client library (Task #9)
+add_library(zerokv_client SHARED ${CLIENT_SRCS})
+target_link_libraries(zerokv_client
+    zerokv_common
+    ${UCX_LIBRARIES}
+    ${Protobuf_LIBRARIES}
+    Threads::Threads
+)
+target_include_directories(zerokv_client PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
+target_compile_options(zerokv_client PRIVATE -Wno-unused-parameter)
 
 # Install headers
 install(DIRECTORY include/zerokv
@@ -281,14 +292,10 @@ install(DIRECTORY include/zerokv
 )
 
 # Install libraries
-install(TARGETS zerokv_common
+install(TARGETS zerokv_common zerokv_server zerokv_client
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
-# install(TARGETS zerokv_server zerokv_client  # Will be enabled in later milestones
-#     LIBRARY DESTINATION lib
-#     ARCHIVE DESTINATION lib
-# )
 
 # Build tests
 if(BUILD_TESTS)
@@ -317,7 +324,14 @@ if(BUILD_TESTS)
         target_compile_options(${test_name} PRIVATE -Wno-unused-parameter)
 
         # Link appropriate libraries based on test name
-        if(test_name MATCHES "ucx_control_server|ucx_control_client|zerokv_server|zerokv_client")
+        if(test_name MATCHES "ucx_control_client")
+            target_link_libraries(${test_name}
+                zerokv_client
+                zerokv_server
+                zerokv_common
+                GTest::gtest_main
+            )
+        elseif(test_name MATCHES "ucx_control_server|zerokv_server|zerokv_client")
             target_link_libraries(${test_name}
                 zerokv_server
                 zerokv_common

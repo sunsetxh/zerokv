@@ -280,4 +280,32 @@ void ucp_listener_reject(ucp_listener_h listener, ucp_conn_request_h conn_reques
     // Stub: Do nothing for now
 }
 
+// Stream API implementations
+ucs_status_ptr_t ucp_stream_send_nbx(ucp_ep_h ep, const void* buffer, size_t count,
+                                      const ucp_request_param_t* param) {
+    (void)ep;
+    (void)buffer;
+    (void)count;
+    (void)param;
+
+    // Stub: Return nullptr to indicate immediate completion
+    return nullptr;
+}
+
+ucs_status_ptr_t ucp_stream_recv_nbx(ucp_ep_h ep, void* buffer, size_t count,
+                                      size_t* length, const ucp_request_param_t* param) {
+    (void)ep;
+    (void)buffer;
+    (void)count;
+    (void)param;
+
+    // Stub: Return 0 length (no data available)
+    if (length != nullptr) {
+        *length = 0;
+    }
+
+    // Return nullptr to indicate immediate completion
+    return nullptr;
+}
+
 }  // extern "C"

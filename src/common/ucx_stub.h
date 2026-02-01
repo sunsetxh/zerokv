@@ -106,16 +106,20 @@ typedef struct {
     ucs_thread_mode_t thread_mode;
 } ucp_worker_params_t;
 
-typedef struct {
-    uint64_t field_mask;
-    const ucp_address_t* address;
-    ucp_conn_request_h conn_request;
-} ucp_ep_params_t;
+// EP parameter field masks (add missing ones, keep existing)
+#define UCP_EP_PARAM_FIELD_REMOTE_ADDRESS       (1ULL << 0)
+#define UCP_EP_PARAM_FIELD_FLAGS                (1ULL << 3)
+#define UCP_EP_PARAM_FIELD_SOCK_ADDR            (1ULL << 4)
+#define UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE    (1ULL << 5)
 
-// Connection request callback
-typedef void (*ucp_connection_request_callback_t)(ucp_conn_request_h conn_request, void* arg);
+// EP flags
+#define UCP_EP_PARAMS_FLAGS_CLIENT_SERVER       (1ULL << 0)
 
-// Socket address (UCS type)
+// Error handling modes
+#define UCP_ERR_HANDLING_MODE_NONE              0
+#define UCP_ERR_HANDLING_MODE_PEER              1
+
+// Socket address (UCS type) - defined here before use
 typedef struct ucs_sock_addr {
     const struct sockaddr* addr;
     socklen_t addrlen;
@@ -123,20 +127,41 @@ typedef struct ucs_sock_addr {
 
 typedef struct {
     uint64_t field_mask;
+    const ucp_address_t* address;
+    ucp_conn_request_h conn_request;
+    uint32_t flags;
     ucs_sock_addr_t sockaddr;
-    union {
-        ucp_connection_request_callback_t conn_handler;
-        struct {
-            ucp_connection_request_callback_t cb;
-            void* arg;
-        } conn_handler_struct;
-    };
+    uint32_t err_mode;
+} ucp_ep_params_t;
+
+// Connection request callback
+typedef void (*ucp_connection_request_callback_t)(ucp_conn_request_h conn_request, void* arg);
+
+// Listener connection handler structure
+typedef struct {
+    ucp_connection_request_callback_t cb;
+    void* arg;
+} ucp_listener_conn_handler_t;
+
+typedef struct {
+    uint64_t field_mask;
+    ucs_sock_addr_t sockaddr;
+    ucp_listener_conn_handler_t conn_handler;
 } ucp_listener_params_t;
 
 // Tag receive info
 typedef struct {
     size_t length;
 } ucp_tag_recv_info_t;
+
+// Stream send flags
+#define UCP_STREAM_SEND_FLAG_LAST   (1ULL << 0)
+
+// EP close flags
+#define UCP_EP_CLOSE_FLAG_FORCE     (1ULL << 0)
+
+// UCS_PTR_IS_PTR was missing, add it
+#define UCS_PTR_IS_PTR(_ptr)    ((uintptr_t)(_ptr) >= 0x100)
 
 typedef struct {
     uint64_t op_attr_mask;
@@ -201,6 +226,12 @@ ucs_status_ptr_t ucp_am_send_nbx(ucp_ep_h ep, unsigned id,
 
 ucs_status_t ucp_worker_set_am_recv_handler(ucp_worker_h worker,
                                              const ucp_am_handler_param_t* param);
+
+// Stream API
+ucs_status_ptr_t ucp_stream_send_nbx(ucp_ep_h ep, const void* buffer, size_t count,
+                                      const ucp_request_param_t* param);
+ucs_status_ptr_t ucp_stream_recv_nbx(ucp_ep_h ep, void* buffer, size_t count,
+                                      size_t* length, const ucp_request_param_t* param);
 
 ucs_status_t ucp_request_check_status(void* request);
 void ucp_request_free(void* request);

@@ -20,9 +20,9 @@
  */
 
 #include "zerokv/ucx_control_server.h"
+#include <zerokv/logger.h>
 
 #include <cstring>
-#include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -55,44 +55,44 @@ UCXControlServer::~UCXControlServer() {
 
 bool UCXControlServer::Initialize() {
     if (initialized_) {
-        std::cerr << "Server already initialized" << std::endl;
+        LOG_ERROR( "Server already initialized");
         return false;
     }
 
     // Create UCP context
     if (!CreateUCPContext()) {
-        std::cerr << "Failed to create UCP context" << std::endl;
+        LOG_ERROR( "Failed to create UCP context");
         return false;
     }
 
     // Create UCP worker
     if (!CreateUCPWorker()) {
-        std::cerr << "Failed to create UCP worker" << std::endl;
+        LOG_ERROR( "Failed to create UCP worker");
         return false;
     }
 
     // Create listener
     if (!CreateListener()) {
-        std::cerr << "Failed to create listener" << std::endl;
+        LOG_ERROR( "Failed to create listener");
         return false;
     }
 
     initialized_ = true;
-    std::cout << "UCX Control Server initialized successfully" << std::endl;
-    std::cout << "Listen address: " << GetListenAddress() << std::endl;
+    LOG_INFO( "UCX Control Server initialized successfully");
+    LOG_INFO( "Listen address: " << GetListenAddress());
 
     return true;
 }
 
 bool UCXControlServer::Start() {
     if (!initialized_) {
-        std::cerr << "Server not initialized" << std::endl;
+        LOG_ERROR( "Server not initialized");
         return false;
     }
 
     running_ = true;
     start_time_ = std::chrono::system_clock::now();
-    std::cout << "UCX Control Server started" << std::endl;
+    LOG_INFO( "UCX Control Server started");
 
     return true;
 }
@@ -152,19 +152,19 @@ void UCXControlServer::Stop() {
     initialized_ = false;
 
     initialized_ = false;
-    std::cout << "UCX Control Server stopped" << std::endl;
+    LOG_INFO( "UCX Control Server stopped");
 }
 
 bool UCXControlServer::Run(uint32_t stop_after_ms) {
     if (!running_) {
-        std::cerr << "Server not running" << std::endl;
+        LOG_ERROR( "Server not running");
         return false;
     }
 
     auto start_time = std::chrono::steady_clock::now();
     auto end_time = start_time + std::chrono::milliseconds(stop_after_ms);
 
-    std::cout << "Server event loop started" << std::endl;
+    LOG_INFO( "Server event loop started");
 
     while (running_) {
         // Progress UCX worker to handle communication
@@ -174,7 +174,7 @@ bool UCXControlServer::Run(uint32_t stop_after_ms) {
         if (stop_after_ms > 0) {
             auto now = std::chrono::steady_clock::now();
             if (now >= end_time) {
-                std::cout << "Server run timeout reached" << std::endl;
+                LOG_INFO( "Server run timeout reached");
                 break;
             }
         }
@@ -183,7 +183,7 @@ bool UCXControlServer::Run(uint32_t stop_after_ms) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
-    std::cout << "Server event loop ended" << std::endl;
+    LOG_INFO( "Server event loop ended");
     return true;
 }
 
@@ -223,7 +223,7 @@ bool UCXControlServer::CreateUCPContext() {
     ucp_config_t* config = nullptr;
     ucs_status_t status = ucp_config_read(nullptr, nullptr, &config);
     if (status != UCS_OK) {
-        std::cerr << "Failed to read UCP config" << std::endl;
+        LOG_ERROR( "Failed to read UCP config");
         return false;
     }
 
@@ -239,8 +239,8 @@ bool UCXControlServer::CreateUCPContext() {
     ucp_config_release(config);
 
     if (status != UCS_OK) {
-        std::cerr << "Failed to initialize UCP context: "
-                  << ucs_status_string(status) << std::endl;
+        LOG_ERROR( "Failed to initialize UCP context: "
+                  << ucs_status_string(status));
         return false;
     }
 
@@ -257,8 +257,8 @@ bool UCXControlServer::CreateUCPWorker() {
     // Create worker
     ucs_status_t status = ucp_worker_create(ucp_context_, &worker_params, &ucp_worker_);
     if (status != UCS_OK) {
-        std::cerr << "Failed to create UCP worker: "
-                  << ucs_status_string(status) << std::endl;
+        LOG_ERROR( "Failed to create UCP worker: "
+                  << ucs_status_string(status));
         return false;
     }
 
@@ -288,8 +288,8 @@ bool UCXControlServer::CreateListener() {
     // Create listener
     ucs_status_t status = ucp_listener_create(ucp_worker_, &listener_params, &ucp_listener_);
     if (status != UCS_OK) {
-        std::cerr << "Failed to create listener: "
-                  << ucs_status_string(status) << std::endl;
+        LOG_ERROR( "Failed to create listener: "
+                  << ucs_status_string(status));
         return false;
     }
 
@@ -313,7 +313,7 @@ void UCXControlServer::HandleConnectionRequest(ucp_conn_request_h conn_request, 
     {
         std::lock_guard<std::mutex> lock(connections_mutex_);
         if (client_connections_.size() >= config_.max_connections) {
-            std::cerr << "Connection limit reached, rejecting request" << std::endl;
+            LOG_ERROR( "Connection limit reached, rejecting request");
             ucp_listener_reject(ucp_listener_, conn_request);
             return;
         }
@@ -333,8 +333,8 @@ void UCXControlServer::AcceptConnection(ucp_conn_request_h conn_request) {
     ucp_ep_h endpoint = nullptr;
     ucs_status_t status = ucp_ep_create(ucp_worker_, &ep_params, &endpoint);
     if (status != UCS_OK) {
-        std::cerr << "Failed to create endpoint: "
-                  << ucs_status_string(status) << std::endl;
+        LOG_ERROR( "Failed to create endpoint: "
+                  << ucs_status_string(status));
         ucp_listener_reject(ucp_listener_, conn_request);
         return;
     }
@@ -353,7 +353,7 @@ void UCXControlServer::AcceptConnection(ucp_conn_request_h conn_request) {
         client_connections_[client_id] = conn;
     }
 
-    std::cout << "Client connected: " << client_id << std::endl;
+    LOG_INFO( "Client connected: " << client_id);
 }
 
 void UCXControlServer::CloseConnection(const std::string& client_id) {
@@ -372,7 +372,7 @@ void UCXControlServer::CloseConnection(const std::string& client_id) {
             }
         }
         client_connections_.erase(it);
-        std::cout << "Client disconnected: " << client_id << std::endl;
+        LOG_INFO( "Client disconnected: " << client_id);
     }
 }
 
