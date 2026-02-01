@@ -22,6 +22,9 @@ protected:
     }
 
     void TearDown() override {
+        // Add delay to allow TCP sockets to be released (TIME_WAIT state)
+        // Need longer delay for TCP TIME_WAIT to clear in real UCX environment
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 };
 
@@ -47,18 +50,37 @@ TEST_F(UCXControlClientTest, ConnectWithoutInitTest) {
 
 // Test: Connect to non-existent server
 TEST_F(UCXControlClientTest, ConnectToNonExistentServerTest) {
-    UCXControlClient client;
+    // Use shorter timeout and no retries for this test
+    UCXClientConfig config;
+    config.request_timeout_ms = 500;   // 500ms timeout
+    config.max_retries = 0;            // No retries
+    config.use_rdma = false;
+    UCXControlClient client(config);
+
     EXPECT_TRUE(client.Initialize());
 
-    // Try to connect to a port that's likely not in use
-    EXPECT_FALSE(client.Connect("127.0.0.1", 19999));
+    // UCX uses async connection model - Connect() will succeed immediately
+    // but the actual connection error will be detected during data transfer
+    EXPECT_TRUE(client.Connect("127.0.0.1", 19999));
+    EXPECT_TRUE(client.IsConnected());
+
+    // Try to send a message - this should fail or timeout
+    ServerStatsRequest request;
+    auto result = client.GetStats(request);
+
+    // Should fail with timeout or network error since server doesn't exist
+    EXPECT_NE(result.status, RPCStatus::SUCCESS);
+    EXPECT_TRUE(result.status == RPCStatus::TIMEOUT ||
+                result.status == RPCStatus::NETWORK_ERROR);
 }
 
 // Test: Connect and disconnect
 TEST_F(UCXControlClientTest, ConnectDisconnectTest) {
     // Start a server
     UCXServerConfig server_config;
-    server_config.listen_port = 18516;
+    server_config.listen_address = "127.0.0.1";  // Use localhost
+    server_config.listen_port = 19100;  // Unique port with wider spacing
+    server_config.use_rdma = false;  // Force TCP transport
     UCXControlServer server(server_config);
 
     ASSERT_TRUE(server.Initialize());
@@ -68,9 +90,11 @@ TEST_F(UCXControlClientTest, ConnectDisconnectTest) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // Connect client
-    UCXControlClient client;
+    UCXClientConfig client_config;
+    client_config.use_rdma = false;  // Force TCP transport
+    UCXControlClient client(client_config);
     EXPECT_TRUE(client.Initialize());
-    EXPECT_TRUE(client.Connect("127.0.0.1", 18516));
+    EXPECT_TRUE(client.Connect("127.0.0.1", 19100));
     EXPECT_TRUE(client.IsConnected());
 
     // Disconnect
@@ -84,7 +108,9 @@ TEST_F(UCXControlClientTest, ConnectDisconnectTest) {
 // Test: Double connect
 TEST_F(UCXControlClientTest, DoubleConnectTest) {
     UCXServerConfig server_config;
-    server_config.listen_port = 18517;
+    server_config.listen_address = "127.0.0.1";  // Use localhost
+    server_config.listen_port = 19200;  // Unique port with wider spacing
+    server_config.use_rdma = false;  // Force TCP transport
     UCXControlServer server(server_config);
 
     ASSERT_TRUE(server.Initialize());
@@ -92,10 +118,12 @@ TEST_F(UCXControlClientTest, DoubleConnectTest) {
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    UCXControlClient client;
+    UCXClientConfig client_config;
+    client_config.use_rdma = false;  // Force TCP transport
+    UCXControlClient client(client_config);
     EXPECT_TRUE(client.Initialize());
-    EXPECT_TRUE(client.Connect("127.0.0.1", 18517));
-    EXPECT_TRUE(client.Connect("127.0.0.1", 18517));  // Should succeed (idempotent)
+    EXPECT_TRUE(client.Connect("127.0.0.1", 19200));
+    EXPECT_TRUE(client.Connect("127.0.0.1", 18601));  // Should succeed (idempotent)
 
     client.Disconnect();
     server.Stop();
@@ -157,7 +185,9 @@ TEST_F(UCXControlClientTest, StatsWithoutConnectionTest) {
 // Test: Get server address
 TEST_F(UCXControlClientTest, GetServerAddressTest) {
     UCXServerConfig server_config;
-    server_config.listen_port = 18518;
+    server_config.listen_address = "127.0.0.1";  // Use localhost
+    server_config.listen_port = 19300;  // Unique port with wider spacing
+    server_config.use_rdma = false;  // Force TCP transport
     UCXControlServer server(server_config);
 
     ASSERT_TRUE(server.Initialize());
@@ -165,12 +195,14 @@ TEST_F(UCXControlClientTest, GetServerAddressTest) {
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    UCXControlClient client;
+    UCXClientConfig client_config;
+    client_config.use_rdma = false;  // Force TCP transport
+    UCXControlClient client(client_config);
     EXPECT_TRUE(client.Initialize());
-    EXPECT_TRUE(client.Connect("127.0.0.1", 18518));
+    EXPECT_TRUE(client.Connect("127.0.0.1", 19300));
 
     EXPECT_EQ(client.GetServerAddress(), "127.0.0.1");
-    EXPECT_EQ(client.GetServerPort(), 18518);
+    EXPECT_EQ(client.GetServerPort(), 19300);
 
     client.Disconnect();
     server.Stop();
@@ -208,8 +240,10 @@ TEST_F(UCXControlClientTest, TCPModeTest) {
 // Test: Multiple clients
 TEST_F(UCXControlClientTest, MultipleClientsTest) {
     UCXServerConfig server_config;
-    server_config.listen_port = 18519;
+    server_config.listen_address = "127.0.0.1";  // Use localhost
+    server_config.listen_port = 19400;  // Unique port with wider spacing
     server_config.max_connections = 10;
+    server_config.use_rdma = false;  // Force TCP transport
     UCXControlServer server(server_config);
 
     ASSERT_TRUE(server.Initialize());
@@ -218,11 +252,13 @@ TEST_F(UCXControlClientTest, MultipleClientsTest) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // Create multiple clients
+    UCXClientConfig client_config;
+    client_config.use_rdma = false;  // Force TCP transport
     std::vector<std::unique_ptr<UCXControlClient>> clients;
     for (int i = 0; i < 5; ++i) {
-        auto client = std::make_unique<UCXControlClient>();
+        auto client = std::make_unique<UCXControlClient>(client_config);
         EXPECT_TRUE(client->Initialize());
-        EXPECT_TRUE(client->Connect("127.0.0.1", 18519));
+        EXPECT_TRUE(client->Connect("127.0.0.1", 19400));
         clients.push_back(std::move(client));
     }
 

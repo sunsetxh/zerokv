@@ -156,6 +156,13 @@ bool UCXControlClient::CreateUCPContext() {
         return false;
     }
 
+    // Modify config for RDMA/TCP
+    if (config_.use_rdma) {
+        ucp_config_modify(config, "TLS", "rc_x,sm,self");  // Prefer RDMA
+    } else {
+        ucp_config_modify(config, "TLS", "tcp,sm,self");  // Use TCP
+    }
+
     // Set UCP parameters
     std::memset(&ucp_params, 0, sizeof(ucp_params));
     ucp_params.field_mask = UCP_PARAM_FIELD_FEATURES |

@@ -278,7 +278,16 @@ bool UCXControlServer::CreateListener() {
     static struct sockaddr_in listen_addr;
     std::memset(&listen_addr, 0, sizeof(listen_addr));
     listen_addr.sin_family = AF_INET;
-    listen_addr.sin_addr.s_addr = INADDR_ANY;  // Listen on all interfaces
+
+    // Use configured listen address
+    if (config_.listen_address == "0.0.0.0") {
+        listen_addr.sin_addr.s_addr = INADDR_ANY;  // Listen on all interfaces
+    } else {
+        if (inet_pton(AF_INET, config_.listen_address.c_str(), &listen_addr.sin_addr) != 1) {
+            LOG_ERROR("Invalid listen address: " << config_.listen_address);
+            return false;
+        }
+    }
     listen_addr.sin_port = htons(config_.listen_port);
 
     // Set sockaddr (using pointer)

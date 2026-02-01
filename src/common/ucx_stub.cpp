@@ -20,6 +20,8 @@
  */
 
 #include "ucx_stub.h"
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -27,6 +29,10 @@
 #include <mutex>
 #include <queue>
 #include <vector>
+
+// Global listener registry for async connection validation
+static std::map<uint16_t, bool> g_active_listeners;
+static std::mutex g_listener_mutex;
 
 // Stub implementation structures
 struct ucp_context {
@@ -43,6 +49,8 @@ struct ucp_worker {
 struct ucp_ep {
     ucp_worker_h worker;
     std::vector<uint8_t> remote_address;
+    uint16_t target_port = 0;  // Store target port for async connection check
+    bool connected = false;     // Will be validated on first send
 };
 
 struct ucp_listener {
@@ -189,6 +197,17 @@ ucs_status_t ucp_ep_create(ucp_worker_h worker, const ucp_ep_params_t* params,
         ep->remote_address.assign(addr_bytes, addr_bytes + 64);
     }
 
+    // Extract target port from sockaddr if available (for async connection check)
+    if (params->field_mask & UCP_EP_PARAM_FIELD_SOCK_ADDR) {
+        const struct sockaddr* addr = params->sockaddr.addr;
+        if (addr != nullptr && addr->sa_family == AF_INET) {
+            const struct sockaddr_in* addr_in = reinterpret_cast<const struct sockaddr_in*>(addr);
+            ep->target_port = ntohs(addr_in->sin_port);
+        }
+    }
+
+    // Note: In async connection model, always return success
+    // Connection validity will be checked during first send operation
     *ep_p = ep;
     return UCS_OK;
 }
@@ -258,20 +277,43 @@ void ucp_request_free(void* request) {
 
 ucs_status_t ucp_listener_create(ucp_worker_h worker, const ucp_listener_params_t* params,
                                 ucp_listener_h* listener_p) {
-    (void)worker;
-    (void)params;
-
-    if (listener_p == nullptr) {
+    if (worker == nullptr || params == nullptr || listener_p == nullptr) {
         return UCS_ERR_INVALID_PARAM;
     }
 
-    // Stub: Create a mock listener
-    *listener_p = new ucp_listener();
+    // Extract port from sockaddr
+    uint16_t port = 0;
+    if (params->field_mask & UCP_LISTENER_PARAM_FIELD_SOCK_ADDR) {
+        const struct sockaddr* addr = params->sockaddr.addr;
+        if (addr != nullptr && addr->sa_family == AF_INET) {
+            const struct sockaddr_in* addr_in = reinterpret_cast<const struct sockaddr_in*>(addr);
+            port = ntohs(addr_in->sin_port);
+        }
+    }
+
+    // Register this listener port
+    {
+        std::lock_guard<std::mutex> lock(g_listener_mutex);
+        g_active_listeners[port] = true;
+    }
+
+    // Create a mock listener
+    ucp_listener_h listener = new ucp_listener();
+    listener->worker = worker;
+    listener->port = port;
+    *listener_p = listener;
     return UCS_OK;
 }
 
 void ucp_listener_destroy(ucp_listener_h listener) {
-    delete listener;
+    if (listener != nullptr) {
+        // Unregister this listener port
+        {
+            std::lock_guard<std::mutex> lock(g_listener_mutex);
+            g_active_listeners.erase(listener->port);
+        }
+        delete listener;
+    }
 }
 
 void ucp_listener_reject(ucp_listener_h listener, ucp_conn_request_h conn_request) {
@@ -283,10 +325,26 @@ void ucp_listener_reject(ucp_listener_h listener, ucp_conn_request_h conn_reques
 // Stream API implementations
 ucs_status_ptr_t ucp_stream_send_nbx(ucp_ep_h ep, const void* buffer, size_t count,
                                       const ucp_request_param_t* param) {
-    (void)ep;
     (void)buffer;
     (void)count;
     (void)param;
+
+    if (ep == nullptr) {
+        return reinterpret_cast<ucs_status_ptr_t>(UCS_ERR_INVALID_PARAM);
+    }
+
+    // Async connection validation: check if target listener exists
+    // This simulates real UCX behavior where connection errors are detected during send
+    if (!ep->connected) {
+        if (ep->target_port > 0) {
+            std::lock_guard<std::mutex> lock(g_listener_mutex);
+            if (g_active_listeners.find(ep->target_port) == g_active_listeners.end()) {
+                // Target port has no listener - connection failed
+                return reinterpret_cast<ucs_status_ptr_t>(UCS_ERR_IO_ERROR);
+            }
+        }
+        ep->connected = true;  // Mark as connected after first successful check
+    }
 
     // Stub: Return nullptr to indicate immediate completion
     return nullptr;
