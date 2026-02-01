@@ -374,18 +374,43 @@ if(BUILD_TESTS)
         add_test(NAME ${test_name} COMMAND ${test_name})
     endforeach()
 
-    # Integration tests (will be enabled in later milestones)
-    # file(GLOB INTEGRATION_TEST_SRCS tests/integration/*.cpp)
-    # foreach(test_src ${INTEGRATION_TEST_SRCS})
-    #     get_filename_component(test_name ${test_src} NAME_WE)
-    #     add_executable(${test_name} ${test_src})
-    #     target_link_libraries(${test_name}
-    #         zerokv_server
-    #         zerokv_client
-    #         GTest::gtest_main
-    #     )
-    #     add_test(NAME ${test_name} COMMAND ${test_name})
-    # endforeach()
+    # Integration tests
+    file(GLOB INTEGRATION_TEST_SRCS tests/integration/*.cpp)
+    foreach(test_src ${INTEGRATION_TEST_SRCS})
+        get_filename_component(test_name ${test_src} NAME_WE)
+        add_executable(${test_name} ${test_src})
+        target_include_directories(${test_name} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/common
+            ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        target_compile_options(${test_name} PRIVATE -Wno-unused-parameter)
+        target_link_libraries(${test_name}
+            zerokv_server
+            zerokv_client
+            zerokv_common
+            GTest::gtest_main
+        )
+        add_test(NAME ${test_name} COMMAND ${test_name})
+    endforeach()
+
+    # Performance benchmark tests
+    file(GLOB PERF_TEST_SRCS tests/perf/*.cpp)
+    foreach(test_src ${PERF_TEST_SRCS})
+        get_filename_component(test_name ${test_src} NAME_WE)
+        add_executable(${test_name} ${test_src})
+        target_include_directories(${test_name} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/common
+            ${CMAKE_CURRENT_BINARY_DIR}
+        )
+        target_compile_options(${test_name} PRIVATE -Wno-unused-parameter)
+        target_link_libraries(${test_name}
+            zerokv_server
+            zerokv_client
+            zerokv_common
+            GTest::gtest_main
+        )
+        add_test(NAME ${test_name} COMMAND ${test_name})
+    endforeach()
 endif()
 
 # Build examples (will be enabled in later milestones)
