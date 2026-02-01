@@ -30,87 +30,114 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 find_package(Threads REQUIRED)
 
 #==============================================================================
-# UCX (Unified Communication X)
+# UCX (Unified Communication X) Configuration
 #
-# Options:
-#   - BUILD_UCX_FROM_SOURCE=ON : Download and build UCX 1.20.0 (Linux only)
-#   - USE_UCX_STUB=ON         : Use stub implementation (default, works everywhere)
-#   - Or install UCX separately: brew install ucx (macOS) or package manager (Linux)
+# Build Modes:
+#   1. Stub Mode (for development without UCX)
+#      cmake .. -DUSE_UCX_STUB=ON
+#
+#   2. Auto Build Mode (default, builds UCX 1.20.0 from source)
+#      cmake .. -DUSE_UCX_STUB=OFF
+#
+#   3. Custom UCX Path Mode (use pre-built UCX)
+#      cmake .. -DUSE_UCX_STUB=OFF -DUCX_ROOT=/path/to/ucx
 #
 # Note: UCX build requires Linux with build tools (autoconf, libtool, etc.)
-#       On macOS, use: brew install ucx
 #==============================================================================
 
-option(BUILD_UCX_FROM_SOURCE "Download and build UCX from source (Linux only)" OFF)
-option(USE_UCX_STUB "Use UCX stub implementation (set to OFF to use system UCX)" ON)
+option(USE_UCX_STUB "Use UCX stub implementation for development" OFF)
+set(UCX_ROOT "" CACHE PATH "Path to existing UCX installation (optional)")
 
-if(BUILD_UCX_FROM_SOURCE)
-    # Build UCX from source
-    message(STATUS "Will build UCX 1.20.0 from source...")
-    message(WARNING "UCX build requires Linux with autoconf, libtool, etc.")
-    message(STATUS "To disable: set -DBUILD_UCX_FROM_SOURCE=OFF or -DUSE_UCX_STUB=ON")
+if(USE_UCX_STUB)
+    # Mode 1: Use stub implementation
+    message(STATUS "UCX Mode: Stub implementation (for development)")
+    set(UCX_LIBRARIES "")
+    set(UCX_INCLUDE_DIRS "")
+    add_definitions(-DUSE_UCX_STUB)
+    set(HAVE_REAL_UCX OFF)
+    set(NEED_UCX_DEPENDENCY FALSE)
 
-    include(ExternalProject)
+else()
+    # Real UCX required
+    if(UCX_ROOT)
+        # Mode 3: Use user-provided UCX installation
+        message(STATUS "UCX Mode: Using custom installation at ${UCX_ROOT}")
 
-    # UCX 1.20.0 release
-    ExternalProject_Add(ucx
-        URL https://github.com/openucx/ucx/releases/download/1.20.0/ucx-1.20.0.tar.gz
-        URL_HASH SHA256=8a2776c3e8d7da8aa45abe640a6956b33f71b59cf4120566a888ee2b0ecfe667
-        BUILD_IN_SOURCE 1
-        CONFIGURE_COMMAND ${CMAKE_CURRENT_BINARY_DIR}/ucx-prefix/src/ucx/configure
-            --prefix=${CMAKE_CURRENT_BINARY_DIR}/ucx-install
-            --enable-shared
-            --disable-static
-            --disable-debug
-            --disable-assertions
-            --disable-mt
-        BUILD_COMMAND make -j${CMAKE_BUILD_PARALLEL_LEVEL}
-        INSTALL_COMMAND make install
-        BUILD_BYPRODUCTS
-            ${CMAKE_CURRENT_BINARY_DIR}/ucx-install/lib/libucp${CMAKE_SHARED_LIBRARY_SUFFIX}
-            ${CMAKE_CURRENT_BINARY_DIR}/ucx-install/lib/libucs${CMAKE_SHARED_LIBRARY_SUFFIX}
-    )
+        # Verify UCX_ROOT is valid
+        if(NOT EXISTS "${UCX_ROOT}/include/ucp/api/ucp.h")
+            message(FATAL_ERROR
+                "Invalid UCX_ROOT: ${UCX_ROOT}\n"
+                "Could not find ucp/api/ucp.h in ${UCX_ROOT}/include\n"
+                "Please provide a valid UCX installation path or remove UCX_ROOT to build from source.")
+        endif()
 
-    # Set UCX variables for our project
-    set(UCX_INSTALL_DIR ${CMAKE_CURRENT_BINARY_DIR}/ucx-install)
-    set(UCX_INCLUDE_DIRS ${UCX_INSTALL_DIR}/include)
-    set(UCX_UCP_LIB ${UCX_INSTALL_DIR}/lib/libucp${CMAKE_SHARED_LIBRARY_SUFFIX})
-    set(UCX_UCS_LIB ${UCX_INSTALL_DIR}/lib/libucs${CMAKE_SHARED_LIBRARY_SUFFIX})
-    set(UCX_LIBRARIES ${UCX_UCP_LIB} ${UCX_UCS_LIB})
-    set(HAVE_REAL_UCX ON)
-    set(NEED_UCX_DEPENDENCY TRUE)
+        # Find libraries in UCX_ROOT
+        find_library(UCX_UCP_LIB ucp
+            PATHS ${UCX_ROOT}/lib ${UCX_ROOT}/lib64
+            NO_DEFAULT_PATH
+            REQUIRED)
+        find_library(UCX_UCS_LIB ucs
+            PATHS ${UCX_ROOT}/lib ${UCX_ROOT}/lib64
+            NO_DEFAULT_PATH
+            REQUIRED)
 
-    message(STATUS "UCX will be built and installed to: ${UCX_INSTALL_DIR}")
+        # Optional: UCT library
+        find_library(UCX_UCT_LIB uct
+            PATHS ${UCX_ROOT}/lib ${UCX_ROOT}/lib64
+            NO_DEFAULT_PATH)
 
-elseif(NOT USE_UCX_STUB)
-    # Try to find system UCX
-    message(STATUS "Looking for system UCX...")
-    find_package(ucx QUIET)
-    if(ucx_FOUND)
-        message(STATUS "Found system UCX: ${ucx_VERSION}")
-        find_library(UCX_UCP_LIB ucp)
-        find_library(UCX_UCS_LIB ucs)
-        find_library(UCX_UCT_LIB uct)
+        set(UCX_INCLUDE_DIRS ${UCX_ROOT}/include)
         if(UCX_UCT_LIB)
             set(UCX_LIBRARIES ${UCX_UCP_LIB} ${UCX_UCS_LIB} ${UCX_UCT_LIB})
         else()
             set(UCX_LIBRARIES ${UCX_UCP_LIB} ${UCX_UCS_LIB})
         endif()
-        find_path(UCX_INCLUDE_DIR ucp/api/ucp.h)
-        set(UCX_INCLUDE_DIRS ${UCX_INCLUDE_DIR})
+
         set(HAVE_REAL_UCX ON)
+        set(NEED_UCX_DEPENDENCY FALSE)
+
+        message(STATUS "  UCX include: ${UCX_INCLUDE_DIRS}")
+        message(STATUS "  UCX libraries: ${UCX_LIBRARIES}")
+
     else()
-        message(FATAL_ERROR "USE_UCX_STUB=OFF but UCX not found.\n"
-                          "Install UCX with: brew install ucx (macOS) or package manager (Linux)\n"
-                          "Or set: -DUSE_UCX_STUB=ON")
+        # Mode 2: Build UCX 1.20.0 from source
+        message(STATUS "UCX Mode: Building UCX 1.20.0 from source")
+        message(STATUS "  This requires Linux with autoconf, libtool, make, gcc, etc.")
+        message(STATUS "  To use pre-built UCX, set: -DUCX_ROOT=/path/to/ucx")
+        message(STATUS "  For development without UCX, set: -DUSE_UCX_STUB=ON")
+
+        include(ExternalProject)
+
+        # UCX 1.20.0 release
+        ExternalProject_Add(ucx
+            URL https://github.com/openucx/ucx/releases/download/1.20.0/ucx-1.20.0.tar.gz
+            URL_HASH SHA256=8a2776c3e8d7da8aa45abe640a6956b33f71b59cf4120566a888ee2b0ecfe667
+            BUILD_IN_SOURCE 1
+            CONFIGURE_COMMAND ${CMAKE_CURRENT_BINARY_DIR}/ucx-prefix/src/ucx/configure
+                --prefix=${CMAKE_CURRENT_BINARY_DIR}/ucx-install
+                --enable-shared
+                --disable-static
+                --disable-debug
+                --disable-assertions
+                --disable-mt
+            BUILD_COMMAND make -j${CMAKE_BUILD_PARALLEL_LEVEL}
+            INSTALL_COMMAND make install
+            BUILD_BYPRODUCTS
+                ${CMAKE_CURRENT_BINARY_DIR}/ucx-install/lib/libucp${CMAKE_SHARED_LIBRARY_SUFFIX}
+                ${CMAKE_CURRENT_BINARY_DIR}/ucx-install/lib/libucs${CMAKE_SHARED_LIBRARY_SUFFIX}
+        )
+
+        # Set UCX variables for our project
+        set(UCX_INSTALL_DIR ${CMAKE_CURRENT_BINARY_DIR}/ucx-install)
+        set(UCX_INCLUDE_DIRS ${UCX_INSTALL_DIR}/include)
+        set(UCX_UCP_LIB ${UCX_INSTALL_DIR}/lib/libucp${CMAKE_SHARED_LIBRARY_SUFFIX})
+        set(UCX_UCS_LIB ${UCX_INSTALL_DIR}/lib/libucs${CMAKE_SHARED_LIBRARY_SUFFIX})
+        set(UCX_LIBRARIES ${UCX_UCP_LIB} ${UCX_UCS_LIB})
+        set(HAVE_REAL_UCX ON)
+        set(NEED_UCX_DEPENDENCY TRUE)
+
+        message(STATUS "  UCX will be installed to: ${UCX_INSTALL_DIR}")
     endif()
-else()
-    # Use stub implementation
-    message(STATUS "Using UCX stub implementation for development")
-    set(UCX_LIBRARIES "")
-    set(UCX_INCLUDE_DIRS "")
-    add_definitions(-DUSE_UCX_STUB)
-    set(HAVE_REAL_UCX OFF)
 endif()
 
 include_directories(${UCX_INCLUDE_DIRS})

@@ -154,9 +154,6 @@ typedef struct {
     size_t length;
 } ucp_tag_recv_info_t;
 
-// Stream send flags
-#define UCP_STREAM_SEND_FLAG_LAST   (1ULL << 0)
-
 // EP close flags
 #define UCP_EP_CLOSE_FLAG_FORCE     (1ULL << 0)
 

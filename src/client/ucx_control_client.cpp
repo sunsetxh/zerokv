@@ -319,8 +319,7 @@ bool UCXControlClient::SendMessage(const std::string& message) {
     uint32_t msg_size = htonl(static_cast<uint32_t>(message.size()));
     ucp_request_param_t param;
     std::memset(&param, 0, sizeof(param));
-    param.op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS;
-    param.flags = UCP_STREAM_SEND_FLAG_LAST;
+    param.op_attr_mask = 0;  // No flags needed for stream send
 
     // Send size
     ucs_status_ptr_t status_ptr = ucp_stream_send_nbx(
