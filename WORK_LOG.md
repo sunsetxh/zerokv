@@ -881,3 +881,142 @@ docker run -d --name zerokv-ucx-test \
 
 **工作日志结束** - 2025-02-01 (Day 3)
 **下次工作从**: Task #10 - 基础设施集成测试 或 Task #11 - CI/CD Pipeline
+
+---
+
+## 🔧 Docker 容器工作流程
+
+### ⚠️ 重要提醒：容器代码挂载
+
+**关键事实**：Docker 容器 `zerokv-ucx-test` 通过 `-v` 挂载主机目录：
+```bash
+docker run -d --name zerokv-ucx-test \
+  -v /Users/wangyuchao/code/openyuanrong/zerokv:/workspace \
+  -w /workspace ubuntu:24.04 tail -f /dev/null
+```
+
+**这意味着**：
+- ✅ 容器内的 `/workspace` 和主机的 `zerokv` 目录是**同一个目录**
+- ✅ 在 macOS 上修改代码，容器内**立即同步**
+- ✅ 在容器内修改代码，macOS 上也**立即同步**
+- ✅ 可以在 macOS 用 IDE 编辑，然后在容器内编译验证
+
+### 推荐工作流程
+
+#### 方式 1：macOS 编辑 + 容器编译（推荐）
+
+```bash
+# 1. 在 macOS 上用你喜欢的编辑器修改代码
+vim src/client/ucx_control_client.cpp
+# 或使用 VS Code / CLion 等 IDE
+
+# 2. 在容器内编译验证
+docker exec zerokv-ucx-test bash -c "cd /workspace/build && make -j5"
+
+# 3. 在容器内运行测试
+docker exec zerokv-ucx-test bash -c "cd /workspace/build && ctest -V"
+
+# 4. 在 macOS 上提交代码
+git add -A
+git commit -m "your message"
+```
+
+#### 方式 2：容器内全流程（不推荐）
+
+```bash
+# 进入容器
+docker exec -it zerokv-ucx-test bash
+
+# 在容器内编辑（体验较差）
+cd /workspace
+vim src/client/ucx_control_client.cpp
+
+# 编译和测试
+cd build && make -j5 && ctest -V
+
+# 退出容器
+exit
+
+# 在 macOS 上提交
+git add -A && git commit -m "your message"
+```
+
+### 常用容器命令
+
+```bash
+# 检查容器状态
+docker ps -a | grep zerokv-ucx-test
+
+# 启动容器（如果已停止）
+docker start zerokv-ucx-test
+
+# 停止容器
+docker stop zerokv-ucx-test
+
+# 删除容器（需要重新创建）
+docker rm zerokv-ucx-test
+
+# 查看容器日志
+docker logs zerokv-ucx-test
+
+# 进入容器交互式 shell
+docker exec -it zerokv-ucx-test bash
+
+# 单次命令执行（推荐）
+docker exec zerokv-ucx-test bash -c "cd /workspace/build && cmake .. && make -j5"
+```
+
+### 容器环境特点
+
+| 项目 | macOS (主机) | Docker 容器 (zerokv-ucx-test) |
+|------|-------------|------------------------------|
+| 操作系统 | macOS Darwin | Ubuntu 24.04 |
+| 编辑代码 | ✅ 推荐（IDE 体验好） | ❌ 不推荐（vim 体验差） |
+| 编译 UCX | ❌ 不支持 | ✅ 支持 |
+| 运行测试 | ⚠️ Stub 模式 | ✅ 真实 UCX |
+| Git 操作 | ✅ 推荐 | ✅ 可以但不推荐 |
+| 代码目录 | `/Users/.../zerokv` | `/workspace` |
+| 目录关系 | **同一目录（挂载）** | **同一目录（挂载）** |
+
+### 典型开发流程示例
+
+```bash
+# Day 1: 启动容器（只需一次）
+docker run -d --name zerokv-ucx-test \
+  -v $(pwd):/workspace \
+  -w /workspace \
+  ubuntu:24.04 tail -f /dev/null
+
+docker exec zerokv-ucx-test bash -c "
+  apt-get update && apt-get install -y cmake g++ autoconf libtool make
+"
+
+# Day 2-N: 日常开发
+# 1. macOS 编辑代码（VS Code / CLion）
+# 2. 容器编译验证
+docker exec zerokv-ucx-test bash -c "
+  cd /workspace && 
+  rm -rf build && 
+  mkdir build && 
+  cd build && 
+  cmake .. -DBUILD_PYTHON=OFF && 
+  make -j5 && 
+  ctest -V
+"
+
+# 3. macOS 提交代码
+git add -A
+git commit -m "feat: implement new feature"
+```
+
+### 注意事项
+
+1. **文件权限**：容器内创建的文件可能属于 root，需要注意权限问题
+2. **build 目录**：建议在容器内创建，避免跨平台二进制问题
+3. **网络端口**：容器内测试时注意端口冲突
+4. **性能**：挂载目录的 I/O 性能略低于容器内原生文件系统
+
+---
+
+**记录时间**: 2025-02-01
+**目的**: 避免忘记容器挂载机制，优化开发效率
