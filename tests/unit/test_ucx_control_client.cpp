@@ -19,13 +19,23 @@ protected:
     void SetUp() override {
         // Disable logger for tests
         zerokv::LogManager::Instance().SetLevel(zerokv::LogLevel::ERROR);
+        // Allocate unique port for each test
+        test_port_ = AllocateUniquePort();
     }
 
     void TearDown() override {
         // Add delay to allow TCP sockets to be released (TIME_WAIT state)
-        // Need longer delay for TCP TIME_WAIT to clear in real UCX environment
+        // Real UCX environment needs significant time for port release
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
+
+    static uint16_t AllocateUniquePort() {
+        static uint16_t port_counter = 25000;
+        port_counter += 10;  // Skip 10 ports to avoid conflicts
+        return port_counter;
+    }
+
+    uint16_t test_port_;
 };
 
 // Test: Client initialization
@@ -45,7 +55,7 @@ TEST_F(UCXControlClientTest, DoubleInitializeTest) {
 // Test: Connect without initialization
 TEST_F(UCXControlClientTest, ConnectWithoutInitTest) {
     UCXControlClient client;
-    EXPECT_FALSE(client.Connect("127.0.0.1", 18515));
+    EXPECT_FALSE(client.Connect("127.0.0.1", AllocateUniquePort()));
 }
 
 // Test: Connect to non-existent server
@@ -61,7 +71,7 @@ TEST_F(UCXControlClientTest, ConnectToNonExistentServerTest) {
 
     // UCX uses async connection model - Connect() will succeed immediately
     // but the actual connection error will be detected during data transfer
-    EXPECT_TRUE(client.Connect("127.0.0.1", 19999));
+    EXPECT_TRUE(client.Connect("127.0.0.1", AllocateUniquePort()));
     EXPECT_TRUE(client.IsConnected());
 
     // Try to send a message - this should fail or timeout
@@ -79,7 +89,7 @@ TEST_F(UCXControlClientTest, ConnectDisconnectTest) {
     // Start a server
     UCXServerConfig server_config;
     server_config.listen_address = "127.0.0.1";  // Use localhost
-    server_config.listen_port = 19100;  // Unique port with wider spacing
+    server_config.listen_port = test_port_;  // Unique port with wider spacing
     server_config.use_rdma = false;  // Force TCP transport
     UCXControlServer server(server_config);
 
@@ -94,7 +104,7 @@ TEST_F(UCXControlClientTest, ConnectDisconnectTest) {
     client_config.use_rdma = false;  // Force TCP transport
     UCXControlClient client(client_config);
     EXPECT_TRUE(client.Initialize());
-    EXPECT_TRUE(client.Connect("127.0.0.1", 19100));
+    EXPECT_TRUE(client.Connect("127.0.0.1", test_port_));
     EXPECT_TRUE(client.IsConnected());
 
     // Disconnect
@@ -109,7 +119,7 @@ TEST_F(UCXControlClientTest, ConnectDisconnectTest) {
 TEST_F(UCXControlClientTest, DoubleConnectTest) {
     UCXServerConfig server_config;
     server_config.listen_address = "127.0.0.1";  // Use localhost
-    server_config.listen_port = 19200;  // Unique port with wider spacing
+    server_config.listen_port = test_port_;  // Unique port with wider spacing
     server_config.use_rdma = false;  // Force TCP transport
     UCXControlServer server(server_config);
 
@@ -122,8 +132,8 @@ TEST_F(UCXControlClientTest, DoubleConnectTest) {
     client_config.use_rdma = false;  // Force TCP transport
     UCXControlClient client(client_config);
     EXPECT_TRUE(client.Initialize());
-    EXPECT_TRUE(client.Connect("127.0.0.1", 19200));
-    EXPECT_TRUE(client.Connect("127.0.0.1", 18601));  // Should succeed (idempotent)
+    EXPECT_TRUE(client.Connect("127.0.0.1", test_port_));
+    EXPECT_TRUE(client.Connect("127.0.0.1", test_port_));  // Should succeed (idempotent)
 
     client.Disconnect();
     server.Stop();
@@ -186,7 +196,7 @@ TEST_F(UCXControlClientTest, StatsWithoutConnectionTest) {
 TEST_F(UCXControlClientTest, GetServerAddressTest) {
     UCXServerConfig server_config;
     server_config.listen_address = "127.0.0.1";  // Use localhost
-    server_config.listen_port = 19300;  // Unique port with wider spacing
+    server_config.listen_port = test_port_;  // Unique port with wider spacing
     server_config.use_rdma = false;  // Force TCP transport
     UCXControlServer server(server_config);
 
@@ -199,10 +209,10 @@ TEST_F(UCXControlClientTest, GetServerAddressTest) {
     client_config.use_rdma = false;  // Force TCP transport
     UCXControlClient client(client_config);
     EXPECT_TRUE(client.Initialize());
-    EXPECT_TRUE(client.Connect("127.0.0.1", 19300));
+    EXPECT_TRUE(client.Connect("127.0.0.1", test_port_));
 
     EXPECT_EQ(client.GetServerAddress(), "127.0.0.1");
-    EXPECT_EQ(client.GetServerPort(), 19300);
+    EXPECT_EQ(client.GetServerPort(), test_port_);
 
     client.Disconnect();
     server.Stop();
@@ -241,7 +251,7 @@ TEST_F(UCXControlClientTest, TCPModeTest) {
 TEST_F(UCXControlClientTest, MultipleClientsTest) {
     UCXServerConfig server_config;
     server_config.listen_address = "127.0.0.1";  // Use localhost
-    server_config.listen_port = 19400;  // Unique port with wider spacing
+    server_config.listen_port = test_port_;  // Unique port with wider spacing
     server_config.max_connections = 10;
     server_config.use_rdma = false;  // Force TCP transport
     UCXControlServer server(server_config);
@@ -258,7 +268,7 @@ TEST_F(UCXControlClientTest, MultipleClientsTest) {
     for (int i = 0; i < 5; ++i) {
         auto client = std::make_unique<UCXControlClient>(client_config);
         EXPECT_TRUE(client->Initialize());
-        EXPECT_TRUE(client->Connect("127.0.0.1", 19400));
+        EXPECT_TRUE(client->Connect("127.0.0.1", test_port_));
         clients.push_back(std::move(client));
     }
 

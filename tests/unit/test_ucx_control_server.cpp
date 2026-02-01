@@ -29,18 +29,29 @@ namespace zerokv {
 class UCXControlServerTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Allocate unique port for each test to avoid conflicts
+        test_port_ = AllocateUniquePort();
         config_.listen_address = "127.0.0.1";
-        config_.listen_port = 18515;
+        config_.listen_port = test_port_;
         config_.use_rdma = false;  // Use TCP for testing
         config_.max_connections = 10;
         config_.max_kv_size = 1024 * 1024;  // 1MB for testing
     }
 
     void TearDown() override {
-        // Cleanup is handled by server destructor
+        // Give UCX time to properly release the port
+        // Real UCX environment needs significant time for port release
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+
+    static uint16_t AllocateUniquePort() {
+        static uint16_t port_counter = 20000;
+        port_counter += 10;  // Skip 10 ports to avoid conflicts
+        return port_counter;
     }
 
     UCXServerConfig config_;
+    uint16_t test_port_;
 };
 
 //==============================================================================
@@ -68,7 +79,9 @@ TEST_F(UCXControlServerTest, GetListenAddressTest) {
     server.Initialize();
     std::string addr = server.GetListenAddress();
     EXPECT_FALSE(addr.empty());
-    EXPECT_NE(addr.find("18515"), std::string::npos);
+    // Check that the port is present in the address string
+    std::string port_str = std::to_string(test_port_);
+    EXPECT_NE(addr.find(port_str), std::string::npos);
 }
 
 //==============================================================================
@@ -127,11 +140,14 @@ TEST_F(UCXControlServerTest, KVCountTest) {
 //==============================================================================
 
 TEST_F(UCXControlServerTest, CustomPortTest) {
-    config_.listen_port = 19000;
+    // Use a different custom port
+    uint16_t custom_port = AllocateUniquePort();
+    config_.listen_port = custom_port;
     UCXControlServer server(config_);
     EXPECT_TRUE(server.Initialize());
     std::string addr = server.GetListenAddress();
-    EXPECT_NE(addr.find("19000"), std::string::npos);
+    std::string port_str = std::to_string(custom_port);
+    EXPECT_NE(addr.find(port_str), std::string::npos);
 }
 
 TEST_F(UCXControlServerTest, RDAModeTest) {
