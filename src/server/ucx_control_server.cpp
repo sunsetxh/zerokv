@@ -157,14 +157,14 @@ void UCXControlServer::Stop() {
 
 bool UCXControlServer::Run(uint32_t stop_after_ms) {
     if (!running_) {
-        LOG_ERROR( "Server not running");
+        LOG_ERROR("Server not running");
         return false;
     }
 
     auto start_time = std::chrono::steady_clock::now();
     auto end_time = start_time + std::chrono::milliseconds(stop_after_ms);
 
-    LOG_INFO( "Server event loop started");
+    LOG_INFO("Server event loop started");
 
     while (running_) {
         // Progress UCX worker to handle communication
@@ -357,6 +357,12 @@ void UCXControlServer::AcceptConnection(ucp_conn_request_h conn_request) {
     conn.client_id = client_id;
     conn.connect_time = std::chrono::system_clock::now();
 
+    // Initialize receive state machine to IDLE
+    conn.recv_state.phase = ClientReceiveState::IDLE;
+    conn.recv_state.recv_request = nullptr;
+    conn.recv_state.msg_length = 0;
+    conn.recv_state.bytes_received = 0;
+
     {
         std::lock_guard<std::mutex> lock(connections_mutex_);
         client_connections_[client_id] = conn;
@@ -430,6 +436,7 @@ std::string UCXControlServer::HandlePutRequest(const PutRequest& request) {
     }
 
     response.set_status_code(0);
+    response.set_error_message("OK");  // Proto3 requires at least one non-default field
     return response.SerializeAsString();
 }
 
@@ -484,6 +491,7 @@ std::string UCXControlServer::HandleDeleteRequest(const DeleteRequest& request) 
     kv_store_.erase(it);
 
     response.set_status_code(0);
+    response.set_error_message("OK");  // Proto3 requires at least one non-default field
     return response.SerializeAsString();
 }
 
@@ -493,16 +501,316 @@ std::string UCXControlServer::HandleStatsRequest(const ServerStatsRequest& reque
 }
 
 bool UCXControlServer::SendResponse(ucp_ep_h endpoint, const std::string& response_data) {
-    // For now, this is a placeholder
-    // Full implementation will use UCX stream or active message
-    (void)endpoint;
-    (void)response_data;
+    if (endpoint == nullptr) {
+        LOG_ERROR("Invalid endpoint: endpoint is null");
+        return false;
+    }
+    if (response_data.empty()) {
+        LOG_ERROR("Empty response data");
+        return false;
+    }
+
+    // Stack-allocated buffer for send (will persist during limited wait)
+    std::vector<char> send_buffer(sizeof(uint32_t) + response_data.size());
+
+    // Write length header (network byte order)
+    uint32_t msg_length = htonl(static_cast<uint32_t>(response_data.size()));
+    std::memcpy(send_buffer.data(), &msg_length, sizeof(msg_length));
+
+    // Write message body
+    std::memcpy(send_buffer.data() + sizeof(uint32_t), response_data.data(), response_data.size());
+
+    // Send complete message (header + body)
+    ucp_request_param_t send_param;
+    std::memset(&send_param, 0, sizeof(send_param));
+    send_param.op_attr_mask = 0;
+
+    void* request = ucp_stream_send_nbx(
+        endpoint,
+        send_buffer.data(),
+        send_buffer.size(),
+        &send_param);
+
+    // Handle result
+    if (UCS_PTR_IS_ERR(request)) {
+        LOG_ERROR("Failed to initiate send: " << ucs_status_string(UCS_PTR_STATUS(request)));
+        return false;
+    } else if (UCS_PTR_IS_PTR(request)) {
+        // Request is pending, do limited progress to help it complete
+        // But don't wait forever to avoid deadlock
+        int progress_count = 0;
+        const int max_progress = 100;  // Limit iterations
+        ucs_status_t status;
+
+        do {
+            ucp_worker_progress(ucp_worker_);
+            status = ucp_request_check_status(request);
+            progress_count++;
+        } while (status == UCS_INPROGRESS && progress_count < max_progress);
+
+        ucp_request_free(request);
+
+        if (status != UCS_OK && status != UCS_INPROGRESS) {
+            LOG_ERROR("Send failed: " << ucs_status_string(status));
+            return false;
+        }
+        // If still in progress after max iterations, that's okay
+        // UCX will complete it in background
+    }
+    // Completed immediately (request == NULL)
+
+    LOG_DEBUG("Response send completed, size=" << response_data.size());
     return true;
 }
 
+//==============================================================================
+// Message Receive State Machine
+//==============================================================================
+
+void UCXControlServer::ProcessClientReceive(ClientConnection& conn) {
+    auto& state = conn.recv_state;
+
+    LOG_DEBUG("ProcessClientReceive: client=" << conn.client_id << ", phase=" << static_cast<int>(state.phase));
+
+    switch (state.phase) {
+        case ClientReceiveState::IDLE:
+            // Start receiving message length header
+            StartReceiveLength(conn);
+            break;
+
+        case ClientReceiveState::RECV_LENGTH:
+            // Check if length header is complete
+            if (CheckReceiveComplete(state.recv_request, 4, state.bytes_received)) {
+                // Verify we received exactly 4 bytes
+                if (state.bytes_received != 4) {
+                    LOG_ERROR("Incomplete length header: " << state.bytes_received
+                              << " bytes, expected 4, from " << conn.client_id);
+                    // Need to continue receiving
+                    state.recv_request = nullptr;
+                    state.phase = ClientReceiveState::IDLE;
+                    return;
+                }
+
+                // Parse message length
+                state.msg_length = ntohl(*reinterpret_cast<uint32_t*>(state.buffer.data()));
+                LOG_DEBUG("Received length header: " << state.msg_length << " from " << conn.client_id);
+
+                // Validate message size
+                if (state.msg_length == 0 || state.msg_length > MAX_MESSAGE_SIZE) {
+                    LOG_ERROR("Invalid message length: " << state.msg_length << " from " << conn.client_id);
+                    // Mark for close (will be handled by ProgressWorker)
+                    conn.endpoint = nullptr;
+                    return;
+                }
+
+                // Start receiving message body
+                StartReceiveBody(conn);
+            }
+            break;
+
+        case ClientReceiveState::RECV_BODY:
+            // Check if message body is complete
+            if (CheckReceiveComplete(state.recv_request, state.msg_length, state.bytes_received)) {
+                LOG_DEBUG("Message received from " << conn.client_id << ", size=" << state.msg_length);
+
+                // Dispatch message and get response
+                std::string response = DispatchMessage(state.buffer);
+
+                // Send response back to client
+                if (!SendResponse(conn.endpoint, response)) {
+                    LOG_ERROR("Failed to send response to " << conn.client_id);
+                    // Mark for close (will be handled by ProgressWorker)
+                    conn.endpoint = nullptr;
+                    return;
+                }
+
+                // Reset to IDLE for next message
+                state.phase = ClientReceiveState::IDLE;
+                state.msg_length = 0;
+                state.bytes_received = 0;
+                state.buffer.clear();
+            }
+            break;
+    }
+}
+
+void UCXControlServer::StartReceiveLength(ClientConnection& conn) {
+    auto& state = conn.recv_state;
+
+    // Allocate buffer for length header (4 bytes)
+    state.buffer.resize(4);
+    state.bytes_received = 0;
+
+    // Start async receive
+    ucp_request_param_t recv_param;
+    std::memset(&recv_param, 0, sizeof(recv_param));
+    recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS;
+    recv_param.flags = 0;
+
+    state.recv_request = ucp_stream_recv_nbx(
+        conn.endpoint,
+        state.buffer.data(),
+        state.buffer.size(),
+        &state.bytes_received,
+        &recv_param);
+
+    if (UCS_PTR_IS_ERR(state.recv_request)) {
+        LOG_ERROR("Failed to start receive length: "
+                  << ucs_status_string(UCS_PTR_STATUS(state.recv_request))
+                  << " from " << conn.client_id);
+        // Mark for close
+        conn.endpoint = nullptr;
+        return;
+    }
+
+    state.phase = ClientReceiveState::RECV_LENGTH;
+}
+
+void UCXControlServer::StartReceiveBody(ClientConnection& conn) {
+    auto& state = conn.recv_state;
+
+    // Allocate buffer for message body
+    state.buffer.resize(state.msg_length);
+    state.bytes_received = 0;
+
+    // Start async receive
+    ucp_request_param_t recv_param;
+    std::memset(&recv_param, 0, sizeof(recv_param));
+    recv_param.op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS;
+    recv_param.flags = 0;
+
+    state.recv_request = ucp_stream_recv_nbx(
+        conn.endpoint,
+        state.buffer.data(),
+        state.buffer.size(),
+        &state.bytes_received,
+        &recv_param);
+
+    if (UCS_PTR_IS_ERR(state.recv_request)) {
+        LOG_ERROR("Failed to start receive body: "
+                  << ucs_status_string(UCS_PTR_STATUS(state.recv_request))
+                  << " from " << conn.client_id);
+        // Mark for close
+        conn.endpoint = nullptr;
+        return;
+    }
+
+    state.phase = ClientReceiveState::RECV_BODY;
+}
+
+bool UCXControlServer::CheckReceiveComplete(void* request, size_t expected_size, size_t& bytes_received) {
+    if (request == nullptr) {
+        // Immediate completion (UCS_OK)
+        return bytes_received >= expected_size;
+    }
+
+    if (UCS_PTR_IS_PTR(request)) {
+        // Check if request is complete
+        ucs_status_t status = ucp_request_check_status(request);
+
+        if (status == UCS_OK) {
+            // Request completed, free it first
+            ucp_request_free(request);
+            // Then check if we received the expected number of bytes
+            return bytes_received >= expected_size;
+        } else if (status == UCS_INPROGRESS) {
+            // Still in progress
+            return false;
+        } else {
+            // Error occurred
+            LOG_ERROR("Receive error: " << ucs_status_string(status));
+            ucp_request_free(request);
+            return false;
+        }
+    }
+
+    // Should not reach here
+    return false;
+}
+
+std::string UCXControlServer::DispatchMessage(const std::vector<char>& message_data) {
+    LOG_DEBUG("Dispatching message, size=" << message_data.size());
+
+    // Try to parse as PutRequest first
+    PutRequest put_req;
+    if (put_req.ParseFromArray(message_data.data(), message_data.size())) {
+        if (!put_req.key().empty()) {
+            LOG_DEBUG("Parsed as PutRequest, key=" << put_req.key());
+            std::string response = HandlePutRequest(put_req);
+            LOG_DEBUG("HandlePutRequest returned response, size=" << response.size());
+            return response;
+        }
+    }
+
+    // Try GetRequest
+    GetRequest get_req;
+    if (get_req.ParseFromArray(message_data.data(), message_data.size())) {
+        if (!get_req.key().empty()) {
+            return HandleGetRequest(get_req);
+        }
+    }
+
+    // Try DeleteRequest
+    DeleteRequest del_req;
+    if (del_req.ParseFromArray(message_data.data(), message_data.size())) {
+        if (!del_req.key().empty()) {
+            return HandleDeleteRequest(del_req);
+        }
+    }
+
+    // Try ServerStatsRequest
+    ServerStatsRequest stats_req;
+    if (stats_req.ParseFromArray(message_data.data(), message_data.size())) {
+        return HandleStatsRequest(stats_req);
+    }
+
+    // Unknown message type
+    LOG_ERROR("Failed to parse message, size=" << message_data.size());
+    PutResponse error_response;
+    error_response.set_status_code(-1);
+    error_response.set_error_message("Unknown message type");
+    return error_response.SerializeAsString();
+}
+
+//==============================================================================
+// Worker Progress
+//==============================================================================
+
 void UCXControlServer::ProgressWorker() {
     if (ucp_worker_ != nullptr) {
+        // Drive UCX event handling
         ucp_worker_progress(ucp_worker_);
+
+        // Collect clients to close (to avoid modifying map while iterating)
+        std::vector<std::string> clients_to_close;
+
+        // Process all client receive states
+        {
+            std::lock_guard<std::mutex> lock(connections_mutex_);
+            static int log_counter = 0;
+            if (++log_counter % 1000 == 0 && !client_connections_.empty()) {
+                LOG_DEBUG("ProgressWorker: " << client_connections_.size() << " clients");
+            }
+            for (auto& [client_id, conn] : client_connections_) {
+                // Check if client should be closed (endpoint is null)
+                if (conn.endpoint == nullptr) {
+                    clients_to_close.push_back(client_id);
+                    continue;
+                }
+
+                ProcessClientReceive(conn);
+
+                // If endpoint was invalidated during processing, mark for close
+                if (conn.endpoint == nullptr) {
+                    clients_to_close.push_back(client_id);
+                }
+            }
+        }
+
+        // Close clients outside the lock
+        for (const auto& client_id : clients_to_close) {
+            CloseConnection(client_id);
+        }
     }
 }
 

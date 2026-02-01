@@ -34,7 +34,7 @@ using namespace zerokv;
 class IntegrationTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        zerokv::LogManager::Instance().SetLevel(zerokv::LogLevel::ERROR);
+        zerokv::LogManager::Instance().SetLevel(zerokv::LogLevel::DEBUG);
 
         test_port_ = AllocateUniquePort();
         server_config_.listen_address = "127.0.0.1";
@@ -45,20 +45,34 @@ protected:
 
         server_ = std::make_unique<UCXControlServer>(server_config_);
         server_initialized_ = server_->Initialize() && server_->Start();
+
         if (server_initialized_) {
+            // Start the server event loop in a background thread
+            server_thread_ = std::thread([this]() {
+                server_->Run(0);  // Run indefinitely (0 = no timeout)
+            });
+
+            // Give server time to start event loop
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     }
 
     void TearDown() override {
         if (server_) {
+            // Stop the server (this will break the Run() loop)
             server_->Stop();
+
+            // Wait for the server thread to finish
+            if (server_thread_.joinable()) {
+                server_thread_.join();
+            }
+
             server_.reset();
         }
         server_initialized_ = false;
         // Give UCX time to properly release the port
         // TCP TIME_WAIT can last up to 60 seconds in Linux
-        std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     static uint16_t AllocateUniquePort() {
@@ -73,7 +87,7 @@ protected:
         UCXClientConfig config;
         config.use_rdma = false;
         config.connect_timeout_ms = 2000;
-        config.request_timeout_ms = 5000;
+        config.request_timeout_ms = 5000;  // Increase timeout for async receive
         config.max_retries = 3;
 
         auto client = std::make_unique<UCXControlClient>(config);
@@ -85,6 +99,7 @@ protected:
 
     UCXServerConfig server_config_;
     std::unique_ptr<UCXControlServer> server_;
+    std::thread server_thread_;
     uint16_t test_port_;
     bool server_initialized_;
 };

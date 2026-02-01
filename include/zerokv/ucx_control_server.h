@@ -76,12 +76,30 @@ struct KVEntry {
     std::chrono::system_clock::time_point timestamp;
 };
 
+// Client receive state machine
+struct ClientReceiveState {
+    enum Phase {
+        IDLE,           // Ready to receive next message
+        RECV_LENGTH,    // Receiving 4-byte message length header
+        RECV_BODY       // Receiving message body
+    };
+
+    Phase phase = IDLE;
+    uint32_t msg_length = 0;
+    std::vector<char> buffer;
+    void* recv_request = nullptr;  // UCX async receive request handle
+    size_t bytes_received = 0;     // Bytes received so far
+};
+
 // Client connection info
 struct ClientConnection {
     ucp_ep_h endpoint = nullptr;
     std::string client_id;
     std::string remote_address;
     std::chrono::system_clock::time_point connect_time;
+
+    // Receive state machine for async message handling
+    ClientReceiveState recv_state;
 };
 
 // RPC handler callback type
@@ -174,7 +192,14 @@ private:
     void AcceptConnection(ucp_conn_request_h conn_request);
     void CloseConnection(const std::string& client_id);
 
-    // Message handlers
+    // Message receive state machine
+    void ProcessClientReceive(ClientConnection& conn);
+    void StartReceiveLength(ClientConnection& conn);
+    void StartReceiveBody(ClientConnection& conn);
+    bool CheckReceiveComplete(void* request, size_t expected_size, size_t& bytes_received);
+
+    // Message dispatch and handlers
+    std::string DispatchMessage(const std::vector<char>& message_data);
     std::string HandlePutRequest(const PutRequest& request);
     std::string HandleGetRequest(const GetRequest& request);
     std::string HandleDeleteRequest(const DeleteRequest& request);

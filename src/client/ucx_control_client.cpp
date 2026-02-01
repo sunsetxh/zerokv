@@ -384,6 +384,7 @@ bool UCXControlClient::SendMessage(const std::string& message) {
 }
 
 bool UCXControlClient::ReceiveResponse(std::string& response, uint32_t timeout_ms) {
+    LOG_DEBUG("Waiting for response, timeout=" << timeout_ms << "ms");
     auto start_time = std::chrono::steady_clock::now();
     auto timeout = std::chrono::milliseconds(timeout_ms);
 
