@@ -78,3 +78,17 @@ core.*
 # Test outputs
 test_results/
 benchmark_results/
+
+# Thirdparty dependencies (UCX, etc.)
+thirdparty/
+ucx-*.tar.gz
+ucx-*/
+
+# Test binaries in root
+test_*
+example_basic
+example_*
+
+# Binary files
+*.exe
+*.bin
