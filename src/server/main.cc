@@ -57,6 +57,9 @@ int main(int argc, char** argv) {
     std::cout << "Listen: " << listen_addr << ":" << port << std::endl;
     std::cout << "Max Memory: " << (max_memory / 1024 / 1024) << " MB" << std::endl;
 
+    // Create storage
+    auto storage = std::make_unique<StorageEngine>(max_memory);
+
     // Create transport
 #ifdef USE_UCX
     auto transport = std::make_unique<UCXTransport>();
@@ -66,6 +69,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Pass storage to transport for request handling
+    transport->set_storage(std::shared_ptr<StorageEngine>(storage.release()));
+
     status = transport->listen(listen_addr, port);
     if (status != Status::OK) {
         std::cerr << "Failed to listen on " << listen_addr << ":" << port << std::endl;
@@ -74,9 +80,6 @@ int main(int argc, char** argv) {
 #else
     std::cout << "Warning: UCX not available, running in storage-only mode" << std::endl;
 #endif
-
-    // Create storage
-    auto storage = std::make_unique<StorageEngine>(max_memory);
 
     std::cout << "Server started successfully" << std::endl;
 

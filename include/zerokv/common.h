@@ -22,7 +22,9 @@ enum class OpCode : uint8_t {
     GET = 1,
     DELETE = 2,
     PUT_USER_MEM = 3,
-    GET_USER_MEM = 4
+    GET_USER_MEM = 4,
+    BATCH_PUT = 5,
+    BATCH_GET = 6
 };
 
 // Status codes

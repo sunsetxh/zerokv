@@ -133,6 +133,7 @@ set(PUBLIC_HEADERS
 # Source files
 set(SOURCES
     src/protocol/codec.cc
+    src/protocol/handler.cc
     src/storage/storage.cc
     src/metadata/metadata.cc
     src/pool/connection_pool.cc
