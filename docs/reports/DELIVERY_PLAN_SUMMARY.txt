@@ -1,0 +1,416 @@
+================================================================================
+P2P HIGH-PERFORMANCE TRANSPORT LIBRARY MVP
+DELIVERY PLAN SUMMARY
+================================================================================
+
+CREATED: 2026-03-04
+DOCUMENT VERSION: 1.0
+AUDIENCE: Project sponsors, engineering leadership, stakeholders
+
+================================================================================
+THE PLAN IN 30 SECONDS
+================================================================================
+
+TIMELINE: 16–20 weeks (4–5 months)
+TEAM SIZE: 6–8 FTE
+CRITICAL PATH: US6 (4 weeks) → US2 (5 weeks) → US1+US4 (5 weeks) = 14 weeks
+PARALLEL: US2 and US5 run simultaneously (saves ~5 weeks vs sequential)
+
+KEY MILESTONE:
+  Week 14: "Hello World Messaging" (MVP delivers customer value)
+  Week 18: RDMA complete (full feature set)
+  Week 20: Production ready (tested, documented, shipped)
+
+================================================================================
+5-PHASE DELIVERY BREAKDOWN
+================================================================================
+
+PHASE 1: FOUNDATION (Weeks 1–4)
+  Story: US6 - Library Configuration and Initialization
+  Deliverable: Config builder API, Context initialization
+  Acceptance: Can create Context; env var overrides work
+  Team: 1 Core C++ Eng + Tech Lead
+  
+PHASE 2A: CONNECTIONS (Weeks 5–9, PARALLEL with 2B)
+  Story: US2 - Connection Lifecycle Management
+  Deliverable: Server listen, client connect, endpoint lifecycle
+  Acceptance: Two processes establish connection; 64 concurrent ok
+  Team: 1 Core C++ Eng
+  
+PHASE 2B: MEMORY REGISTRATION (Weeks 5–9, PARALLEL with 2A)
+  Story: US5 - Memory Registration and Management
+  Deliverable: Register buffers, pin pages, obtain remote keys
+  Acceptance: Memory regions registered; remote keys serializable
+  Team: 1 RDMA Specialist
+  
+PHASE 3: TAG MESSAGING (Weeks 10–14)
+  Stories: US1 - Point-to-Point Tag-Matched Messaging
+           US4 - Asynchronous Operation Model (Futures)
+  Deliverable: Blocking tag_send/recv; non-blocking async via Futures
+  Acceptance: Two processes exchange 4KB message; Futures work
+  Milestone: ✓ M2 "HELLO WORLD MESSAGING" (CUSTOMER VALUE UNLOCK)
+  Team: 2 Core C++ Eng + Performance Eng
+  
+PHASE 4: RDMA OPERATIONS (Weeks 15–18)
+  Story: US3 - One-Sided RDMA Operations
+  Deliverable: RDMA put/get with remote memory access
+  Acceptance: Write 1GB to remote memory; >22 GB/s throughput
+  Milestone: ✓ M3 "RDMA READY" (FULL FEATURE SET)
+  Team: 1 RDMA Specialist + Performance Eng
+  
+PHASE 5: PERFORMANCE & POLISH (Weeks 19–20)
+  Deliverable: Performance tuning, testing, documentation
+  Acceptance: All success criteria met; 80% code coverage
+  Milestone: ✓ M4 "PRODUCTION READY" (SHIP!)
+  Team: All hands
+
+================================================================================
+FOUR "HELLO WORLD" MILESTONES
+================================================================================
+
+M1: CONFIG & INIT (Week 4)
+  Goal: Validate build system and dependencies
+  Acceptance: Config().set_worker_count(4).build() works
+  
+M2: HELLO WORLD MESSAGING (Week 14)
+  Goal: Deliver customer-visible value; unlock use cases
+  Acceptance: Two processes exchange 4KB message with tag matching
+  Use Cases Enabled: Gradient synchronization, KV Cache transfer
+  
+M3: RDMA READY (Week 18)
+  Goal: Complete P2P feature set
+  Acceptance: RDMA put/get works with remote keys
+  Use Cases Enabled: Parameter servers, low-latency inference
+  
+M4: PRODUCTION READY (Week 20)
+  Goal: Ship-ready library
+  Acceptance: All 6 user stories pass; 80% coverage; perf targets met
+
+================================================================================
+DEPENDENCY GRAPH (WHY THIS ORDER?)
+================================================================================
+
+             US6: Config (Week 1)
+                  ↓
+       ┌──────────┴──────────┐
+       ↓                     ↓
+  US2: Connect          US5: Memory Reg.
+  (Weeks 5–9)           (Weeks 5–9)
+       │                     │
+       └──────────┬──────────┘
+                  ↓
+      US1+US4: Messaging (Weeks 10–14)
+           ✓ VALUE UNLOCK
+                  ↓
+      US3: RDMA Put/Get (Weeks 15–18)
+
+KEY INSIGHT: Parallelize US2 and US5 (independent after US6)
+Saves: 5 weeks vs sequential approach
+
+================================================================================
+TOP 3 TECHNICAL RISKS & MITIGATION
+================================================================================
+
+RISK 1: RDMA Implementation Complexity (Probability: 15–20%, Impact: HIGH)
+  What Could Go Wrong:
+    UCX RMA API incomplete or undocumented
+    RDMA put/get implementation harder than expected
+  
+  Fallback Strategy:
+    Week 6–7: Spike research on UCX RMA API
+    Week 8: Decision gate (proceed or pivot to messaging-only MVP)
+    If blocked: Ship US1–US4 at Week 14; defer US3 to Phase 2
+  
+  Timeline Impact: +4–8 weeks if unmitigated
+
+---
+
+RISK 2: Memory Registration Performance (Probability: 25–30%, Impact: MEDIUM)
+  What Could Go Wrong:
+    Registration becomes bottleneck
+    Can't achieve 90% bandwidth target for large messages
+  
+  Fallback Strategy:
+    Week 5: Benchmark vs NCCL (establish baseline)
+    Week 12: Add MemoryPool (slab allocator)
+    Week 15: Add RegistrationCache (LRU)
+    If needed: Relax perf target for unregistered buffers
+  
+  Timeline Impact: +2–4 weeks if unmitigated
+
+---
+
+RISK 3: Ascend NPU Plugin Integration (Probability: 35–40%, Impact: MEDIUM–HIGH)
+  What Could Go Wrong:
+    HCCL API incompatible with plugin design
+    Ascend support breaks in Phase 2
+  
+  Fallback Strategy:
+    Week 2–3: Design plugin interface (decouple from core)
+    Week 6: Early Ascend team engagement
+    Week 12–14: Implement mock HCCL plugin (validate architecture)
+    Week 15: Decision gate (proceed or defer to Phase 2)
+  
+  Timeline Impact: +4–6 weeks if unmitigated; can shift to Phase 2
+
+---
+
+DECISION GATES (Weekly Risk Review):
+  ✓ If probability rises above 50% OR impact is CRITICAL
+    → Emergency escalation meeting
+    → Re-plan with fallback strategy
+
+================================================================================
+PERFORMANCE TARGETS (FROM SUCCESS CRITERIA)
+================================================================================
+
+Latency (1-way, RDMA, 200Gbps network):
+  ✓ 4KB message:     < 5 microseconds (within 2us of raw UCX)
+  ✓ 1KB message:     < 3 microseconds
+
+Throughput (RDMA):
+  ✓ 1MB message:     > 20 GB/s
+  ✓ 1GB message:     > 23 GB/s (92% of 200Gbps link)
+
+Overhead vs Raw UCX:
+  ✓ < 5% for 64KB+ messages
+  ✓ < 2 microseconds absolute for < 4KB
+
+Connection Setup:
+  ✓ < 100 milliseconds (first connection, one-time cost)
+
+Scalability:
+  ✓ 64 concurrent connections without degradation
+
+Quality:
+  ✓ 80% line code coverage (mandatory gate)
+  ✓ 70% branch coverage
+  ✓ ASAN clean (no memory errors)
+  ✓ TSAN clean (no data races)
+
+================================================================================
+TEAM ALLOCATION (6–8 FTE)
+================================================================================
+
+Tech Lead / Architect         (1.0 FTE)
+  → Design, risk mitigation, phases 1–2
+
+Core C++ Engineer             (2.0 FTE)
+  → Implement US6, US2, US1
+
+RDMA Specialist               (1.5 FTE)
+  → Implement US5, US3, performance tuning
+
+Performance Engineer          (1.0 FTE)
+  → Benchmarking, perf targets, tuning
+
+QA / Test Engineer            (1.0 FTE)
+  → Test infrastructure, CI/CD, fault injection
+
+PM / Technical Writer         (0.5 FTE)
+  → Spec clarity, milestone tracking, docs
+
+GPU/Ascend Liaison (optional) (0.5 FTE)
+  → HCCL compatibility research (risk mitigation)
+
+================================================================================
+WHAT'S IN MVP (6 User Stories)
+================================================================================
+
+✅ US1: Point-to-Point Tag-Matched Messaging
+   - Tag send/recv with 64-bit tags
+   - 0 bytes to 1GB message sizes
+   - Zero data corruption
+   
+✅ US2: Connection Lifecycle Management
+   - Listen, accept, connect, close
+   - Connection timeouts
+   - 64 concurrent connections
+   
+✅ US3: One-Sided RDMA Operations
+   - Put (write to remote memory)
+   - Get (read from remote memory)
+   - Flush (ensure completion)
+   
+✅ US4: Asynchronous Operation Model
+   - Future<Status> for all operations
+   - Poll (ready()), block (get()/wait()), callbacks
+   - Future::wait_all() for multiple operations
+   
+✅ US5: Memory Registration and Management
+   - Register/deregister buffers
+   - Pin/unpin pages with UCX
+   - Obtain serializable remote keys
+   
+✅ US6: Library Configuration and Initialization
+   - Config builder pattern
+   - Environment variable overrides
+   - Sensible defaults
+
+================================================================================
+WHAT'S NOT IN MVP (Deferred to Phase 2+)
+================================================================================
+
+❌ Python bindings       (Phase 2 - can parallelize)
+❌ MemoryPool            (Phase 2 - optimization)
+❌ RegistrationCache     (Phase 2 - optimization)
+❌ Scatter/gather        (Phase 2 - advanced)
+❌ NCCL plugin           (Phase 2 - requires external API stability)
+❌ HCCL plugin           (Phase 2 - requires Ascend team)
+❌ Multi-path RDMA       (Phase 3 - advanced)
+❌ Observability (metrics/tracing) (Phase 3 - ops nice-to-have)
+
+MVP is intentionally focused on core P2P functionality.
+Phase 2 will add Python, optimization, and plugin ecosystem.
+
+================================================================================
+SUCCESS DEFINITION (END OF WEEK 20)
+================================================================================
+
+Functionality:
+  ✅ All 6 user story acceptance scenarios pass
+  ✅ All edge cases handled correctly
+  ✅ Works on RDMA + TCP + Shared Memory transports
+
+Performance:
+  ✅ SC-001: 4KB latency < 5us
+  ✅ SC-002: 1GB throughput > 92% of link BW
+  ✅ SC-003: Overhead < 5% vs raw UCX
+  ✅ SC-006: 64 connections without degradation
+  ✅ SC-007: Failed ops complete with error within timeout
+
+Quality:
+  ✅ 80% line code coverage (MANDATORY GATE)
+  ✅ 70% branch coverage
+  ✅ ASAN clean (no leaks)
+  ✅ TSAN clean (no races)
+  ✅ All unit tests pass (gtest)
+  ✅ All integration tests pass (pytest)
+  ✅ No memory leaks in stress tests (24h)
+
+Documentation:
+  ✅ API reference (doxygen)
+  ✅ "Hello World" example
+  ✅ RDMA example
+  ✅ Architecture guide
+  ✅ Performance baselines established
+
+Deliverables:
+  ✅ Source code merged to main, tagged v1.0.0-mvp
+  ✅ Docker image with all dependencies
+  ✅ CMake export for downstream consumers
+  ✅ Known issues & limitations documented
+
+================================================================================
+CRITICAL GO/NO-GO DECISION POINTS
+================================================================================
+
+GATE 1 (Week 7): RDMA Architecture Validation
+  Question: Is UCX RMA API compatible with our design?
+  Pass Criteria: Spike completes with no blockers
+  Fallback: Defer US3 (RDMA) to Phase 2; ship messaging-only at Week 14
+  
+GATE 2 (Week 14): Messaging MVP Ready
+  Question: Do M2 acceptance criteria pass?
+  Pass Criteria: Tag send/recv works; Futures work; perf targets met
+  Fallback: Extend Week 14 by 2 weeks; continue tuning
+  
+GATE 3 (Week 18): RDMA Performance Acceptable
+  Question: Can we achieve > 85% line bandwidth?
+  Pass Criteria: 1GB message achieves > 22 GB/s
+  Fallback: Relax target to 80% and document limitation
+  
+GATE 4 (Week 20): All Acceptance Criteria Met
+  Question: Is MVP ready to ship?
+  Pass Criteria: M4 sign-off; all tests passing; coverage >= 80%
+  Fallback: Ship with known issues doc; patch in Phase 2
+
+================================================================================
+WEEKLY CADENCE
+================================================================================
+
+Every Friday 4pm (15 minutes):
+  ✓ Completed this week (PRs, features merged)
+  ✓ On track / at risk items
+  ✓ Next week focus
+  ✓ Blockers with owner and ETA
+
+Every 4 weeks (1 hour gate review):
+  ✓ Milestone acceptance criteria verification
+  ✓ Performance target validation
+  ✓ Risk status update
+  ✓ Go/No-Go decision for next phase
+
+================================================================================
+KEY DOCUMENTS
+================================================================================
+
+pm-mvp-delivery-plan.md
+  → Full strategic plan with rationale and detailed risk analysis
+  → 7 sections: delivery order, milestones, risks, resource allocation
+  → For: Technical stakeholders, project leadership
+  
+pm-mvp-quick-reference.md
+  → 5-minute visual summary; key decision points
+  → For: Sponsors, program managers, quick briefings
+  
+DELIVERY_PLAN_SUMMARY.txt (this file)
+  → Executive summary; can print and frame!
+  → For: One-pagers, presentations, quick lookup
+
+/specs/001-p2p-transport-mvp/spec.md
+  → User stories, acceptance scenarios, requirements
+  → For: Development team, test team
+  
+/docs/reports/report-arch-design.md
+  → Architecture decisions, tech stack choices
+  → For: Tech lead, architects
+
+/docs/reports/test-strategy.md
+  → Performance baselines, test matrix, CI/CD
+  → For: QA lead, performance engineers
+
+================================================================================
+THE ELEVATOR PITCH (30 seconds)
+================================================================================
+
+We will deliver a production-ready P2P transport library in 20 weeks
+with a 6–8 person team:
+
+  Week 4:   Config & initialization (foundation)
+  Week 9:   Connections + memory registration (parallel, independence)
+  Week 14:  Tag messaging (MVP with customer value)
+  Week 18:  RDMA operations (complete feature set)
+  Week 20:  Performance tuned, tested, documented (SHIP!)
+
+Top risk: RDMA complexity.
+Mitigation: Early spike + fallback to messaging-only.
+Value delivery: Week 14 (not 20) — customers can start building.
+
+================================================================================
+CONTACT & ESCALATION
+================================================================================
+
+Project Lead:    [TBD]
+Tech Lead:       [TBD]
+PM:              [TBD]
+
+Escalation Process:
+  1. Weekly Friday standup: raise risk
+  2. If probability > 50% or impact CRITICAL: emergency meeting
+  3. Risk owner prepares fallback; PM updates timeline
+
+================================================================================
+DOCUMENT METADATA
+================================================================================
+
+Prepared by:  Product Manager
+Date:         2026-03-04
+Version:      1.0
+Status:       Final
+Next Review:  After Phase 1 completion (Week 5)
+
+Last Updated: 2026-03-04
+Approvals:    [TBD - Sponsor, Tech Lead, PM]
+
+================================================================================

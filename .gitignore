@@ -1,0 +1,55 @@
+# Build outputs
+build/
+bin/
+obj/
+out/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+*.cmake
+
+# Dependencies
+third_party/
+external/
+
+# Build artifacts
+lib/*.a
+lib/*.so
+lib/*.dylib
+
+# Test outputs
+Testing/
+CTestTestfile.cmake
+_coverage/
+*.gcda
+*.gcno
+*.gcov
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env*
+*.local
