@@ -26,34 +26,79 @@ using namespace nb::literals;
 
 // ---------------------------------------------------------------------------
 // Helper: extract pointer + length from any buffer-protocol object
+// Keeps a reference to the Python object to prevent garbage collection
 // ---------------------------------------------------------------------------
-static std::pair<void*, size_t> extract_buffer(nb::handle buf) {
-    // Try bytes first
-    if (PyBytes_Check(buf.ptr())) {
-        Py_ssize_t len = PyBytes_GET_SIZE(buf.ptr());
-        char* ptr = PyBytes_AS_STRING(buf.ptr());
-        return std::make_pair(ptr, static_cast<size_t>(len));
+struct BufferHolder {
+    PyObject* obj = nullptr;
+    void* ptr = nullptr;
+    size_t len = 0;
+
+    BufferHolder() = default;
+    BufferHolder(const BufferHolder&) = delete;
+    BufferHolder& operator=(const BufferHolder&) = delete;
+    BufferHolder(BufferHolder&& other) noexcept : obj(other.obj), ptr(other.ptr), len(other.len) {
+        other.obj = nullptr;
     }
-    // Try bytearray
-    if (PyByteArray_Check(buf.ptr())) {
-        Py_ssize_t len = PyByteArray_GET_SIZE(buf.ptr());
-        char* ptr = PyByteArray_AS_STRING(buf.ptr());
-        return std::make_pair(ptr, static_cast<size_t>(len));
+    BufferHolder& operator=(BufferHolder&& other) noexcept {
+        if (this != &other) {
+            if (obj) Py_DECREF(obj);
+            obj = other.obj;
+            ptr = other.ptr;
+            len = other.len;
+            other.obj = nullptr;
+        }
+        return *this;
     }
-    // Try memoryview
-    if (PyMemoryView_Check(buf.ptr())) {
-        Py_buffer* view = PyMemoryView_GET_BUFFER(buf.ptr());
-        return std::make_pair(view->buf, static_cast<size_t>(view->len));
+
+    static BufferHolder extract(nb::handle buf) {
+        BufferHolder holder;
+        holder.obj = buf.ptr();
+        Py_INCREF(holder.obj);
+
+        // Try bytes first
+        if (PyBytes_Check(holder.obj)) {
+            holder.len = PyBytes_GET_SIZE(holder.obj);
+            holder.ptr = PyBytes_AS_STRING(holder.obj);
+            return holder;
+        }
+        // Try bytearray
+        if (PyByteArray_Check(holder.obj)) {
+            holder.len = PyByteArray_GET_SIZE(holder.obj);
+            holder.ptr = PyByteArray_AS_STRING(holder.obj);
+            return holder;
+        }
+        // Try memoryview
+        if (PyMemoryView_Check(holder.obj)) {
+            Py_buffer* view = PyMemoryView_GET_BUFFER(holder.obj);
+            holder.ptr = view->buf;
+            holder.len = static_cast<size_t>(view->len);
+            return holder;
+        }
+        // Try numpy array via nanobind ndarray
+        try {
+            auto arr = nb::cast<nb::ndarray<nb::numpy, const uint8_t, nb::ndim<1>>>(buf);
+            holder.ptr = static_cast<void*>(const_cast<uint8_t*>(arr.data()));
+            holder.len = static_cast<size_t>(arr.size());
+            return holder;
+        } catch (...) {
+            // Fall through to error
+        }
+
+        Py_DECREF(holder.obj);
+        holder.obj = nullptr;
+        throw std::runtime_error("Unsupported buffer type. Use bytes, bytearray, memoryview, or numpy array.");
     }
-    // Try numpy array via nanobind ndarray
-    try {
-        auto arr = nb::cast<nb::ndarray<nb::numpy, const uint8_t, nb::ndim<1>>>(buf);
-        return std::make_pair(static_cast<void*>(const_cast<uint8_t*>(arr.data())), static_cast<size_t>(arr.size()));
-    } catch (...) {
-        // Fall through to error
+
+    ~BufferHolder() {
+        if (obj) {
+            Py_DECREF(obj);
+        }
     }
-    throw std::runtime_error("Unsupported buffer type. Use bytes, bytearray, memoryview, or numpy array.");
-}
+
+    std::pair<void*, size_t> get() const {
+        return {ptr, len};
+    }
+};
 
 // ---------------------------------------------------------------------------
 // Helper: create Config from Python arguments
@@ -178,7 +223,8 @@ NB_MODULE(_core, m) {
     nb::class_<p2p::MemoryRegion>(m, "MemoryRegion")
         .def_static("register_", [](std::shared_ptr<p2p::Context>& ctx, nb::handle buf,
                                     p2p::MemoryType type) {
-            auto [ptr, len] = extract_buffer(buf);
+            auto holder = BufferHolder::extract(buf);
+            auto [ptr, len] = holder.get();
             return p2p::MemoryRegion::register_mem(ctx, ptr, len, type);
         }, "ctx"_a, "buffer"_a, "memory_type"_a = p2p::MemoryType::kHost)
         .def_static("allocate", &p2p::MemoryRegion::allocate,
@@ -204,7 +250,8 @@ NB_MODULE(_core, m) {
 
     nb::class_<p2p::Endpoint>(m, "Endpoint")
         .def("tag_send", [](p2p::Endpoint& self, nb::handle buf, p2p::Tag tag) {
-            auto [ptr, len] = extract_buffer(buf);
+            auto holder = BufferHolder::extract(buf);
+            auto [ptr, len] = holder.get();
             nb::gil_scoped_release release;
             return self.tag_send(ptr, len, tag);
         }, "buffer"_a, "tag"_a)
@@ -215,7 +262,8 @@ NB_MODULE(_core, m) {
         }, "region"_a, "tag"_a)
         .def("tag_recv", [](p2p::Endpoint& self, nb::handle buf,
                             p2p::Tag tag, p2p::Tag tag_mask) {
-            auto [ptr, len] = extract_buffer(buf);
+            auto holder = BufferHolder::extract(buf);
+            auto [ptr, len] = holder.get();
             nb::gil_scoped_release release;
             return self.tag_recv(ptr, len, tag, tag_mask);
         }, "buffer"_a, "tag"_a, "tag_mask"_a = p2p::kTagMaskAll)
@@ -237,11 +285,19 @@ NB_MODULE(_core, m) {
             nb::gil_scoped_release release;
             return self.connect(addr);
         }, "address"_a)
+        .def("connect_blob", [](p2p::Worker& self, const std::vector<uint8_t>& addr) {
+            nb::gil_scoped_release release;
+            return self.connect(addr);
+        }, "address"_a)
         .def("listen", &p2p::Worker::listen,
              "bind_address"_a, "on_accept"_a)
         .def("progress", [](p2p::Worker& self) {
             nb::gil_scoped_release release;
             return self.progress();
+        })
+        .def("address", [](p2p::Worker& self) {
+            nb::gil_scoped_release release;
+            return self.address();
         })
         .def_prop_ro("event_fd", &p2p::Worker::event_fd)
         .def_prop_ro("index", &p2p::Worker::index)

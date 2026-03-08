@@ -110,27 +110,29 @@ Tag = int
 # Future[T] – awaitable async result
 # ---------------------------------------------------------------------------
 
-class Future:
+class FutureVoid:
     """
-    Wraps an in-flight async operation.  Can be awaited in asyncio context
-    or polled synchronously.
-
-    Usage (sync):
-        result = future.wait(timeout=5.0)
-
-    Usage (async):
-        result = await future
+    Wraps an in-flight async operation that returns no value.
     """
 
     def ready(self) -> bool: ...
-    def wait(self, timeout: Optional[float] = None) -> Any: ...
+    def get(self, timeout: Optional[float] = None) -> None: ...
     def cancel(self) -> None: ...
 
     @property
     def status(self) -> ErrorCode: ...
 
-    # asyncio support: makes Future awaitable
-    def __await__(self): ...
+class FutureRecv:
+    """
+    Wraps an in-flight async recv operation.
+    """
+
+    def ready(self) -> bool: ...
+    def get(self, timeout: Optional[float] = None) -> Tuple[int, int]: ...
+    def cancel(self) -> None: ...
+
+    @property
+    def status(self) -> ErrorCode: ...
 
 # ---------------------------------------------------------------------------
 # Request – low-level async handle
@@ -159,7 +161,7 @@ class MemoryRegion:
     """
 
     @staticmethod
-    def register(
+    def register_(
         ctx: Context,
         buffer: Union[bytes, bytearray, memoryview, np.ndarray, GpuArray],
         memory_type: MemoryType = MemoryType.HOST,
