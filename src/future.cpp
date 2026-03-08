@@ -28,10 +28,14 @@ Request::Ptr Request::create(void* ucx_request, ucp_worker_h worker) {
 
 Request::~Request() {
     if (impl_ && impl_->ucx_request_) {
-        // Wait for completion before freeing to avoid freeing in-flight requests
-        while (ucp_request_check_status(impl_->ucx_request_) == UCS_INPROGRESS) {
+        // Cancel the request if still in progress
+        if (ucp_request_check_status(impl_->ucx_request_) == UCS_INPROGRESS) {
             if (impl_->worker_) {
-                ucp_worker_progress(impl_->worker_);
+                ucp_request_cancel(impl_->worker_, impl_->ucx_request_);
+                // Progress until cancel completes
+                for (int i = 0; i < 1000 && ucp_request_check_status(impl_->ucx_request_) == UCS_INPROGRESS; ++i) {
+                    ucp_worker_progress(impl_->worker_);
+                }
             }
         }
         ucp_request_free(impl_->ucx_request_);
