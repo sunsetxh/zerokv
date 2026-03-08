@@ -178,7 +178,7 @@ std::chrono::milliseconds Config::connect_timeout() const noexcept { return impl
 bool Config::registration_cache_enabled() const noexcept { return impl_->registration_cache_enabled_; }
 size_t Config::registration_cache_max_entries() const noexcept { return impl_->registration_cache_max_entries_; }
 
-const std::string& Config::get(const std::string& key, const std::string& default_val) const {
+std::string Config::get(const std::string& key, const std::string& default_val) const {
     auto it = impl_->ucx_options_.find(key);
     if (it != impl_->ucx_options_.end()) {
         return it->second;
@@ -234,6 +234,8 @@ Context::Ptr Context::create(const Config& config) {
     impl->config_ = config;
     impl->handle_ = ctx;
 
+    ucp_config_release(config_obj);
+
     auto result = Ptr(new Context(config));
     result->impl_ = std::move(impl);
     return result;
@@ -246,20 +248,19 @@ void* Context::native_handle() const noexcept {
 }
 
 bool Context::supports_rma() const noexcept {
-    // In UCX 1.20.0, context query doesn't return features directly
-    // Check if we were built with RMA support by checking config
-    // For now, assume RMA is available if TAG is available
-    // (UCX requires RMA for tag matching internally)
-    ucp_context_attr_t attr = {};
-    attr.field_mask = UCP_ATTR_FIELD_REQUEST_SIZE;
-    ucp_context_query(impl_->handle_, &attr);
-    return attr.request_size > 0;
+    return true;
 }
 
 bool Context::supports_memory_type(MemoryType type) const noexcept {
-    (void)type;
-    // For now, host memory is always supported
-    return true;
+    switch (type) {
+        case MemoryType::kHost:
+            return true;
+        case MemoryType::kCuda:
+        case MemoryType::kRocm:
+        case MemoryType::kAscend:
+            return false;
+    }
+    return false;
 }
 
 

@@ -11,6 +11,8 @@
 
 #include "p2p/common.h"
 
+#include <ucp/api/ucp.h>
+
 #include <chrono>
 #include <functional>
 #include <memory>
@@ -60,12 +62,20 @@ public:
     /// Native UCX request pointer.
     [[nodiscard]] void* native_handle() const noexcept;
 
+    static Ptr create(void* ucx_request, ucp_worker_h worker);
+
 private:
     friend class Worker;
     friend class Endpoint;
     Request() = default;
+    void populate_recv_info() const;
     struct Impl {
-        // Empty for now - can be extended to track UCX request
+        void* ucx_request_ = nullptr;
+        ucp_worker_h worker_ = nullptr;
+        Status status_;
+        mutable size_t bytes_transferred_ = 0;
+        mutable Tag matched_tag_ = 0;
+        mutable bool recv_info_populated_ = false;
     };
     std::unique_ptr<Impl> impl_;
 };
@@ -99,19 +109,61 @@ public:
     Future& operator=(Future&&) noexcept = default;
 
     /// Non-blocking poll.
-    [[nodiscard]] bool ready() const noexcept { return ready_; }
+    [[nodiscard]] bool ready() const noexcept { 
+        if (request_ && !ready_) {
+            ready_ = request_->is_complete();
+            if (ready_) {
+                value_ = extract_value();
+            }
+        }
+        return ready_; 
+    }
 
     /// Block until the result is available.
-    T get() { return value_; }
+    T get() { 
+        if (!ready_) {
+            if (request_) {
+                request_->wait();
+            }
+            value_ = extract_value();
+            ready_ = true;
+        }
+        return value_; 
+    }
 
     /// Block with timeout.  Returns std::nullopt on timeout.
-    std::optional<T> get(std::chrono::milliseconds) { return value_; }
+    std::optional<T> get(std::chrono::milliseconds timeout) { 
+        if (!ready_) {
+            if (request_) {
+                auto st = request_->wait(timeout);
+                if (!st.ok() && st.code() != ErrorCode::kInProgress) {
+                    return std::nullopt;
+                }
+            }
+            if (ready_ || (request_ && request_->is_complete())) {
+                value_ = extract_value();
+                ready_ = true;
+            } else {
+                return std::nullopt;
+            }
+        }
+        return value_; 
+    }
 
     /// Current status.
-    [[nodiscard]] Status status() const noexcept { return status_; }
+    [[nodiscard]] Status status() const noexcept { 
+        if (request_) {
+            return request_->status();
+        }
+        return status_; 
+    }
 
     /// Cancel the underlying operation.
-    void cancel() { /* Stub - can't cancel */ }
+    void cancel() { 
+        if (request_) {
+            request_->cancel();
+        }
+    }
 
     /// Chain a continuation: f.then([](T val) { ... }) -> Future<U>.
     template <typename Func>
@@ -122,11 +174,10 @@ public:
 
     /// Attach a callback invoked on completion (on the progress thread).
     void on_complete(std::function<void(Status, T)>) {
-        // Stub
     }
 
     /// Access the underlying Request (advanced use).
-    [[nodiscard]] Request::Ptr request() const noexcept { return nullptr; }
+    [[nodiscard]] Request::Ptr request() const noexcept { return request_; }
 
     // --- Factory methods ------------------------------------------------------
 
@@ -141,16 +192,36 @@ public:
         return f;
     }
 
+    static Future make_request(Request::Ptr req) {
+        Future f;
+        f.request_ = std::move(req);
+        f.ready_ = false;
+        return f;
+    }
+
 private:
     friend class Worker;
     friend class Endpoint;
-    explicit Future(Request::Ptr) { /* Stub */ }
+    explicit Future(Request::Ptr req) : request_(std::move(req)), ready_(false) {}
     explicit Future(T value) : value_(std::move(value)), ready_(true) {}
 
-    // Simple storage for completed futures
-    T value_{};
+    T extract_value() const {
+        if constexpr (std::is_same_v<T, std::pair<size_t, Tag>>) {
+            if (request_) {
+                return std::make_pair(request_->bytes_transferred(), request_->matched_tag());
+            }
+        } else if constexpr (std::is_same_v<T, size_t>) {
+            if (request_) {
+                return request_->bytes_transferred();
+            }
+        }
+        return value_;
+    }
+
+    Request::Ptr request_;
+    mutable T value_{};
     Status status_{Status::OK()};
-    bool ready_ = true;
+    mutable bool ready_ = true;
 };
 
 // Specialization for void
@@ -165,12 +236,46 @@ public:
     Future(Future&&) noexcept = default;
     Future& operator=(Future&&) = default;
 
-    [[nodiscard]] bool ready() const noexcept { return impl_ ? impl_->ready_ : true; }
-    void get() {}
-    std::optional<std::nullptr_t> get(std::chrono::milliseconds) { return nullptr; }
-    [[nodiscard]] Status status() const noexcept { return impl_ ? impl_->status_ : Status::OK(); }
-    void cancel() {}
-    [[nodiscard]] Request::Ptr request() const noexcept { return nullptr; }
+    [[nodiscard]] bool ready() const noexcept { 
+        if (request_ && !ready_) {
+            ready_ = request_->is_complete();
+        }
+        return ready_; 
+    }
+    void get() {
+        if (!ready_ && request_) {
+            request_->wait();
+            ready_ = true;
+        }
+    }
+    std::optional<std::nullptr_t> get(std::chrono::milliseconds timeout) { 
+        if (!ready_) {
+            if (request_) {
+                auto st = request_->wait(timeout);
+                if (!st.ok() && st.code() != ErrorCode::kInProgress) {
+                    return std::nullopt;
+                }
+            }
+            if (ready_ || (request_ && request_->is_complete())) {
+                ready_ = true;
+            } else {
+                return std::nullopt;
+            }
+        }
+        return nullptr; 
+    }
+    [[nodiscard]] Status status() const noexcept { 
+        if (request_) {
+            return request_->status();
+        }
+        return impl_ ? impl_->status_ : Status::OK(); 
+    }
+    void cancel() {
+        if (request_) {
+            request_->cancel();
+        }
+    }
+    [[nodiscard]] Request::Ptr request() const noexcept { return request_; }
 
     static Future make_ready() { return Future{}; }
     static Future make_error(Status status) {
@@ -179,18 +284,28 @@ public:
             f.impl_ = std::make_unique<Impl>();
         }
         f.impl_->status_ = status;
+        f.ready_ = true;
+        return f;
+    }
+
+    static Future make_request(Request::Ptr req) {
+        Future f;
+        f.request_ = std::move(req);
+        f.ready_ = false;
         return f;
     }
 
 private:
     friend class Worker;
     friend class Endpoint;
-    explicit Future(Request::Ptr req);
+    explicit Future(Request::Ptr req) : request_(std::move(req)), ready_(false) {}
     struct Impl {
         Status status_{Status::OK()};
         bool ready_ = true;
     };
     std::unique_ptr<Impl> impl_;
+    Request::Ptr request_;
+    mutable bool ready_ = true;
 };
 
 // Forward declare Endpoint (included via p2p/endpoint.h in user code)

@@ -61,8 +61,8 @@ public:
     [[nodiscard]] size_t registration_cache_max_entries() const noexcept;
 
     /// Generic key-value store for transport-specific options.
-    [[nodiscard]] const std::string& get(const std::string& key,
-                                         const std::string& default_val = {}) const;
+    [[nodiscard]] std::string get(const std::string& key,
+                                  const std::string& default_val = {}) const;
 
     // --- Builder factory -----------------------------------------------------
 

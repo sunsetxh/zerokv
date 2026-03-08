@@ -149,6 +149,9 @@ if(P2P_BUILD_TESTS)
     add_executable(test_rdma tests/integration/test_rdma.cpp)
     target_link_libraries(test_rdma PRIVATE p2p GTest::gtest GTest::gtest_main)
     add_test(NAME IntegrationRdma COMMAND test_rdma)
+    add_executable(test_loopback tests/integration/test_loopback.cpp)
+    target_link_libraries(test_loopback PRIVATE p2p GTest::gtest GTest::gtest_main)
+    add_test(NAME IntegrationLoopback COMMAND test_loopback)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -161,6 +164,10 @@ if(P2P_BUILD_BENCHMARK)
     add_executable(bench_throughput tests/benchmark/bench_throughput.cpp)
     target_link_libraries(bench_throughput PRIVATE p2p GBenchmark::benchmark)
 endif()
+
+# Single-process benchmark (no GBenchmark dependency)
+add_executable(bench_single_process tests/benchmark/bench_single_process.cpp)
+target_link_libraries(bench_single_process PRIVATE p2p)
 
 # ---------------------------------------------------------------------------
 # Python bindings

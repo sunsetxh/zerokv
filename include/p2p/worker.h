@@ -38,6 +38,7 @@ using AcceptCallback = std::function<void(std::shared_ptr<Endpoint> ep)>;
 class Listener {
 public:
     using Ptr = std::shared_ptr<Listener>;
+    using WeakPtr = std::weak_ptr<Listener>;
 
     ~Listener();
     Listener(const Listener&) = delete;
@@ -45,6 +46,12 @@ public:
 
     /// The address this listener is bound to (e.g. "0.0.0.0:13337").
     [[nodiscard]] std::string address() const;
+
+    /// Add a pending connection request (called by connection handler).
+    void add_connection_request(ucp_conn_request_h req);
+
+    /// Accept one pending connection (call in event loop).
+    bool accept();
 
     /// Stop accepting new connections.
     void close();
