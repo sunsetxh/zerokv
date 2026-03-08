@@ -66,15 +66,44 @@ Future<void> Endpoint::tag_send(const void* buffer, size_t length, Tag tag) {
             Status(ErrorCode::kTransportError, std::string("Send failed: ") + ucs_status_string(err)));
     }
 
-    // Async - for now return ready (would need request tracking)
-    return Future<void>::make_ready();
+    // Valid request pointer - operation is pending
+    auto req = Request::create(status, static_cast<ucp_worker_h>(impl_->worker_->native_handle()));
+    return Future<void>::make_request(req);
 }
 
-Future<void> Endpoint::tag_send(const MemoryRegion::Ptr& /*region*/, size_t /*offset*/,
-                                size_t /*length*/, Tag /*tag*/) {
-    // TODO: Implement with pre-registered memory region
-    return Future<void>::make_error(
-        Status(ErrorCode::kNotImplemented, "tag_send from region not implemented"));
+Future<void> Endpoint::tag_send(const MemoryRegion::Ptr& region, size_t offset,
+                                size_t length, Tag tag) {
+    if (!impl_ || !impl_->handle_ || !region) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Invalid parameters"));
+    }
+    if (offset + length > region->length()) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Offset + length exceeds region size"));
+    }
+
+    ucp_request_param_t params = {};
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+
+    ucs_status_ptr_t status = ucp_tag_send_nbx(
+        impl_->handle_,
+        static_cast<char*>(region->address()) + offset,
+        length,
+        tag,
+        &params);
+
+    if (status == nullptr) {
+        return Future<void>::make_ready();
+    }
+
+    if (UCS_PTR_IS_ERR(status)) {
+        ucs_status_t err = UCS_PTR_STATUS(status);
+        return Future<void>::make_error(
+            Status(ErrorCode::kTransportError, std::string("Send from region failed: ") + ucs_status_string(err)));
+    }
+
+    auto req = Request::create(status, static_cast<ucp_worker_h>(impl_->worker_->native_handle()));
+    return Future<void>::make_request(req);
 }
 
 Future<std::pair<size_t, Tag>> Endpoint::tag_recv(void* buffer, size_t length,
@@ -107,23 +136,116 @@ Future<std::pair<size_t, Tag>> Endpoint::tag_recv(void* buffer, size_t length,
             Status(ErrorCode::kTransportError, std::string("Recv failed: ") + ucs_status_string(err)));
     }
 
-    // Async - for now return ready (would need request tracking)
-    return Future<std::pair<size_t, Tag>>::make_ready({0, 0});
+    // Valid request pointer - operation is pending
+    auto req = Request::create(status, static_cast<ucp_worker_h>(impl_->worker_->native_handle()));
+    return Future<std::pair<size_t, Tag>>::make_request(req);
 }
 
 // RDMA
-Future<void> Endpoint::put(const MemoryRegion::Ptr& /*local*/, size_t /*local_offset*/,
-                         uint64_t /*remote_addr*/, const RemoteKey& /*rkey*/,
-                         size_t /*length*/) {
-    return Future<void>::make_error(
-        Status(ErrorCode::kNotImplemented, "RDMA put requires connected endpoint"));
+Future<void> Endpoint::put(const MemoryRegion::Ptr& local, size_t local_offset,
+                         uint64_t remote_addr, const RemoteKey& rkey,
+                         size_t length) {
+    if (!impl_ || !impl_->handle_) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Endpoint not connected"));
+    }
+    if (!local || local_offset + length > local->length()) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Invalid local region or offset"));
+    }
+    if (rkey.empty()) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Empty remote key"));
+    }
+
+    // Unpack remote key
+    ucp_rkey_h ucx_rkey = nullptr;
+    ucs_status_t status = ucp_ep_rkey_unpack(impl_->handle_, rkey.bytes(), &ucx_rkey);
+    if (status != UCS_OK) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument,
+                   std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
+    }
+
+    ucp_request_param_t params = {};
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+
+    ucs_status_ptr_t req = ucp_put_nbx(
+        impl_->handle_,
+        static_cast<char*>(local->address()) + local_offset,
+        length,
+        remote_addr,
+        ucx_rkey,
+        &params);
+
+    // Destroy rkey after operation is initiated
+    ucp_rkey_destroy(ucx_rkey);
+
+    if (req == nullptr) {
+        return Future<void>::make_ready();
+    }
+
+    if (UCS_PTR_IS_ERR(req)) {
+        ucs_status_t err = UCS_PTR_STATUS(req);
+        return Future<void>::make_error(
+            Status(ErrorCode::kTransportError, std::string("RDMA put failed: ") + ucs_status_string(err)));
+    }
+
+    auto request = Request::create(req, static_cast<ucp_worker_h>(impl_->worker_->native_handle()));
+    return Future<void>::make_request(request);
 }
 
-Future<void> Endpoint::get(const MemoryRegion::Ptr& /*local*/, size_t /*local_offset*/,
-                          uint64_t /*remote_addr*/, const RemoteKey& /*rkey*/,
-                          size_t /*length*/) {
-    return Future<void>::make_error(
-        Status(ErrorCode::kNotImplemented, "RDMA get requires connected endpoint"));
+Future<void> Endpoint::get(const MemoryRegion::Ptr& local, size_t local_offset,
+                          uint64_t remote_addr, const RemoteKey& rkey,
+                          size_t length) {
+    if (!impl_ || !impl_->handle_) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Endpoint not connected"));
+    }
+    if (!local || local_offset + length > local->length()) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Invalid local region or offset"));
+    }
+    if (rkey.empty()) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Empty remote key"));
+    }
+
+    // Unpack remote key
+    ucp_rkey_h ucx_rkey = nullptr;
+    ucs_status_t status = ucp_ep_rkey_unpack(impl_->handle_, rkey.bytes(), &ucx_rkey);
+    if (status != UCS_OK) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument,
+                   std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
+    }
+
+    ucp_request_param_t params = {};
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+
+    ucs_status_ptr_t req = ucp_get_nbx(
+        impl_->handle_,
+        static_cast<char*>(local->address()) + local_offset,
+        length,
+        remote_addr,
+        ucx_rkey,
+        &params);
+
+    // Destroy rkey after operation is initiated
+    ucp_rkey_destroy(ucx_rkey);
+
+    if (req == nullptr) {
+        return Future<void>::make_ready();
+    }
+
+    if (UCS_PTR_IS_ERR(req)) {
+        ucs_status_t err = UCS_PTR_STATUS(req);
+        return Future<void>::make_error(
+            Status(ErrorCode::kTransportError, std::string("RDMA get failed: ") + ucs_status_string(err)));
+    }
+
+    auto request = Request::create(req, static_cast<ucp_worker_h>(impl_->worker_->native_handle()));
+    return Future<void>::make_request(request);
 }
 
 // Simplified put: entire local region

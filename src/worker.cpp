@@ -169,7 +169,9 @@ Future<std::pair<size_t, Tag>> Worker::tag_recv(void* buffer, size_t length,
             Status(ErrorCode::kTransportError, std::string("Worker recv failed: ") + ucs_status_string(err)));
     }
 
-    return Future<std::pair<size_t, Tag>>::make_ready({0, 0});
+    // Valid request pointer - operation is pending
+    auto req = Request::create(status, impl_->handle_);
+    return Future<std::pair<size_t, Tag>>::make_request(req);
 }
 
 Future<std::pair<size_t, Tag>> Worker::tag_recv(const MemoryRegion::Ptr& /*region*/,
@@ -179,11 +181,31 @@ Future<std::pair<size_t, Tag>> Worker::tag_recv(const MemoryRegion::Ptr& /*regio
         Status(ErrorCode::kNotImplemented, "tag_recv from region not implemented"));
 }
 
-Future<std::shared_ptr<Endpoint>> Worker::connect(const std::vector<uint8_t>& /*remote_address*/) {
-    // In UCX 1.20.0, endpoint creation with remote address requires
-    // a different API. Return not implemented for now.
-    return Future<std::shared_ptr<Endpoint>>::make_error(
-        Status(ErrorCode::kNotImplemented, "connect with address blob not implemented in UCX 1.20.0"));
+Future<std::shared_ptr<Endpoint>> Worker::connect(const std::vector<uint8_t>& remote_address) {
+    if (!impl_ || !impl_->handle_) {
+        return Future<std::shared_ptr<Endpoint>>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Worker not initialized"));
+    }
+    if (remote_address.empty()) {
+        return Future<std::shared_ptr<Endpoint>>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Remote address is empty"));
+    }
+
+    ucp_ep_params_t ep_params = {};
+    ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
+    ep_params.address = reinterpret_cast<const ucp_address_t*>(remote_address.data());
+
+    ucp_ep_h ep_handle = nullptr;
+    ucs_status_t status = ucp_ep_create(impl_->handle_, &ep_params, &ep_handle);
+
+    if (status != UCS_OK) {
+        return Future<std::shared_ptr<Endpoint>>::make_error(
+            Status(ErrorCode::kTransportError,
+                   std::string("Failed to create endpoint: ") + ucs_status_string(status)));
+    }
+
+    auto ep = Endpoint::create(shared_from_this(), ep_handle);
+    return Future<std::shared_ptr<Endpoint>>::make_ready(ep);
 }
 
 Future<std::shared_ptr<Endpoint>> Worker::connect(const std::string& address) {
