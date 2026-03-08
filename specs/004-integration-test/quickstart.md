@@ -14,11 +14,23 @@ make -j$(nproc)
 ### Run Python Integration Tests
 
 ```bash
-# Run all integration tests
+# Run all unit tests (no server required)
+pytest python/tests/test_zerokv.py -v -m "not integration"
+
+# Run all tests including integration tests (requires server)
 pytest python/tests/test_zerokv.py -v
 
-# Run specific test
+# Run only integration tests
+pytest python/tests/test_zerokv.py -v -m integration
+
+# Run specific test class
 pytest python/tests/test_zerokv.py::TestClientBasic -v
+
+# Run integration tests with server lifecycle management
+pytest python/tests/test_zerokv.py::TestServerIntegration -v
+
+# Run performance benchmarks
+pytest python/tests/test_zerokv.py -v -m benchmark
 ```
 
 ### Run C++ Integration Tests
@@ -30,6 +42,9 @@ ctest --output-on-failure
 
 # Run specific test
 ./tests/test_storage
+
+# Run integration tests (if built)
+./tests/test_cluster
 ```
 
 ### Run Performance Benchmarks
@@ -52,6 +67,46 @@ print(f'1000 puts: {(end-start)*1000:.2f}ms')
 "
 ```
 
+## Test Fixtures
+
+### Python Test Fixtures
+
+The integration test framework provides fixtures in `tests/integration/fixtures.py`:
+
+```python
+from tests.integration.fixtures import TestServer, TestClient
+
+# Using TestServer as context manager
+with TestServer(port=5000) as server:
+    # Server is running
+    client = TestClient(servers=[f"127.0.0.1:{server.port}"])
+    client.connect()
+    client.put("key", "value")
+    value = client.get("key")
+    assert value == "value"
+    # Server automatically stopped on exit
+```
+
+### C++ Test Fixtures
+
+The C++ test fixtures are in `tests/integration/test_server_fixture.h`:
+
+```cpp
+#include "test_server_fixture.h"
+
+// Using GoogleTest fixture
+class MyIntegrationTest : public ConnectedClientTest {};
+
+// Tests automatically get a running server and connected client
+TEST_F(MyIntegrationTest, PutGet) {
+    Status status = client_->Put("key", "value");
+    EXPECT_EQ(status, Status::OK);
+
+    std::string value = client_->Get("key");
+    EXPECT_EQ(value, "value");
+}
+```
+
 ## Adding New Integration Tests
 
 ### Python
@@ -61,15 +116,19 @@ print(f'1000 puts: {(end-start)*1000:.2f}ms')
 import pytest
 import zerokv
 
-def test_basic_operations():
-    """Test basic put/get operations"""
-    client = zerokv.Client()
-    client.connect(['localhost:5000'])
+@pytest.mark.integration
+class TestMyFeature:
+    """Test my feature"""
 
-    client.put('test_key', 'test_value')
-    value = client.get('test_key')
+    def test_basic_operations(self):
+        """Test basic put/get operations"""
+        client = zerokv.Client()
+        client.connect(['localhost:5000'])
 
-    assert value == 'test_value'
+        client.put('test_key', 'test_value')
+        value = client.get('test_key')
+
+        assert value == 'test_value'
 ```
 
 ### C++
@@ -78,12 +137,13 @@ def test_basic_operations():
 // tests/integration/test_cluster.cc
 #include <gtest/gtest.h>
 #include "zerokv/client.h"
+#include "test_server_fixture.h"
 
 TEST(IntegrationTest, BasicOperations) {
-    zerokv::Client client;
-    client.connect({"localhost:5000"});
+    test::TestClient client({"localhost:5000"});
+    client.Connect();
 
-    Status status = client.put("test_key", "test_value", 10);
+    Status status = client.Put("test_key", "test_value");
     ASSERT_EQ(status, Status::OK);
 }
 ```
@@ -134,3 +194,9 @@ jobs:
 - Increase timeout in conftest.py
 - Check system resources
 - Verify network latency
+
+### UCX errors
+
+- Verify UCX is installed: `ucx_info -c`
+- Check network interfaces are available
+- Try running server with `-vv` for verbose output

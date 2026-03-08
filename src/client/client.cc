@@ -17,6 +17,7 @@ Status Client::connect(const std::vector<std::string>& servers) {
     }
 
     servers_ = servers;
+    std::cout << "[DEBUG] Creating transport..." << std::endl;
     transport_ = create_transport(memory_type_);
 
     if (!transport_) {
@@ -24,6 +25,7 @@ Status Client::connect(const std::vector<std::string>& servers) {
         return Status::ERROR;
     }
 
+    std::cout << "[DEBUG] Initializing transport..." << std::endl;
     Status status = transport_->initialize();
     if (status != Status::OK) {
         std::cerr << "Failed to initialize transport" << std::endl;
@@ -32,6 +34,7 @@ Status Client::connect(const std::vector<std::string>& servers) {
 
     // Connect to first server (simplified)
     if (!servers.empty()) {
+        std::cout << "[DEBUG] Connecting to " << servers[0] << "..." << std::endl;
         status = transport_->connect(servers[0]);
         if (status != Status::OK) {
             std::cerr << "Failed to connect to " << servers[0] << std::endl;

@@ -1,4 +1,3 @@
-#include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/buffer_info.h>
 #include "zerokv/client.h"
@@ -8,22 +7,10 @@ namespace py = pybind11;
 
 namespace zerokv {
 
-// Python wrapper for Client with context manager support
+// Python wrapper for Client
 class PyClient {
 public:
     PyClient() : client_(std::make_unique<Client>()) {}
-
-    // Context manager support
-    void enter() {
-        // Auto-connect if servers are configured
-    }
-
-    void exit(py::object exc_type, py::object exc_val, py::object exc_tb) {
-        (void)exc_type;
-        (void)exc_val;
-        (void)exc_tb;
-        disconnect();
-    }
 
     void connect(const std::vector<std::string>& servers) {
         Status status = client_->connect(servers);
@@ -57,33 +44,10 @@ public:
 
     void remove(const std::string& key) {
         Status status = client_->remove(key);
-        // NOT_FOUND is OK - key doesn't exist
         if (status != Status::OK && status != Status::NOT_FOUND) {
             throw std::runtime_error("Failed to remove key");
         }
     }
-
-    // Batch operations
-    void batch_put(const std::vector<std::pair<std::string, std::string>>& items) {
-        for (const auto& item : items) {
-            put(item.first, item.second);
-        }
-    }
-
-    std::vector<std::string> batch_get(const std::vector<std::string>& keys) {
-        std::vector<std::string> results;
-        for (const auto& key : keys) {
-            try {
-                results.push_back(get(key));
-            } catch (const py::key_error&) {
-                results.push_back("");  // Return empty for not found
-            }
-        }
-        return results;
-    }
-
-    // Get client for direct access
-    Client* client() { return client_.get(); }
 
     void set_memory_type(const std::string& type) {
         if (type == "cpu") {
@@ -106,21 +70,8 @@ private:
 PYBIND11_MODULE(_zerokv, m) {
     m.doc() = "ZeroKV - High-performance distributed KV store";
 
-    // Register exception translations
-    py::register_exception_translator([](std::exception_ptr p) {
-        try {
-            if (p) std::rethrow_exception(p);
-        } catch (const py::key_error& e) {
-            PyErr_SetString(PyExc_KeyError, e.what());
-        }
-    });
-
-    // Main Client class
-    // Use "Client" as primary name, also expose as "ZeroKV" for backwards compatibility
-    py::class_<zerokv::PyClient>(m, "Client")
+    py::class_<zerokv::PyClient>(m, "ZeroKV")
         .def(py::init<>())
-        .def("__enter__", &zerokv::PyClient::enter)
-        .def("__exit__", &zerokv::PyClient::exit)
         .def("connect", &zerokv::PyClient::connect,
              "Connect to ZeroKV cluster",
              py::arg("servers"))
@@ -135,12 +86,6 @@ PYBIND11_MODULE(_zerokv, m) {
         .def("remove", &zerokv::PyClient::remove,
              "Remove key",
              py::arg("key"))
-        .def("batch_put", &zerokv::PyClient::batch_put,
-             "Batch put key-value pairs",
-             py::arg("items"))
-        .def("batch_get", &zerokv::PyClient::batch_get,
-             "Batch get values by keys",
-             py::arg("keys"))
         .def("set_memory_type", &zerokv::PyClient::set_memory_type,
              "Set memory type for transport",
              py::arg("type"));
@@ -149,10 +94,4 @@ PYBIND11_MODULE(_zerokv, m) {
     m.attr("MEMORY_CPU") = "cpu";
     m.attr("MEMORY_HUAWEI_NPU") = "huawei_npu";
     m.attr("MEMORY_NVIDIA_GPU") = "nvidia_gpu";
-
-    // Version info
-    m.attr("__version__") = "0.1.0";
-
-    // Add backwards compatible alias
-    m.attr("ZeroKV") = m.attr("Client");
 }

@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  zerokv-node-1:
+    image: zerokv:latest
+    container_name: zerokv-node-1
+    ports:
+      - "5001:5000"
+    environment:
+      - NODE_ID=1
+      - SEEDS=zerokv-node-2:5000
+    networks:
+      - zerokv-net
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+
+  zerokv-node-2:
+    image: zerokv:latest
+    container_name: zerokv-node-2
+    ports:
+      - "5002:5000"
+    environment:
+      - NODE_ID=2
+      - SEEDS=zerokv-node-1:5000
+    networks:
+      - zerokv-net
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  zerokv-node-3:
+    image: zerokv:latest
+    container_name: zerokv-node-3
+    ports:
+      - "5003:5000"
+    environment:
+      - NODE_ID=3
+      - SEEDS=zerokv-node-1:5000
+    networks:
+      - zerokv-net
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  redis:
+    image: redis:7-alpine
+    container_name: zerokv-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - zerokv-net
+
+networks:
+  zerokv-net:
+    driver: bridge

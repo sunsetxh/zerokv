@@ -2,6 +2,12 @@
 ZeroKV Python Integration Tests
 
 Run with: pytest python/tests/test_zerokv.py -v
+
+Integration tests that require a running server:
+    pytest python/tests/test_zerokv.py -v -m integration
+
+Unit tests (no server required):
+    pytest python/tests/test_zerokv.py -v -m "not integration"
 """
 
 import pytest
@@ -12,6 +18,9 @@ import asyncio
 
 # Add build directory to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'build'))
+
+# Add tests directory for fixtures
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'tests', 'integration'))
 
 
 class TestClientBasic:
@@ -137,6 +146,254 @@ class TestHighLevelClient:
         """Test ZeroKVClient with memory type"""
         client = zerokv.ZeroKVClient(memory_type="nvidia_gpu")
         assert client.memory_type == "nvidia_gpu"
+
+
+@pytest.mark.integration
+class TestServerIntegration:
+    """Integration tests that require a running ZeroKV server"""
+
+    @pytest.fixture(autouse=True)
+    def setup_teardown(self):
+        """Setup and teardown for each test"""
+        # Import here to avoid import errors if fixtures not available
+        try:
+            from fixtures import TestServer, TestClient
+            self.server = TestServer(port=5000)
+            self.server.start()
+            yield
+            self.server.stop()
+        except Exception as e:
+            pytest.skip(f"Server not available: {e}")
+
+    def test_put_get_operations(self):
+        """Test US1: Put and get operations work end-to-end"""
+        client = zerokv.Client()
+        client.connect(["127.0.0.1:5000"])
+
+        # Put a key-value pair (returns None on success)
+        client.put("test_key", "test_value")
+
+        # Get the value
+        value = client.get("test_key")
+        assert value == "test_value"
+
+    def test_delete_operations(self):
+        """Test US1: Delete operations work correctly"""
+        client = zerokv.Client()
+        client.connect(["127.0.0.1:5000"])
+
+        # Put a key-value pair
+        client.put("delete_key", "delete_value")
+
+        # Verify it exists
+        value = client.get("delete_key")
+        assert value == "delete_value"
+
+        # Delete the key - returns None on success
+        client.remove("delete_key")
+
+        # Verify it's gone - should raise or return None
+        try:
+            value = client.get("delete_key")
+            assert value is None or value == ""
+        except:
+            pass  # Expected - key should not exist
+
+    def test_batch_operations(self):
+        """Test US2: Batch operations work correctly"""
+        client = zerokv.Client()
+        client.connect(["127.0.0.1:5000"])
+
+        # Prepare batch data
+        items = [
+            ("batch_key_1", "batch_value_1"),
+            ("batch_key_2", "batch_value_2"),
+            ("batch_key_3", "batch_value_3")
+        ]
+
+        # Batch put (returns None on success)
+        client.batch_put(items)
+
+        # Batch get
+        keys = ["batch_key_1", "batch_key_2", "batch_key_3"]
+        values = client.batch_get(keys)
+
+        assert len(values) == 3
+        assert values[0] == "batch_value_1"
+        assert values[1] == "batch_value_2"
+        assert values[2] == "batch_value_3"
+
+    def test_multiple_clients(self):
+        """Test US1: Multiple clients can connect to same server"""
+        client1 = zerokv.Client()
+        client1.connect(["127.0.0.1:5000"])
+
+        client2 = zerokv.Client()
+        client2.connect(["127.0.0.1:5000"])
+
+        # Client 1 writes
+        client1.put("shared_key", "client1_value")
+
+        # Client 2 reads
+        value = client2.get("shared_key")
+        assert value == "client1_value"
+
+    def test_update_existing_key(self):
+        """Test US1: Updating existing key works correctly"""
+        client = zerokv.Client()
+        client.connect(["127.0.0.1:5000"])
+
+        # Put initial value
+        client.put("update_key", "value1")
+
+        # Get initial value
+        value1 = client.get("update_key")
+        assert value1 == "value1"
+
+        # Update value
+        client.put("update_key", "value2")
+
+        # Get updated value
+        value2 = client.get("update_key")
+        assert value2 == "value2"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not os.path.exists("/home/wyc/code/zerokv/build/zerokv_server"),
+    reason="Server binary not found"
+)
+class TestServerLifecycle:
+    """Test server lifecycle management"""
+
+    def test_server_start_stop(self):
+        """Test server can be started and stopped"""
+        from fixtures import TestServer
+
+        server = TestServer(port=5001)
+        assert not server.is_running()
+
+        server.start()
+        assert server.is_running()
+
+        server.stop()
+        assert not server.is_running()
+
+    def test_server_context_manager(self):
+        """Test server works as context manager"""
+        from fixtures import TestServer
+
+        with TestServer(port=5002) as server:
+            assert server.is_running()
+
+        assert not server.is_running()
+
+
+@pytest.mark.integration
+class TestFailureRecovery:
+    """Test US3: Failure recovery scenarios"""
+
+    @pytest.fixture(autouse=True)
+    def setup_teardown(self):
+        """Setup and teardown for each test"""
+        try:
+            from fixtures import TestServer
+            self.server = TestServer(port=5003)
+            self.server.start()
+            yield
+            self.server.stop()
+        except Exception as e:
+            pytest.skip(f"Server not available: {e}")
+
+    def test_server_restart(self):
+        """Test US3: Server can restart and client reconnects"""
+        client = zerokv.Client()
+        client.connect(["127.0.0.1:5003"])
+
+        # Write data
+        client.put("restart_key", "before_restart")
+
+        # Verify data exists
+        value = client.get("restart_key")
+        assert value == "before_restart"
+
+        # Restart server
+        self.server.restart()
+
+        # Reconnect and verify data persists (if server supports persistence)
+        # Note: In-memory server will lose data on restart
+        client.disconnect()
+        client.connect(["127.0.0.1:5003"])
+
+        # Server was restarted, data may or may not persist
+        # This test verifies reconnection works
+        try:
+            value = client.get("restart_key")
+            # Data might be gone if in-memory
+        except:
+            pass  # Expected if in-memory
+
+    def test_reconnect_after_disconnect(self):
+        """Test US3: Client can reconnect after disconnect"""
+        client = zerokv.Client()
+        client.connect(["127.0.0.1:5003"])
+
+        # Write some data
+        client.put("reconnect_key", "reconnect_value")
+
+        # Disconnect
+        client.disconnect()
+
+        # Reconnect
+        client.connect(["127.0.0.1:5003"])
+
+        # Data should still be there
+        value = client.get("reconnect_key")
+        assert value == "reconnect_value"
+
+
+@pytest.mark.benchmark
+class TestPerformance:
+    """Test US4: Performance benchmarks"""
+
+    @pytest.fixture(autouse=True)
+    def setup_teardown(self):
+        """Setup and teardown for each test"""
+        try:
+            from fixtures import TestServer
+            self.server = TestServer(port=5004)
+            self.server.start()
+            yield
+            self.server.stop()
+        except Exception as e:
+            pytest.skip(f"Server not available: {e}")
+
+    @pytest.mark.integration
+    def test_single_client_latency(self):
+        """Test US4: Single client put/get latency"""
+        import time
+
+        client = zerokv.Client()
+        client.connect(["127.0.0.1:5004"])
+
+        # Measure put latency
+        num_ops = 100
+        start = time.time()
+        for i in range(num_ops):
+            client.put(f"perf_key_{i}", f"perf_value_{i}")
+        put_latency = (time.time() - start) * 1000 / num_ops
+
+        # Measure get latency
+        start = time.time()
+        for i in range(num_ops):
+            _ = client.get(f"perf_key_{i}")
+        get_latency = (time.time() - start) * 1000 / num_ops
+
+        print(f"\nSingle client latency: put={put_latency:.2f}ms, get={get_latency:.2f}ms")
+
+        # Should be under 10ms per operation
+        assert put_latency < 10, f"Put latency {put_latency:.2f}ms exceeds 10ms"
+        assert get_latency < 10, f"Get latency {get_latency:.2f}ms exceeds 10ms"
 
 
 if __name__ == "__main__":

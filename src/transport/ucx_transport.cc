@@ -4,11 +4,55 @@
 #include <thread>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
 #include <cstring>
 #include <sstream>
 #include <unistd.h>
 
 namespace zerokv {
+
+// Constants for validation
+constexpr size_t MAX_KEY_SIZE = 1024;      // 1KB max key size
+constexpr size_t MAX_VALUE_SIZE = 1024 * 1024;  // 1MB max value size
+constexpr int RECV_TIMEOUT_SEC = 5;        // 5 second timeout
+
+// Helper: send message with 4-byte length prefix
+static bool send_with_length(int fd, const std::vector<uint8_t>& data) {
+    uint32_t len = htonl(static_cast<uint32_t>(data.size()));
+    if (send(fd, &len, sizeof(len), 0) != sizeof(len)) {
+        return false;
+    }
+    if (send(fd, data.data(), data.size(), 0) != (ssize_t)data.size()) {
+        return false;
+    }
+    return true;
+}
+
+// Helper: recv message with 4-byte length prefix
+static bool recv_with_length(int fd, std::vector<uint8_t>& data) {
+    uint32_t len;
+    ssize_t n = recv(fd, &len, sizeof(len), 0);
+    if (n != sizeof(len)) {
+        return false;
+    }
+    len = ntohl(len);
+
+    // Validate length
+    if (len > MAX_VALUE_SIZE + 4096) {  // max message size
+        return false;
+    }
+
+    data.resize(len);
+    size_t received = 0;
+    while (received < len) {
+        n = recv(fd, data.data() + received, len - received, 0);
+        if (n <= 0) {
+            return false;
+        }
+        received += n;
+    }
+    return true;
+}
 
 // Global progress thread
 static std::atomic<UCXTransport*> g_transport{nullptr};
@@ -145,17 +189,20 @@ void UCXTransport::accept_loop() {
 }
 
 void UCXTransport::handle_client(int client_fd) {
+    // Set receive timeout
+    struct timeval tv;
+    tv.tv_sec = RECV_TIMEOUT_SEC;
+    tv.tv_usec = 0;
+    setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
     // Handle multiple requests on the same connection
     while (true) {
-        // Receive request
-        std::vector<uint8_t> request(4096);
-        ssize_t n = recv(client_fd, request.data(), request.size(), 0);
-
-        if (n <= 0) {
-            // Connection closed or error
+        // Receive request with length prefix
+        std::vector<uint8_t> request;
+        if (!recv_with_length(client_fd, request)) {
+            // Connection closed, error, or timeout
             break;
         }
-        request.resize(n);
 
         // Process request using protocol
         RequestHeader req_header;
@@ -165,7 +212,21 @@ void UCXTransport::handle_client(int client_fd) {
         if (!ProtocolCodec::decode_request(request, req_header, key, value)) {
             // Send error response
             auto response = ProtocolCodec::encode_response(Status::ERROR, req_header.request_id);
-            send(client_fd, response.data(), response.size(), 0);
+            send_with_length(client_fd, response);
+            break;
+        }
+
+        // Validate key length
+        if (key.size() > MAX_KEY_SIZE) {
+            auto response = ProtocolCodec::encode_response(Status::ERROR, req_header.request_id);
+            send_with_length(client_fd, response);
+            break;
+        }
+
+        // Validate value length
+        if (req_header.value_len > MAX_VALUE_SIZE) {
+            auto response = ProtocolCodec::encode_response(Status::OUT_OF_MEMORY, req_header.request_id);
+            send_with_length(client_fd, response);
             break;
         }
 
@@ -211,9 +272,8 @@ void UCXTransport::handle_client(int client_fd) {
                 break;
         }
 
-        // Send response
-        ssize_t sent = send(client_fd, response.data(), response.size(), 0);
-        if (sent != (ssize_t)response.size()) {
+        // Send response with length prefix
+        if (!send_with_length(client_fd, response)) {
             break;
         }
     }
@@ -263,23 +323,25 @@ Status UCXTransport::put(const std::string& key, const void* value, size_t size)
         return Status::ERROR;
     }
 
+    // Validate input
+    if (key.size() > MAX_KEY_SIZE || size > MAX_VALUE_SIZE) {
+        return Status::ERROR;
+    }
+
     // Encode request
     auto request = ProtocolCodec::encode_request(
         OpCode::PUT, key, value, size, 0);
 
-    // Send request
-    ssize_t sent = send(client_fd_, request.data(), request.size(), 0);
-    if (sent != (ssize_t)request.size()) {
+    // Send request with length prefix
+    if (!send_with_length(client_fd_, request)) {
         return Status::ERROR;
     }
 
-    // Receive response
-    std::vector<uint8_t> response(256);
-    ssize_t n = recv(client_fd_, response.data(), response.size(), 0);
-    if (n <= 0) {
+    // Receive response with length prefix
+    std::vector<uint8_t> response;
+    if (!recv_with_length(client_fd_, response)) {
         return Status::ERROR;
     }
-    response.resize(n);
 
     // Decode response
     ResponseHeader resp_header;
@@ -302,23 +364,25 @@ Status UCXTransport::get(const std::string& key, void* buffer, size_t* size) {
         return Status::ERROR;
     }
 
+    // Validate input
+    if (key.size() > MAX_KEY_SIZE) {
+        return Status::ERROR;
+    }
+
     // Encode request (value_len = 0 for GET)
     auto request = ProtocolCodec::encode_request(
         OpCode::GET, key, nullptr, 0, 0);
 
-    // Send request
-    ssize_t sent = send(client_fd_, request.data(), request.size(), 0);
-    if (sent != (ssize_t)request.size()) {
+    // Send request with length prefix
+    if (!send_with_length(client_fd_, request)) {
         return Status::ERROR;
     }
 
-    // Receive response
-    std::vector<uint8_t> response(4096);
-    ssize_t n = recv(client_fd_, response.data(), response.size(), 0);
-    if (n <= 0) {
+    // Receive response with length prefix
+    std::vector<uint8_t> response;
+    if (!recv_with_length(client_fd_, response)) {
         return Status::ERROR;
     }
-    response.resize(n);
 
     // Decode response
     ResponseHeader resp_header;
@@ -362,7 +426,41 @@ Status UCXTransport::delete_key(const std::string& key) {
     if (!initialized_) {
         return Status::ERROR;
     }
-    return Status::OK;
+
+    if (client_fd_ < 0) {
+        return Status::ERROR;
+    }
+
+    // Validate input
+    if (key.size() > MAX_KEY_SIZE) {
+        return Status::ERROR;
+    }
+
+    // Encode request
+    auto request = ProtocolCodec::encode_request(
+        OpCode::DELETE, key, nullptr, 0, 0);
+
+    // Send request with length prefix
+    if (!send_with_length(client_fd_, request)) {
+        return Status::ERROR;
+    }
+
+    // Receive response with length prefix
+    std::vector<uint8_t> response;
+    if (!recv_with_length(client_fd_, response)) {
+        return Status::ERROR;
+    }
+
+    // Decode response
+    ResponseHeader resp_header;
+    void* resp_value = nullptr;
+    size_t value_len = 0;
+
+    if (!ProtocolCodec::decode_response(response, resp_header, resp_value, value_len)) {
+        return Status::ERROR;
+    }
+
+    return static_cast<Status>(resp_header.status);
 }
 
 void UCXTransport::shutdown() {
