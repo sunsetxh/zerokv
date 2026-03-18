@@ -2,21 +2,21 @@
 
 ## Version: 1.0.0-MVP
 
-This document defines the stable public API contracts for the P2P Transport Library. All APIs follow semantic versioning.
+This document defines the stable public API contracts for the AXON Transport Library. All APIs follow semantic versioning.
 
 ---
 
 ## Core Headers
 
 ```cpp
-#include <p2p/p2p.h>        // Umbrella header
+#include <axon/axon.h>        // Umbrella header
 // Or individual headers:
-#include <p2p/common.h>     // ErrorCode, Status, Tag, MemoryType
-#include <p2p/config.h>     // Config, Context
-#include <p2p/worker.h>     // Worker, Listener
-#include <p2p/endpoint.h>   // Endpoint
-#include <p2p/memory.h>     // MemoryRegion
-#include <p2p/future.h>     // Future<T>, Request
+#include <axon/common.h>     // ErrorCode, Status, Tag, MemoryType
+#include <axon/config.h>     // Config, Context
+#include <axon/worker.h>     // Worker, Listener
+#include <axon/endpoint.h>   // Endpoint
+#include <axon/memory.h>     // MemoryRegion
+#include <axon/future.h>     // Future<T>, Request
 ```
 
 ---
@@ -116,7 +116,7 @@ public:
 **Contract**:
 - Builder methods return `Builder&` for chaining
 - `build()` transfers ownership to immutable `Config`
-- `from_env()` reads `P2P_*` prefixed env vars
+- `from_env()` reads `AXON_*` prefixed env vars
 
 ### Context
 

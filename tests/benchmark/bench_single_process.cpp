@@ -1,17 +1,17 @@
 /// @file bench_single_process.cpp
 /// @brief Single-process performance benchmark (no network required)
 
-#include <p2p/config.h>
-#include <p2p/worker.h>
-#include <p2p/endpoint.h>
-#include <p2p/memory.h>
+#include <axon/config.h>
+#include <axon/worker.h>
+#include <axon/endpoint.h>
+#include <axon/memory.h>
 
 #include <chrono>
 #include <iostream>
 #include <vector>
 #include <cstring>
 
-using namespace p2p;
+using namespace axon;
 
 // Benchmark worker creation
 void benchmark_worker_creation() {
@@ -108,7 +108,7 @@ void benchmark_progress() {
 }
 
 int main() {
-    std::cout << "=== P2P Single-Process Performance Benchmark ===" << std::endl;
+    std::cout << "=== AXON Single-Process Performance Benchmark ===" << std::endl;
     std::cout << std::endl;
 
     std::cout << "--- Worker Creation ---" << std::endl;

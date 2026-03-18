@@ -6,11 +6,11 @@
 ///   Client: ./ping_pong --connect localhost:13337
 ///
 /// UCX can use TCP or shared memory (shmem) transport.
-/// Set P2P_TRANSPORTS=tcp,shmem or P2P_TRANSPORTS=shmem for different transports.
+/// Set AXON_TRANSPORTS=tcp,shmem or AXON_TRANSPORTS=shmem for different transports.
 
-#include <p2p/config.h>
-#include <p2p/worker.h>
-#include <p2p/endpoint.h>
+#include <axon/config.h>
+#include <axon/worker.h>
+#include <axon/endpoint.h>
 
 #include <iostream>
 #include <vector>
@@ -18,7 +18,7 @@
 #include <chrono>
 #include <thread>
 
-using namespace p2p;
+using namespace axon;
 
 constexpr size_t kMessageSize = 4096;
 constexpr int kNumIterations = 1000;
@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::cout << "Using transport: TCP (set P2P_TRANSPORTS=shmem for shared memory)\n";
+    std::cout << "Using transport: TCP (set AXON_TRANSPORTS=shmem for shared memory)\n";
 
     if (mode == "server") {
         // Server mode: listen for connections
@@ -91,7 +91,7 @@ int main(int argc, char** argv) {
         // This example requires manual address exchange
         std::cerr << "Error: TCP connect requires bootstrap mechanism.\n";
         std::cerr << "Use shared memory (shmem) for single-machine testing:\n";
-        std::cerr << "  Set P2P_TRANSPORTS=shmem and use --listen / --connect with localhost\n";
+        std::cerr << "  Set AXON_TRANSPORTS=shmem and use --listen / --connect with localhost\n";
         return 1;
     }
 

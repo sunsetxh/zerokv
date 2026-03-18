@@ -7,7 +7,7 @@
 #include <memory>
 #include <functional>
 
-namespace p2p {
+namespace axon {
 namespace internal {
 
 /// RAII wrapper for UCX worker
@@ -61,4 +61,4 @@ private:
 };
 
 } // namespace internal
-} // namespace p2p
+} // namespace axon

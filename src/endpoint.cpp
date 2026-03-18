@@ -1,14 +1,14 @@
-#include "p2p/endpoint.h"
+#include "axon/endpoint.h"
 
-#include "p2p/worker.h"
-#include "p2p/memory.h"
-#include "p2p/future.h"
-#include "p2p/common.h"
+#include "axon/worker.h"
+#include "axon/memory.h"
+#include "axon/future.h"
+#include "axon/common.h"
 
 #include <ucp/api/ucp.h>
 #include <memory>
 
-namespace p2p {
+namespace axon {
 
 namespace {
 
@@ -606,4 +606,4 @@ void* Endpoint::native_handle() const noexcept {
     return impl_ ? reinterpret_cast<void*>(impl_->handle_) : nullptr;
 }
 
-} // namespace p2p
+} // namespace axon

@@ -1,29 +1,29 @@
 #pragma once
 
-/// @file p2p/plugin/plugin.h
+/// @file axon/plugin/plugin.h
 /// @brief Plugin interface for NCCL/HCCL collective communication backends.
 ///
 /// A Plugin bridges collective communication libraries (NCCL, HCCL) with
-/// the P2P transport layer.  The plugin system uses a registration-based
+/// the AXON transport layer.  The plugin system uses a registration-based
 /// discovery model:
 ///
 ///   1. Shared libraries implement the CollectivePlugin interface.
-///   2. Each .so exports a C factory function: p2p_plugin_create().
+///   2. Each .so exports a C factory function: axon_plugin_create().
 ///   3. PluginRegistry discovers and loads plugins at runtime.
 ///
 /// Plugin lifecycle:
-///   load .so  ->  p2p_plugin_create()  ->  init(ctx)  ->  create_comm()
+///   load .so  ->  axon_plugin_create()  ->  init(ctx)  ->  create_comm()
 ///   ->  allreduce / broadcast / ...  ->  destroy_comm()  ->  shutdown()
 
-#include "p2p/common.h"
-#include "p2p/memory.h"
+#include "axon/common.h"
+#include "axon/memory.h"
 
 #include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
-namespace p2p {
+namespace axon {
 namespace plugin {
 
 // ---------------------------------------------------------------------------
@@ -98,7 +98,7 @@ public:
 
     // --- Lifecycle -----------------------------------------------------------
 
-    /// Initialise the plugin with the P2P context.
+    /// Initialise the plugin with the AXON context.
     /// Called once, before any other method.
     virtual Status init(const Context::Ptr& ctx) = 0;
 
@@ -191,7 +191,7 @@ public:
 
     // --- Transport integration -----------------------------------------------
 
-    /// Register a P2P transport endpoint that the plugin can use for
+    /// Register a AXON transport endpoint that the plugin can use for
     /// custom communication patterns (e.g., fallback or hybrid).
     virtual Status register_transport(int peer_rank,
                                       std::shared_ptr<Endpoint> ep) {
@@ -207,11 +207,11 @@ public:
 /// Every plugin .so must export this symbol.
 using PluginFactoryFunc = CollectivePlugin* (*)();
 
-#define P2P_PLUGIN_EXPORT extern "C" __attribute__((visibility("default")))
+#define AXON_PLUGIN_EXPORT extern "C" __attribute__((visibility("default")))
 
 /// Example usage in a plugin .so:
 ///
-///   P2P_PLUGIN_EXPORT p2p::plugin::CollectivePlugin* p2p_plugin_create() {
+///   AXON_PLUGIN_EXPORT axon::plugin::CollectivePlugin* axon_plugin_create() {
 ///       return new MyNcclPlugin();
 ///   }
 
@@ -232,7 +232,7 @@ public:
     /// Load a plugin from a shared library path.
     Status load_plugin(const std::string& library_path);
 
-    /// Discover plugins in a directory (searches for libp2p_plugin_*.so).
+    /// Discover plugins in a directory (searches for libaxon_plugin_*.so).
     Status discover(const std::string& directory);
 
     /// Look up a plugin by name.
@@ -251,4 +251,4 @@ private:
 };
 
 }  // namespace plugin
-}  // namespace p2p
+}  // namespace axon

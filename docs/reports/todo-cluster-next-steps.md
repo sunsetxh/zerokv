@@ -30,7 +30,7 @@
    - 问题：当前 `node_id` 为空字符串，后续 stale node 检测与 reconnect 替换逻辑无法实现。
 
 4. 暴露 `bound_control_addr()` 公共访问器
-   - 文件：`include/p2p/cluster.h`、`src/cluster.cpp`
+   - 文件：`include/axon/cluster.h`、`src/cluster.cpp`
    - 问题：测试目前依赖“预留端口再释放”的 workaround，存在 TOCTOU 风险。
 
 ### 测试补充
@@ -58,5 +58,5 @@
    - 依赖：真实 `node_id`
 
 10. 进一步收敛 `wait_ready()` 语义
-   - 文件：`include/p2p/cluster.h`、`src/cluster.cpp`
+   - 文件：`include/axon/cluster.h`、`src/cluster.cpp`
    - 目标：把“控制面 ready”和“数据面 route ready”的边界定义得更清楚。

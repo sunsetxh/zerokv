@@ -1,4 +1,4 @@
-# P2P 高性能传输库 — 接口设计与实现方案
+# AXON 高性能传输库 — 接口设计与实现方案
 
 > 角色: 开发工程师 (Dev)
 > 日期: 2026-03-04
@@ -10,7 +10,7 @@
 ### 1.1 文件结构与层次
 
 ```
-include/p2p/
+include/axon/
   common.h         -- 错误码、Tag、MemoryType、前向声明
   config.h         -- Config (Builder模式) + Context (顶层句柄)
   memory.h         -- MemoryRegion / MemoryPool / RegistrationCache
@@ -18,7 +18,7 @@ include/p2p/
   worker.h         -- Worker (progress引擎) + Listener
   endpoint.h       -- Endpoint (双边/单边/流式传输)
   plugin/plugin.h  -- CollectivePlugin + PluginRegistry
-  p2p.h            -- 便捷聚合头文件
+  axon.h            -- 便捷聚合头文件
 ```
 
 ### 1.2 核心设计原则
@@ -64,14 +64,14 @@ include/p2p/
 
 | 文件 | 行数 | 内容 |
 |------|------|------|
-| `include/p2p/common.h` | 146 | ErrorCode, Status, Tag, MemoryType |
-| `include/p2p/config.h` | 149 | Config::Builder + Context |
-| `include/p2p/memory.h` | 182 | MemoryRegion/Pool/Cache |
-| `include/p2p/future.h` | 152 | Request + Future<T> |
-| `include/p2p/worker.h` | 144 | Worker + Listener |
-| `include/p2p/endpoint.h` | 162 | Endpoint: tag/RMA/stream/atomic |
-| `include/p2p/plugin/plugin.h` | 254 | CollectivePlugin + Registry |
-| `include/p2p/p2p.h` | 12 | 聚合头文件 |
+| `include/axon/common.h` | 146 | ErrorCode, Status, Tag, MemoryType |
+| `include/axon/config.h` | 149 | Config::Builder + Context |
+| `include/axon/memory.h` | 182 | MemoryRegion/Pool/Cache |
+| `include/axon/future.h` | 152 | Request + Future<T> |
+| `include/axon/worker.h` | 144 | Worker + Listener |
+| `include/axon/endpoint.h` | 162 | Endpoint: tag/RMA/stream/atomic |
+| `include/axon/plugin/plugin.h` | 254 | CollectivePlugin + Registry |
+| `include/axon/axon.h` | 12 | 聚合头文件 |
 | `examples/cpp_usage.cpp` | 222 | 6个C++使用示例 |
 
 ---
@@ -109,8 +109,8 @@ include/p2p/
 
 | 文件 | 行数 | 内容 |
 |------|------|------|
-| `python/p2p/_core.pyi` | 496 | 完整类型 stub |
-| `python/p2p/__init__.py` | 68 | 包入口 |
+| `python/axon/_core.pyi` | 496 | 完整类型 stub |
+| `python/axon/__init__.py` | 68 | 包入口 |
 | `src/python/bindings.cpp` | 367 | nanobind 绑定实现 |
 | `examples/python_usage.py` | 263 | 8个Python使用示例 |
 
@@ -120,7 +120,7 @@ include/p2p/
 
 ### 3.1 Plugin 需要实现的接口
 
-定义在 `include/p2p/plugin/plugin.h` 中的 `CollectivePlugin` 抽象类：
+定义在 `include/axon/plugin/plugin.h` 中的 `CollectivePlugin` 抽象类：
 
 - **元数据**：`name()`, `version()`, `supported_memory_types()`
 - **生命周期**：`init(ctx)`, `shutdown()`
@@ -128,18 +128,18 @@ include/p2p/
 - **集合通信**：`allreduce()`, `broadcast()`, `allgather()`, `reduce_scatter()`, `alltoall()`
 - **点对点**：`send()`, `recv()`
 - **分组**：`group_start()`, `group_end()`
-- **传输集成**（可选）：`register_transport()` 允许 plugin 使用 P2P 传输层做 fallback
+- **传输集成**（可选）：`register_transport()` 允许 plugin 使用 AXON 传输层做 fallback
 
 ### 3.2 注册和发现机制
 
 ```
 1. 每个 plugin .so 导出 C 工厂函数：
-   P2P_PLUGIN_EXPORT CollectivePlugin* p2p_plugin_create();
+   AXON_PLUGIN_EXPORT CollectivePlugin* axon_plugin_create();
 
 2. PluginRegistry 发现方式：
    - 手动注册：  registry.register_plugin(std::make_unique<MyPlugin>())
-   - 指定路径：  registry.load_plugin("/path/to/libp2p_plugin_nccl.so")
-   - 目录扫描：  registry.discover("/usr/lib/p2p/plugins/")
+   - 指定路径：  registry.load_plugin("/path/to/libaxon_plugin_nccl.so")
+   - 目录扫描：  registry.discover("/usr/lib/axon/plugins/")
 
 3. 查找：       auto* nccl = registry.find("nccl");
 ```

@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include "p2p/config.h"
-#include "p2p/memory.h"
+#include "axon/config.h"
+#include "axon/memory.h"
 
-using namespace p2p;
+using namespace axon;
 
 class MemoryTest : public ::testing::Test {
 protected:

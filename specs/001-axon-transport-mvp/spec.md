@@ -1,9 +1,9 @@
-# Feature Specification: P2P High-Performance Transport Library MVP
+# Feature Specification: AXON High-Performance Transport Library MVP
 
-**Feature Branch**: `001-p2p-transport-mvp`
+**Feature Branch**: `001-axon-transport-mvp`
 **Created**: 2026-03-04
 **Status**: Draft
-**Input**: User description: "High-performance P2P transport library MVP based on UCX, providing C++ API for point-to-point data transfer (1KB-1GB) over RDMA and TCP, targeting AI distributed training, KV Cache inference transfer, and HPC scenarios."
+**Input**: User description: "High-performance AXON transport library MVP based on UCX, providing C++ API for point-to-point data transfer (1KB-1GB) over RDMA and TCP, targeting AI distributed training, KV Cache inference transfer, and HPC scenarios."
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -222,14 +222,14 @@ All performance benchmarks MUST use the following methodology:
 - The target platform is Linux x86_64. Other platforms (ARM, macOS) are not in scope for MVP.
 - MVP operates on host memory only. GPU memory support (CUDA, Ascend) is deferred to subsequent phases.
 - Python bindings are deferred to Phase 2. MVP is C++ only.
-- Plugin layer (NCCL/HCCL) is deferred. MVP provides only the core P2P transport.
+- Plugin layer (NCCL/HCCL) is deferred. MVP provides only the core AXON transport.
 - Performance targets assume 200Gbps InfiniBand HDR or equivalent RDMA fabric. TCP performance targets are not defined for MVP (TCP serves as a fallback for development/testing).
 - Thread safety is provided by the thread-per-worker model (each Worker accessed by exactly one thread). Cross-thread Worker access is undefined behavior.
 
 ## Scope Boundaries
 
 **In scope for MVP:**
-- Core P2P transport: tag_send, tag_recv, put, get, flush
+- Core AXON transport: tag_send, tag_recv, put, get, flush
 - Connection management: connect, listen, accept, close
 - Async model: Future\<T\> with poll/wait/callback
 - Memory registration: register, deregister, remote key

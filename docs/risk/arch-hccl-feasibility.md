@@ -42,7 +42,7 @@ HcclResult HcclAllGather(...);
 HcclResult HcclReduceScatter(...);
 ```
 
-**P2P 点对点通信（关键发现）：**
+**AXON 点对点通信（关键发现）：**
 ```c
 HcclResult HcclSend(void *sendBuf, uint64_t count, HcclDataType dataType,
                      uint32_t destRank, HcclComm comm, aclrtStream stream);
@@ -98,10 +98,10 @@ CANN 提供类似 CUDA VMM 的虚拟内存管理 API：
 
 ## 四、结论
 
-风险实际严重程度为**中低**。HCCL 提供完整的 C API（含 P2P），Plugin 接口 1:1 映射，实现成本约 200-300 行代码。
+风险实际严重程度为**中低**。HCCL 提供完整的 C API（含 AXON），Plugin 接口 1:1 映射，实现成本约 200-300 行代码。
 
 **后续验证步骤：**
-1. Phase 1（1-2周）：获取 Ascend 环境，编写独立 HCCL P2P 测试
+1. Phase 1（1-2周）：获取 Ascend 环境，编写独立 HCCL AXON 测试
 2. Phase 2（1-2周）：基于骨架实现 hccl_plugin.cpp
 3. Phase 3（2-3周）：性能与稳定性测试
 
@@ -110,6 +110,6 @@ CANN 提供类似 CUDA VMM 的虚拟内存管理 API：
 **参考资料：**
 - [HCCL API - CANN](https://www.hiascend.com/document/detail/en/canncommercial/800/apiref/hcclapiref/hcclcpp_07_0011.html)
 - [Ascend/pytorch - hccl.h](https://gitee.com/ascend/pytorch/blob/83742e7653ebd4747b61a1880f5115f85ed3c933/third_party/hccl/inc/hccl/hccl.h)
-- [HCCL P2P Test](https://github.com/zzudongxiang/ascend.cl/blob/master/hccl/hccl_p2p_rootinfo_test.cc)
+- [HCCL AXON Test](https://github.com/zzudongxiang/ascend.cl/blob/master/hccl/hccl_axon_rootinfo_test.cc)
 - [Mooncake Issue #1312 - CANN VMM APIs](https://github.com/kvcache-ai/Mooncake/issues/1312)
 - [CloudMatrix384 Architecture](https://arxiv.org/html/2506.12708v2)

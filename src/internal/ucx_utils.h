@@ -5,7 +5,7 @@
 #include <string>
 #include <chrono>
 
-namespace p2p {
+namespace axon {
 namespace internal {
 
 /// Convert UCX status to string
@@ -39,4 +39,4 @@ struct ParsedAddress {
 [[nodiscard]] uint64_t to_ucx_timeout(std::chrono::milliseconds ms) noexcept;
 
 } // namespace internal
-} // namespace p2p
+} // namespace axon

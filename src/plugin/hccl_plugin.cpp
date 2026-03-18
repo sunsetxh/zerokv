@@ -1,7 +1,7 @@
 /// @file src/plugin/hccl_plugin.cpp
 /// @brief HCCL (Huawei Collective Communication Library) plugin for Ascend NPU.
 ///
-/// This plugin bridges the P2P transport layer with HCCL for collective and
+/// This plugin bridges the AXON transport layer with HCCL for collective and
 /// point-to-point communication on Huawei Ascend NPU devices.
 ///
 /// Dependencies:
@@ -9,10 +9,10 @@
 ///   - HCCL library: libhccl.so
 ///
 /// Build as a shared library:
-///   g++ -shared -fPIC -o libp2p_plugin_hccl.so hccl_plugin.cpp \
+///   g++ -shared -fPIC -o libaxon_plugin_hccl.so hccl_plugin.cpp \
 ///       -lhccl -lascendcl -I${ASCEND_HOME}/include
 
-#include "p2p/plugin/plugin.h"
+#include "axon/plugin/plugin.h"
 
 #include <cassert>
 #include <cstring>
@@ -110,18 +110,18 @@ inline int aclrtSynchronizeStream(aclrtStream) { return 0; }
 
 #endif  // !HCCL_H
 
-namespace p2p {
+namespace axon {
 namespace plugin {
 
 // ---------------------------------------------------------------------------
-// Helper: HCCL result -> P2P Status
+// Helper: HCCL result -> AXON Status
 // ---------------------------------------------------------------------------
 
 static Status hccl_to_status(HcclResult res) {
     if (res == HCCL_SUCCESS) {
         return Status::OK();
     }
-    // Map HCCL error codes to P2P error codes.
+    // Map HCCL error codes to AXON error codes.
     ErrorCode ec;
     switch (res) {
         case HCCL_E_PARA:
@@ -155,7 +155,7 @@ static Status hccl_to_status(HcclResult res) {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: P2P DataType -> HcclDataType
+// Helper: AXON DataType -> HcclDataType
 // ---------------------------------------------------------------------------
 
 static HcclDataType to_hccl_dtype(DataType dt) {
@@ -174,7 +174,7 @@ static HcclDataType to_hccl_dtype(DataType dt) {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: P2P ReduceOp -> HcclReduceOp
+// Helper: AXON ReduceOp -> HcclReduceOp
 // ---------------------------------------------------------------------------
 
 static HcclReduceOp to_hccl_op(ReduceOp op) {
@@ -537,13 +537,13 @@ private:
 };
 
 }  // namespace plugin
-}  // namespace p2p
+}  // namespace axon
 
 // ---------------------------------------------------------------------------
 // C factory function -- the single entry point loaded by PluginRegistry
 // ---------------------------------------------------------------------------
 
-P2P_PLUGIN_EXPORT
-p2p::plugin::CollectivePlugin* p2p_plugin_create() {
-    return new p2p::plugin::HcclPlugin();
+AXON_PLUGIN_EXPORT
+axon::plugin::CollectivePlugin* axon_plugin_create() {
+    return new axon::plugin::HcclPlugin();
 }

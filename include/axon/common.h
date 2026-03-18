@@ -1,14 +1,14 @@
 #pragma once
 
-/// @file p2p/common.h
-/// @brief Common types, status codes, and forward declarations for the P2P library.
+/// @file axon/common.h
+/// @brief Common types, status codes, and forward declarations for the AXON library.
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <system_error>
 
-namespace p2p {
+namespace axon {
 
 // ---------------------------------------------------------------------------
 // Version
@@ -54,10 +54,10 @@ enum class ErrorCode : int {
 };
 
 /// Category singleton for std::error_code integration.
-const std::error_category& p2p_category() noexcept;
+const std::error_category& axon_category() noexcept;
 
 inline std::error_code make_error_code(ErrorCode ec) noexcept {
-    return {static_cast<int>(ec), p2p_category()};
+    return {static_cast<int>(ec), axon_category()};
 }
 
 /// Lightweight status wrapper – implicitly convertible from ErrorCode.
@@ -141,9 +141,9 @@ class Request;
 template <typename T> class Future;
 template <typename T> class Promise;
 
-}  // namespace p2p
+}  // namespace axon
 
 // Enable std::error_code interop.
 namespace std {
-template<> struct is_error_code_enum<p2p::ErrorCode> : true_type {};
+template<> struct is_error_code_enum<axon::ErrorCode> : true_type {};
 }

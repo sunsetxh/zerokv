@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include "p2p/future.h"
-#include "p2p/endpoint.h"
+#include "axon/future.h"
+#include "axon/endpoint.h"
 
-using namespace p2p;
+using namespace axon;
 
 TEST(FutureVoidTest, Ready) {
     auto f = Future<void>::make_ready();

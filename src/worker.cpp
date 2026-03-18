@@ -1,8 +1,8 @@
-#include "p2p/worker.h"
+#include "axon/worker.h"
 
-#include "p2p/config.h"
-#include "p2p/endpoint.h"
-#include "p2p/common.h"
+#include "axon/config.h"
+#include "axon/endpoint.h"
+#include "axon/common.h"
 
 #include <ucp/api/ucp.h>
 
@@ -20,7 +20,7 @@
 #include <condition_variable>
 #include <poll.h>
 
-namespace p2p {
+namespace axon {
 
 namespace {
 
@@ -484,4 +484,4 @@ void Listener::close() {
     }
 }
 
-} // namespace p2p
+} // namespace axon

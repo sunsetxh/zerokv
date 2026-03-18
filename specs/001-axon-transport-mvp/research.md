@@ -1,4 +1,4 @@
-# Implementation Research: P2P High-Performance Transport Library MVP
+# Implementation Research: AXON High-Performance Transport Library MVP
 
 **Date**: 2026-03-04
 **Input**: Feature specification, Constitution
@@ -50,7 +50,7 @@ This research document consolidates findings from parallel research by PM, Arch,
 
 ### 2.1 RAII Wrappers
 
-| UCX Handle | P2P Wrapper | Ownership |
+| UCX Handle | AXON Wrapper | Ownership |
 |------------|--------------|-----------|
 | `ucp_context_h` | `Context::Impl` | shared_ptr, thread-safe |
 | `ucp_worker_h` | `Worker::Impl` | shared_ptr, single-threaded |
@@ -66,7 +66,7 @@ This research document consolidates findings from parallel research by PM, Arch,
 ### 2.3 Config Builder
 
 - Fluent Builder API with `from_env()` support
-- Prefix `P2P_` for library options, pass UCX options through
+- Prefix `AXON_` for library options, pass UCX options through
 
 ---
 
@@ -179,8 +179,8 @@ ep->tag_send(buf.data(), buf.size(), tag);
 
 ## 8. References
 
-- `/specs/001-p2p-transport-mvp/spec.md` - Feature specification
-- `/include/p2p/*.h` - Public API headers
+- `/specs/001-axon-transport-mvp/spec.md` - Feature specification
+- `/include/axon/*.h` - Public API headers
 - `/src/transport/ucx_impl_notes.h` - Implementation details
 - `/docs/reports/report-arch-design.md` - Architecture decisions
 - `/docs/reports/test-strategy.md` - QA test plan

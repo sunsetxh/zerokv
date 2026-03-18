@@ -1,4 +1,4 @@
-# P2P 高性能传输库 — 产品需求分析报告
+# AXON 高性能传输库 — 产品需求分析报告
 
 > 角色: 产品经理 (PM)
 > 日期: 2026-03-04
@@ -14,7 +14,7 @@
 **核心需求**：
 - 超低延迟的小消息传输（梯度分片 64KB-1MB），减少通信-计算重叠的 bubble
 - 高吞吐的大消息传输（全量梯度 100MB-1GB），最大化带宽利用率
-- 不消耗 GPU SM 资源 -- 当前 NCCL 的 P2P 操作仍需启动 GPU kernel，浪费计算资源（[UCCL 项目已证实这一问题](https://github.com/uccl-project/uccl)）
+- 不消耗 GPU SM 资源 -- 当前 NCCL 的 AXON 操作仍需启动 GPU kernel，浪费计算资源（[UCCL 项目已证实这一问题](https://github.com/uccl-project/uccl)）
 - 支持 NVIDIA GPU（CUDA）和华为 Ascend NPU（HCCL）双栈
 
 ### 1.2 KV Cache 分离式推理传输
@@ -32,7 +32,7 @@
 **场景描述**：Expert Parallelism（MoE 模型）、Pipeline Parallelism 中需要节点间交换 activation 或 expert 参数。
 
 **核心需求**：
-- 灵活的 P2P 语义（send/recv、put/get）
+- 灵活的 AXON 语义（send/recv、put/get）
 - 支持 GPU Direct RDMA 避免 CPU 中转
 - 动态拓扑发现和连接管理
 
@@ -63,8 +63,8 @@
 **特征**：在字节/阿里/华为等公司负责分布式训练/推理框架开发
 **痛点**：
 - NCCL 仅支持 NVIDIA GPU，HCCL 仅支持 Ascend，需要维护两套通信代码
-- NCCL P2P 操作消耗 GPU SM 资源，影响计算效率（[ICCL 研究显示移除该开销可提升 23.4%/28.5% P2P 吞吐/延迟](https://arxiv.org/html/2510.00991v1)）
-- 缺乏统一的、跨硬件的高性能 P2P 通信库
+- NCCL AXON 操作消耗 GPU SM 资源，影响计算效率（[ICCL 研究显示移除该开销可提升 23.4%/28.5% AXON 吞吐/延迟](https://arxiv.org/html/2510.00991v1)）
+- 缺乏统一的、跨硬件的高性能 AXON 通信库
 
 ### 2.2 推理系统开发者
 
@@ -80,7 +80,7 @@
 **痛点**：
 - UCX-Py 已停止维护（[2025 年 RAPIDS 25.08 为最后版本](https://github.com/rapidsai/ucx-py)），需要替代方案
 - 现有 Python 绑定性能不足，GIL 限制并发
-- 需要与 NCCL/HCCL 集合通信库无缝协作的 P2P 层
+- 需要与 NCCL/HCCL 集合通信库无缝协作的 AXON 层
 
 ### 2.4 HPC 研究人员
 
@@ -96,8 +96,8 @@
 | 维度 | NCCL | HCCL | Gloo | UCX/UCXX | NIXL | Mooncake TE | **本项目定位** |
 |------|------|------|------|----------|------|-------------|---------------|
 | **硬件支持** | NVIDIA only | Ascend only | CPU为主 | 多硬件 | NVIDIA为主 | 多硬件 | **NVIDIA + Ascend 双栈** |
-| **通信类型** | Collective + P2P | Collective + P2P | Collective | P2P + RMA | P2P | P2P | **专注 P2P，可扩展 Collective** |
-| **GPU SM 消耗** | P2P 消耗 SM | 类似 | N/A | 零 SM | 零 SM | 零 SM | **零 SM** |
+| **通信类型** | Collective + AXON | Collective + AXON | Collective | AXON + RMA | AXON | AXON | **专注 AXON，可扩展 Collective** |
+| **GPU SM 消耗** | AXON 消耗 SM | 类似 | N/A | 零 SM | 零 SM | 零 SM | **零 SM** |
 | **Python 接口** | 通过 PyTorch | 通过 MindSpore | 通过 PyTorch | UCXX (新) | PyPI 包 | Python API | **原生 C++ & Python** |
 | **KV Cache 优化** | 无专门优化 | 无 | 无 | 无 | 专门优化 | 专门优化 | **内建支持** |
 | **非连续内存** | 有限 | 有限 | 无 | 支持 | 支持 | 支持 | **一等公民** |
@@ -107,7 +107,7 @@
 
 ### 差异化定位
 
-1. **统一双栈**：唯一同时原生支持 NVIDIA GPU（通过 NCCL 扩展）和 Ascend NPU（通过 HCCL 扩展）的高性能 P2P 库
+1. **统一双栈**：唯一同时原生支持 NVIDIA GPU（通过 NCCL 扩展）和 Ascend NPU（通过 HCCL 扩展）的高性能 AXON 库
 2. **UCX 底座 + 集合通信扩展**：底层复用 UCX 成熟的传输引擎，上层可扩展 NCCL/HCCL 集合通信能力
 3. **宽消息尺寸范围**：1KB-1GB 全范围优化，而非仅优化某一端
 4. **双语言原生接口**：C++ 和 Python 都是一等公民，而非一个是另一个的 wrapper
@@ -120,12 +120,12 @@
 
 | # | 功能需求 | 理由 |
 |---|---------|------|
-| M1 | 基于 UCX 的 P2P send/recv 和 RMA put/get | 核心传输语义 |
+| M1 | 基于 UCX 的 AXON send/recv 和 RMA put/get | 核心传输语义 |
 | M2 | CUDA GPU 内存直接传输（GPUDirect RDMA） | AI 场景基本要求 |
 | M3 | InfiniBand / RoCE RDMA 传输后端 | 数据中心标准网络 |
 | M4 | C++ 核心 API（同步 + 异步） | 性能关键路径 |
 | M5 | Python 绑定（nanobind） | ML 生态集成 |
-| M6 | 零 SM 消耗的 P2P 传输 | 关键差异化 |
+| M6 | 零 SM 消耗的 AXON 传输 | 关键差异化 |
 | M7 | 连接管理和端点发现 | 基础网络功能 |
 | M8 | 错误处理和超时机制 | 生产可靠性 |
 | M9 | 1KB-1GB 全范围消息大小支持 | 产品定义范围 |
@@ -174,7 +174,7 @@
 |---------|---------|---------|---------|---------|
 | **1KB** | < 3 us | > 300 MB/s (聚合) | RDMA 基础延迟约 2us | HPC halo exchange、控制消息 |
 | **64KB** | < 10 us | > 5 GB/s | UCX eager 协议 | 梯度分片、小 KV Cache 页 |
-| **1MB** | < 50 us | > 20 GB/s | UCCL P2P 比 NCCL 快 30-50% | KV Cache 页传输 |
+| **1MB** | < 50 us | > 20 GB/s | UCCL AXON 比 NCCL 快 30-50% | KV Cache 页传输 |
 | **100MB** | < 5 ms | > 23 GB/s (接近线速) | 200Gbps 线速 = 25 GB/s | 大梯度同步、模型分片 |
 | **1GB** | < 45 ms | > 23 GB/s (接近线速) | 大消息应达到带宽上限 | 完整模型权重传输 |
 
@@ -197,7 +197,7 @@
 ### 关键 SLA 指标
 
 - **零拷贝率**：GPU 内存传输应 100% 零拷贝（GPUDirect RDMA）
-- **SM 占用**：P2P 传输期间 GPU SM 占用为 0
+- **SM 占用**：AXON 传输期间 GPU SM 占用为 0
 - **连接建立时间**：< 100ms（首次连接）
 - **尾延迟 P99**：不超过平均延迟的 3 倍
 - **CPU 开销**：传输期间 CPU 占用 < 5%（单核）
@@ -208,18 +208,18 @@
 
 ### 产品定位
 
-> 面向 AI 训练和推理场景的统一 P2P 传输库，基于 UCX 实现零 SM 消耗的高性能数据传输，同时支持 NVIDIA GPU 和华为 Ascend NPU。
+> 面向 AI 训练和推理场景的统一 AXON 传输库，基于 UCX 实现零 SM 消耗的高性能数据传输，同时支持 NVIDIA GPU 和华为 Ascend NPU。
 
 ### 关键成功因素
 
-1. **性能达标**：在中等消息（256KB-1MB，KV Cache 主力场景）上超越 NCCL P2P 30%+，与 UCCL/NIXL 持平
+1. **性能达标**：在中等消息（256KB-1MB，KV Cache 主力场景）上超越 NCCL AXON 30%+，与 UCCL/NIXL 持平
 2. **双栈可用**：NVIDIA + Ascend 双栈是最大差异化，需确保两个路径同等质量
 3. **生态融合**：提供 NCCL/HCCL 扩展接口，而非替代它们，降低用户迁移成本
-4. **开发者体验**：Python 接口须做到 3 行代码完成一次 P2P 传输，C++ 接口须做到 header-only 或单库链接
+4. **开发者体验**：Python 接口须做到 3 行代码完成一次 AXON 传输，C++ 接口须做到 header-only 或单库链接
 
 ### 建议的第一个里程碑（MVP）
 
-聚焦 Must Have 需求（M1-M9），目标：在两台配备 200Gbps RoCE 的 NVIDIA GPU 服务器之间，完成 1KB-1GB 全范围 P2P 传输，延迟和吞吐达到上述规格表的 80%，并提供 C++ 和 Python 双接口。
+聚焦 Must Have 需求（M1-M9），目标：在两台配备 200Gbps RoCE 的 NVIDIA GPU 服务器之间，完成 1KB-1GB 全范围 AXON 传输，延迟和吞吐达到上述规格表的 80%，并提供 C++ 和 Python 双接口。
 
 ---
 

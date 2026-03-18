@@ -206,7 +206,7 @@ Solution: LRU Registration Cache with Address-Range Tracking
 #include <mutex>
 #include <unordered_map>
 
-namespace p2p {
+namespace axon {
 namespace internal {
 
 // ---------------------------------------------------------------------------
@@ -261,4 +261,4 @@ struct RegCacheEntry {
 // use boost::icl::interval_map or a custom augmented BST).
 
 }  // namespace internal
-}  // namespace p2p
+}  // namespace axon

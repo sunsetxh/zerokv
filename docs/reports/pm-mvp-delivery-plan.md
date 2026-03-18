@@ -1,4 +1,4 @@
-# P2P High-Performance Transport Library MVP — Delivery Plan
+# AXON High-Performance Transport Library MVP — Delivery Plan
 
 **Role**: Product Manager (PM)
 **Date**: 2026-03-04
@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-This document defines the **optimal delivery order**, **milestone definitions**, and **risk assessment** for the P2P Transport Library MVP. The strategy is based on:
+This document defines the **optimal delivery order**, **milestone definitions**, and **risk assessment** for the AXON Transport Library MVP. The strategy is based on:
 
 1. **Dependency Analysis**: Each user story's technical prerequisites
 2. **Value Delivery**: Minimum viable features that unlock customer value
@@ -273,7 +273,7 @@ ep_from_a->flush();
 | 2A | 5 weeks (parallel) | US2 | Connections | Can connect 2 processes |
 | 2B | 5 weeks (parallel) | US5 | Memory | Can register memory |
 | 3 | 5 weeks | US1+US4 | **Messaging** | **"Hello World" MVP** |
-| 4 | 4 weeks | US3 | RDMA | Complete P2P library |
+| 4 | 4 weeks | US3 | RDMA | Complete AXON library |
 | 5 | 2 weeks | Perf/Polish | Release | Ready for production |
 | | | | **Total** | **16–20 weeks** |
 
@@ -290,7 +290,7 @@ ep_from_a->flush();
 **Acceptance**:
 - ✅ `Config().set_worker_count(4).build()` succeeds
 - ✅ Invalid config rejected with clear error (e.g., negative worker_count)
-- ✅ Environment variable `P2P_TRANSPORT=tcp` overrides config
+- ✅ Environment variable `AXON_TRANSPORT=tcp` overrides config
 - ✅ CMake build completes on Linux x86_64 with GCC 11+, Clang 14+
 - ✅ Unit tests for Config validation pass
 
@@ -350,7 +350,7 @@ ep->flush();
 - Memory registration/deregistration < 10ms for 1GB buffer
 - No CPU involvement in data transfer (verified with performance counters)
 
-**Why This**: Completes the core P2P library. Parameter servers can implement remote model reads, KV Cache transfer can use direct placement, training frameworks can optimize communication pipelines.
+**Why This**: Completes the core AXON library. Parameter servers can implement remote model reads, KV Cache transfer can use direct placement, training frameworks can optimize communication pipelines.
 
 ---
 
@@ -446,7 +446,7 @@ ep->flush();
 - Plugin mechanism is unproven in this codebase
 
 **Fallback Strategy 1** (Preferred):
-1. **Week 2–3**: Architecture spike: design plugin interface (IPlugin, PluginRegistry) to be decoupled from core P2P
+1. **Week 2–3**: Architecture spike: design plugin interface (IPlugin, PluginRegistry) to be decoupled from core AXON
 2. **Week 6**: Early engagement with Ascend team: validate plugin assumptions against HCCL API v8.x and v9.x
 3. **Week 12–14** (Phase 3): Implement mock HCCL plugin to verify architecture
 4. **Decision gate at Week 15**: If HCCL integration looks feasible, proceed to Phase 2; else, document MVP as NVIDIA-only
@@ -587,7 +587,7 @@ At the end of each milestone (Weeks 4, 14, 18, 20):
    - Architecture guide (`.md` files in `/docs/reports`)
    - Example programs (in `/examples`)
 3. **Build/Test Artifacts**:
-   - CMake configuration (with `find_package(P2P)` support)
+   - CMake configuration (with `find_package(AXON)` support)
    - Docker image with all dependencies (for reproducible builds)
    - Performance baseline CSV (for regression detection in Phase 2)
 4. **Known Issues & Limitations**:
@@ -625,7 +625,7 @@ At the end of each milestone (Weeks 4, 14, 18, 20):
 4. **Risk**: Python bindings can be added later without core architecture changes (plugin-like design)
 
 **Phase 2 will include** native Python bindings with:
-- `pip install p2p_transport`
+- `pip install axon_transport`
 - Async support (asyncio integration)
 - Tensor/numpy zero-copy interop
 
@@ -660,7 +660,7 @@ The recommended 16–20 week MVP delivery plan balances:
 2. **Week 14** (after Milestone 2): Ship messaging-only MVP or wait for RDMA?
 3. **Week 18** (after Milestone 3): Ship full MVP or continue optimization phase?
 
-With this plan, the team can deliver a **production-ready, high-performance P2P transport library** that unlocks gradient synchronization, KV Cache transfer, and parameter server use cases for both NVIDIA GPU and (Phase 2) Ascend NPU ecosystems.
+With this plan, the team can deliver a **production-ready, high-performance AXON transport library** that unlocks gradient synchronization, KV Cache transfer, and parameter server use cases for both NVIDIA GPU and (Phase 2) Ascend NPU ecosystems.
 
 ---
 

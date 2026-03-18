@@ -1,16 +1,16 @@
 """
-p2p - High-performance P2P transport library with Python bindings.
+axon - High-performance AXON transport library with Python bindings.
 
 Usage:
-    import p2p
+    import axon
 
-    ctx = p2p.Context(transport="ucx", num_workers=2)
+    ctx = axon.Context(transport="ucx", num_workers=2)
     worker = ctx.create_worker()
     ep = worker.connect("192.168.1.2:13337")
     ep.tag_send(data, tag=42)
 """
 
-from p2p._core import (
+from axon._core import (
     # Core classes
     Config,
     Context,
@@ -25,7 +25,7 @@ from p2p._core import (
     MemoryType,
     ErrorCode,
     # Exceptions
-    P2PError,
+    AXONError,
     # Constants
     TAG_ANY,
     TAG_MASK_ALL,
@@ -53,7 +53,7 @@ __all__ = [
     "Tag",
     "MemoryType",
     "ErrorCode",
-    "P2PError",
+    "AXONError",
     "TAG_ANY",
     "TAG_MASK_ALL",
     "TAG_MASK_USER",

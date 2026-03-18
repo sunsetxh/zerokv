@@ -1,4 +1,4 @@
-# P2P MVP Delivery Plan — Quick Reference
+# AXON MVP Delivery Plan — Quick Reference
 
 **For**: Project sponsors, engineering leadership, technical stakeholders
 **Reading Time**: 5 minutes
@@ -10,7 +10,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ P2P Transport Library MVP – 16–20 Week Delivery Plan            │
+│ AXON Transport Library MVP – 16–20 Week Delivery Plan            │
 │ Team: 6–8 FTE | Critical Path: 13 weeks (US6→US2→US1)         │
 └─────────────────────────────────────────────────────────────────┘
 
@@ -33,7 +33,7 @@ Weeks 1–4                  Weeks 5–9                    Weeks 10–14       
 |-----------|------|------|-----|--------------|
 | **M1: Config & Init** | Week 4 | Create Context with config builder | Validate build system, dependencies | Foundation for all features |
 | **M2: Hello World Messaging** | Week 14 | Send/recv 4KB with tag matching | Core value prop; customers can build pipelines | Gradient sync, KV Cache transfer |
-| **M3: RDMA Ready** | Week 18 | Put/get with remote keys | Complete P2P suite | Parameter servers, low-latency inference |
+| **M3: RDMA Ready** | Week 18 | Put/get with remote keys | Complete AXON suite | Parameter servers, low-latency inference |
 | **M4: Production Ready** | Week 20 | All acceptance criteria, perf targets met, 80% coverage | Ship-ready | Ready for customer deployment |
 
 ---
@@ -260,7 +260,7 @@ Documentation complete  ✓ SHIP!
 | Document | Purpose |
 |----------|---------|
 | `pm-mvp-delivery-plan.md` | Full plan with rationale (this document) |
-| `/specs/001-p2p-transport-mvp/spec.md` | User stories & acceptance criteria |
+| `/specs/001-axon-transport-mvp/spec.md` | User stories & acceptance criteria |
 | `/docs/reports/report-arch-design.md` | Architecture & tech decisions |
 | `/docs/reports/test-strategy.md` | Testing approach & performance baselines |
 
@@ -275,7 +275,7 @@ Documentation complete  ✓ SHIP!
 
 ## TL;DR: The Elevator Pitch
 
-> Build a production-ready P2P transport library in **20 weeks** with a **6–8 person team**:
+> Build a production-ready AXON transport library in **20 weeks** with a **6–8 person team**:
 >
 > **Week 4**: Config & initialization (foundation)
 > **Week 9**: Connections + memory registration (parallel)

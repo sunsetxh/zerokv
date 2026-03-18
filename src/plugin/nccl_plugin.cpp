@@ -4,9 +4,9 @@
 /// This file shows how a real NCCL plugin would implement the
 /// CollectivePlugin interface.  Build as a shared library:
 ///
-///   g++ -shared -fPIC -o libp2p_plugin_nccl.so nccl_plugin.cpp -lnccl -lcudart
+///   g++ -shared -fPIC -o libaxon_plugin_nccl.so nccl_plugin.cpp -lnccl -lcudart
 
-#include "p2p/plugin/plugin.h"
+#include "axon/plugin/plugin.h"
 
 #include <cassert>
 #include <mutex>
@@ -16,7 +16,7 @@
 // #include <nccl.h>
 // #include <cuda_runtime.h>
 
-namespace p2p {
+namespace axon {
 namespace plugin {
 
 // ---------------------------------------------------------------------------
@@ -201,8 +201,8 @@ public:
 
     Status register_transport(int peer_rank,
                               std::shared_ptr<Endpoint> ep) override {
-        // Store the P2P endpoint for hybrid communication patterns.
-        // For example, NCCL can fall back to P2P transport for cross-network
+        // Store the AXON endpoint for hybrid communication patterns.
+        // For example, NCCL can fall back to AXON transport for cross-network
         // communication or when direct GPU-GPU paths are unavailable.
         std::lock_guard lock(mu_);
         transport_eps_[peer_rank] = std::move(ep);
@@ -217,13 +217,13 @@ private:
 };
 
 }  // namespace plugin
-}  // namespace p2p
+}  // namespace axon
 
 // ---------------------------------------------------------------------------
 // C factory function – the single entry point loaded by PluginRegistry
 // ---------------------------------------------------------------------------
 
-P2P_PLUGIN_EXPORT
-p2p::plugin::CollectivePlugin* p2p_plugin_create() {
-    return new p2p::plugin::NcclPlugin();
+AXON_PLUGIN_EXPORT
+axon::plugin::CollectivePlugin* axon_plugin_create() {
+    return new axon::plugin::NcclPlugin();
 }

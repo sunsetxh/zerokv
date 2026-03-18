@@ -1,7 +1,7 @@
-#include "p2p/cluster.h"
+#include "axon/cluster.h"
 
-#include "p2p/endpoint.h"
-#include "p2p/worker.h"
+#include "axon/endpoint.h"
+#include "axon/worker.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -19,11 +19,11 @@
 #include <utility>
 #include <vector>
 
-namespace p2p {
+namespace axon {
 
 namespace {
 
-constexpr uint32_t kControlMagic = 0x50325031U;  // "P2P1"
+constexpr uint32_t kControlMagic = 0x50325031U;  // "AXON1"
 constexpr uint16_t kControlHeaderVersion = 1;
 constexpr uint32_t kMaxControlPayloadSize = 1u << 20;
 
@@ -1069,4 +1069,4 @@ Cluster::recv_any(void* buffer, size_t length, Tag tag, Tag tag_mask) {
     return impl_->worker_->tag_recv(buffer, length, tag, tag_mask);
 }
 
-}  // namespace p2p
+}  // namespace axon

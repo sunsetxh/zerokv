@@ -1,9 +1,9 @@
-# P2P 高性能传输库 — Master/Slave 服务发现与别名路由设计 V3
+# AXON 高性能传输库 — Master/Slave 服务发现与别名路由设计 V3
 
 > 角色: 技术架构设计
 > 日期: 2026-03-16
 > 状态: 根据 Copilot 两轮 review 重写
-> 目标: 为当前 `p2p` 增加基于 `master + multiple slaves` 的服务发现、成员管理、别名寻址与点对点数据面路由能力，并明确线程模型、控制面 framing、故障语义、master 的数据面职责，以及命令队列的异步完成模型。
+> 目标: 为当前 `axon` 增加基于 `master + multiple slaves` 的服务发现、成员管理、别名寻址与点对点数据面路由能力，并明确线程模型、控制面 framing、故障语义、master 的数据面职责，以及命令队列的异步完成模型。
 
 ---
 
@@ -158,7 +158,7 @@ V3 明确：
 |                 Control Plane (TCP, framed protocol)             |
 |  HELLO | REGISTER | MEMBERSHIP_UPDATE | HEARTBEAT | DISCONNECT   |
 +------------------------------------------------------------------+
-|                     Existing p2p Data Plane                      |
+|                     Existing axon Data Plane                      |
 |             Worker | Listener | Endpoint | tag/stream            |
 +------------------------------------------------------------------+
 |                               UCX                                |
@@ -167,9 +167,9 @@ V3 明确：
 
 新增模块建议：
 
-- `include/p2p/cluster.h`
+- `include/axon/cluster.h`
 - `src/cluster.cpp`
-- `include/p2p/internal/discovery.h`
+- `include/axon/internal/discovery.h`
 - `src/discovery.cpp`
 
 注意：
@@ -505,7 +505,7 @@ master 的 `kReady` 条件：
 
 ```cpp
 struct ControlFrameHeader {
-    uint32_t magic = 0x50325031;  // "P2P1"
+    uint32_t magic = 0x50325031;  // "AXON1"
     uint16_t header_version = 1;  // fixed framing version
     uint16_t type = 0;
     uint32_t payload_size = 0;
@@ -899,7 +899,7 @@ enum class ClusterErrorCode : uint16_t {
 
 进入代码实现前，建议先做一个小 PR，只包含：
 
-1. `include/p2p/cluster.h`
+1. `include/axon/cluster.h`
 2. `ClusterState`
 3. `PeerDescriptor`
 4. `MembershipSnapshot`

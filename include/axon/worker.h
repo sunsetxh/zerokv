@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file p2p/worker.h
+/// @file axon/worker.h
 /// @brief Worker – the UCX progress engine and endpoint factory.
 ///
 /// Each Worker owns one ucp_worker_h. The implementation enables UCX's
@@ -8,13 +8,13 @@
 /// lifecycle control as coordinated operations.
 ///
 /// Usage:
-///   auto worker = p2p::Worker::create(ctx);
+///   auto worker = axon::Worker::create(ctx);
 ///   auto ep     = worker->connect("192.168.1.2:13337");
 
-#include "p2p/common.h"
-#include "p2p/config.h"
-#include "p2p/future.h"
-#include "p2p/memory.h"
+#include "axon/common.h"
+#include "axon/config.h"
+#include "axon/future.h"
+#include "axon/memory.h"
 
 #include <chrono>
 #include <functional>
@@ -24,7 +24,7 @@
 #include <atomic>
 #include <condition_variable>
 
-namespace p2p {
+namespace axon {
 
 // Forward
 class Context;
@@ -185,4 +185,4 @@ private:
     friend class Endpoint;
 };
 
-}  // namespace p2p
+}  // namespace axon

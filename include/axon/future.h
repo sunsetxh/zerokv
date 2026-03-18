@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file p2p/future.h
+/// @file axon/future.h
 /// @brief Asynchronous operation primitives: Request, Future<T>, callback support.
 ///
 /// Design rationale:
@@ -9,7 +9,7 @@
 ///   - Callbacks are optional; users may poll, wait, or compose futures.
 ///   - Inspired by std::future but non-blocking by default.
 
-#include "p2p/common.h"
+#include "axon/common.h"
 
 #include <ucp/api/ucp.h>
 
@@ -19,7 +19,7 @@
 #include <optional>
 #include <variant>
 
-namespace p2p {
+namespace axon {
 
 // ---------------------------------------------------------------------------
 // Request – low-level async handle
@@ -324,7 +324,7 @@ private:
     mutable bool ready_ = true;
 };
 
-// Forward declare Endpoint (included via p2p/endpoint.h in user code)
+// Forward declare Endpoint (included via axon/endpoint.h in user code)
 // The template will be instantiated for std::shared_ptr<Endpoint>
 
 // ---------------------------------------------------------------------------
@@ -341,4 +341,4 @@ template <typename T>
 std::optional<size_t> wait_any(std::vector<Future<T>>& futures,
                                std::chrono::milliseconds timeout = std::chrono::milliseconds{-1});
 
-}  // namespace p2p
+}  // namespace axon

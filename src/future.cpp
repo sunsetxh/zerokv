@@ -1,7 +1,7 @@
-#include "p2p/future.h"
+#include "axon/future.h"
 
-#include "p2p/common.h"
-#include "p2p/endpoint.h"
+#include "axon/common.h"
+#include "axon/endpoint.h"
 
 #include <ucp/api/ucp.h>
 
@@ -9,7 +9,7 @@
 #include <functional>
 #include <vector>
 
-namespace p2p {
+namespace axon {
 
 // ============================================================================
 // Request
@@ -174,4 +174,4 @@ void Request::populate_recv_info() const {
     // Completion metadata is captured via per-operation callbacks.
 }
 
-} // namespace p2p
+} // namespace axon

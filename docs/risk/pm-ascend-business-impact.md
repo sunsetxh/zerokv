@@ -61,7 +61,7 @@
 
 ### FlagCX 竞争威胁
 
-FlagCX（智源研究院）已实现多芯通信统一抽象（NCCL+HCCL+RCCL+MUSACCL），但聚焦 Collective 而非 P2P。我们的差异化需重新定义为：**"零SM消耗 + 双栈 + P2P专注 + KV Cache优化"的组合**。
+FlagCX（智源研究院）已实现多芯通信统一抽象（NCCL+HCCL+RCCL+MUSACCL），但聚焦 Collective 而非 AXON。我们的差异化需重新定义为：**"零SM消耗 + 双栈 + AXON专注 + KV Cache优化"的组合**。
 
 ---
 
@@ -71,7 +71,7 @@ FlagCX（智源研究院）已实现多芯通信统一抽象（NCCL+HCCL+RCCL+MU
 2. **PoC 前置到第一期** — 技术不确定性尽早消除
 3. **寻求华为合作** — 加入昇腾开发者生态计划
 4. **法务审查许可证** — CANN License 与项目 License 的兼容性
-5. **与 FlagCX 探讨互补** — 他们做 Collective，我们做 P2P
+5. **与 FlagCX 探讨互补** — 他们做 Collective，我们做 AXON
 
 ---
 

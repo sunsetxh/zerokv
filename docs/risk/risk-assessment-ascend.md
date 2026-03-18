@@ -21,9 +21,9 @@
 | 能力 | 状态 | 说明 |
 |------|------|------|
 | 独立 C API | **可用** | 不依赖 MindSpore/PyTorch，`hccl/hccl.h` + `libhccl.so` |
-| P2P send/recv | **可用** | `HcclSend()` / `HcclRecv()`，已有测试代码验证 |
+| AXON send/recv | **可用** | `HcclSend()` / `HcclRecv()`，已有测试代码验证 |
 | 集合通信全集 | **可用** | AllReduce/Broadcast/AllGather/ReduceScatter/AlltoAll |
-| 批量P2P | **可用** | `HcclBatchSendRecv()`（NCCL无此API） |
+| 批量AXON | **可用** | `HcclBatchSendRecv()`（NCCL无此API） |
 | 异步stream | **可用** | `aclrtStream`，与CUDA `cudaStream_t` 模型一致 |
 | 设备内存管理 | **可用** | `aclrtMalloc/Free`，支持VMM和跨进程IPC |
 
@@ -64,7 +64,7 @@
 
 | 原始风险 | 结论 |
 |---------|------|
-| HCCL 不支持 P2P send/recv | **已排除** — API 已确认存在，有测试代码 |
+| HCCL 不支持 AXON send/recv | **已排除** — API 已确认存在，有测试代码 |
 | Plugin 接口无法映射 HCCL | **已排除** — 1:1 映射已逐一验证 |
 | 需要自研 UCX Ascend Transport | **已排除** — HCCL Plugin 方案更优，无需扩展 UCX |
 
@@ -76,7 +76,7 @@
 | CANN 版本碎片化(8.0 vs 8.5 breaking change) | **中** | 40% | 建立多版本CI矩阵 |
 | HCCL 许可证合规问题 | **中** | 30% | 法务审查 CANN Open Software License v1.0 |
 | 跨进程 IPC API 不成熟(VMM V2) | **中** | 40% | 先不依赖IPC，用HCCL原生通信 |
-| FlagCX 抢占市场定位 | **高** | 60% | 明确差异化为P2P专注；考虑互补合作 |
+| FlagCX 抢占市场定位 | **高** | 60% | 明确差异化为AXON专注；考虑互补合作 |
 
 ---
 
@@ -95,12 +95,12 @@
 | # | 行动 | 负责人 | 时间 | 优先级 |
 |---|------|--------|------|--------|
 | 1 | 获取 Ascend NPU 开发环境（加入昇腾开发者计划或云端实例） | PM | 1周 | **P0** |
-| 2 | 编写独立 HCCL P2P send/recv 测试程序，验证基础可行性 | Dev | 1-2周 | **P0** |
+| 2 | 编写独立 HCCL AXON send/recv 测试程序，验证基础可行性 | Dev | 1-2周 | **P0** |
 | 3 | 法务审查 CANN Open Software License v1.0 与项目许可证兼容性 | PM | 2周 | **P0** |
 | 4 | 基于已生成的 hccl_plugin.cpp 骨架，在真实环境编译链接验证 | Dev | 2周 | P1 |
 | 5 | Plugin.h 增强：新增 `batch_send_recv()` 可选接口 | Dev | 1周 | P1 |
 | 6 | Plugin.h 增强：`create_communicator()` 增加 device_id/CommOptions | Dev | 1周 | P1 |
-| 7 | 与 FlagCX 团队建立联系，探讨互补合作（Collective vs P2P） | PM | 2周 | P1 |
+| 7 | 与 FlagCX 团队建立联系，探讨互补合作（Collective vs AXON） | PM | 2周 | P1 |
 | 8 | 建立 CANN 多版本(8.0/8.5) CI 测试矩阵 | QA | 第二期 | P2 |
 
 ---
@@ -112,7 +112,7 @@
 | 文件 | 产出方 | 说明 |
 |------|--------|------|
 | `src/plugin/hccl_plugin.cpp` | Dev | HCCL Plugin 骨架实现（可编译skeleton） |
-| `CMakeLists.txt` (更新) | Dev | 新增 `P2P_BUILD_HCCL` 构建选项 |
+| `CMakeLists.txt` (更新) | Dev | 新增 `AXON_BUILD_HCCL` 构建选项 |
 | `docs/risk-assessment-ascend.md` | Coord | 本报告 |
 
 ### 各角色完整报告（归档在 agent 输出中）

@@ -1,4 +1,4 @@
-# P2P Transport Library — UCX Research Report
+# AXON Transport Library — UCX Research Report
 
 > Role: Technical Architect (Arch)
 > Date: 2026-03-04
@@ -840,10 +840,10 @@ static void tag_send_callback(void* ucx_request, ucs_status_t status,
                                void* user_data) {
     // user_data is whatever was set in request_param.user_data
     // For our Future<void> model, user_data IS the promise pointer
-    auto* promise = static_cast<p2p::internal::SendPromise*>(user_data);
+    auto* promise = static_cast<axon::internal::SendPromise*>(user_data);
     promise->set_result(status == UCS_OK
-                        ? p2p::Status::OK()
-                        : p2p::Status{ucx_to_p2p_error(status)});
+                        ? axon::Status::OK()
+                        : axon::Status{ucx_to_axon_error(status)});
     // promise->set_result() atomically marks the future as ready
     // The Future's .get() / .ready() poll will see this
 
@@ -862,7 +862,7 @@ if (req == NULL) {
     // Fast path: already done, no callback, no heap allocation for this operation
     promise->set_result(Status::OK());
 } else if (UCS_PTR_IS_ERR(req)) {
-    promise->set_result(Status{ucx_to_p2p_error(UCS_PTR_STATUS(req))});
+    promise->set_result(Status{ucx_to_axon_error(UCS_PTR_STATUS(req))});
 } else {
     // Slow path: will complete via callback
     // The UCX request is allocated from UCX's internal pool (not malloc)
@@ -905,7 +905,7 @@ UCX ships with both a `.pc` (pkg-config) file and a CMake config package startin
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(UCX REQUIRED IMPORTED_TARGET ucx)
 # Provides: PkgConfig::UCX target with include dirs, link libs, and compiler flags
-target_link_libraries(p2p PUBLIC PkgConfig::UCX pthread)
+target_link_libraries(axon PUBLIC PkgConfig::UCX pthread)
 ```
 
 This works reliably when `PKG_CONFIG_PATH` is set to the UCX installation's `lib/pkgconfig` directory.
@@ -1017,7 +1017,7 @@ else()
     endif()
 endif()
 
-target_link_libraries(p2p PUBLIC ${UCX_TARGET} pthread)
+target_link_libraries(axon PUBLIC ${UCX_TARGET} pthread)
 ```
 
 **Alternatives Considered**:
@@ -1032,7 +1032,7 @@ target_link_libraries(p2p PUBLIC ${UCX_TARGET} pthread)
 
 ### 2.2 Shared and Static Library Targets
 
-**Decision**: Build both `p2p` (shared, `.so`) and `p2p_static` (static, `.a`) from the same source list; export both in the CMake install package.
+**Decision**: Build both `axon` (shared, `.so`) and `axon_static` (static, `.a`) from the same source list; export both in the CMake install package.
 
 **Rationale**:
 
@@ -1040,29 +1040,29 @@ Shared libraries are the default for development (faster link, easier `LD_PRELOA
 
 ```cmake
 # Shared sources (define once, use twice)
-file(GLOB_RECURSE P2P_SOURCES
+file(GLOB_RECURSE AXON_SOURCES
     src/core/*.cpp
     src/transport/*.cpp
     src/memory/*.cpp
 )
 
 # Shared library
-add_library(p2p SHARED ${P2P_SOURCES})
-set_target_properties(p2p PROPERTIES
+add_library(axon SHARED ${AXON_SOURCES})
+set_target_properties(axon PROPERTIES
     VERSION   ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}
     POSITION_INDEPENDENT_CODE ON
 )
 
 # Static library (same sources, different target name)
-add_library(p2p_static STATIC ${P2P_SOURCES})
-set_target_properties(p2p_static PROPERTIES
-    OUTPUT_NAME p2p    # outputs libp2p.a, not libp2p_static.a
+add_library(axon_static STATIC ${AXON_SOURCES})
+set_target_properties(axon_static PROPERTIES
+    OUTPUT_NAME axon    # outputs libaxon.a, not libaxon_static.a
     POSITION_INDEPENDENT_CODE ON   # needed if .a is linked into .so
 )
 
 # Apply identical interface definitions to both
-foreach(_target p2p p2p_static)
+foreach(_target axon axon_static)
     target_include_directories(${_target}
         PUBLIC  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
                 $<INSTALL_INTERFACE:include>
@@ -1078,24 +1078,24 @@ foreach(_target p2p p2p_static)
 endforeach()
 
 # Install both
-install(TARGETS p2p p2p_static EXPORT p2pTargets
+install(TARGETS axon axon_static EXPORT axonTargets
     LIBRARY  DESTINATION lib
     ARCHIVE  DESTINATION lib
     RUNTIME  DESTINATION bin
 )
 
 # CMake package export
-install(EXPORT p2pTargets
-    FILE      p2pConfig.cmake
-    NAMESPACE p2p::
-    DESTINATION lib/cmake/p2p
+install(EXPORT axonTargets
+    FILE      axonConfig.cmake
+    NAMESPACE axon::
+    DESTINATION lib/cmake/axon
 )
-install(FILES cmake/p2pConfigVersion.cmake DESTINATION lib/cmake/p2p)
+install(FILES cmake/axonConfigVersion.cmake DESTINATION lib/cmake/axon)
 
 # Version file
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/p2pConfigVersion.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/axonConfigVersion.cmake"
     VERSION       ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
@@ -1109,7 +1109,7 @@ For release builds, enable LTO to allow the linker to inline across the library 
 include(CheckIPOSupported)
 check_ipo_supported(RESULT lto_supported OUTPUT lto_error)
 if(lto_supported)
-    set_target_properties(p2p PROPERTIES
+    set_target_properties(axon PROPERTIES
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE
     )
 endif()
@@ -1159,7 +1159,7 @@ if(NOT benchmark_FOUND)
 endif()
 
 # --- Unit Tests ---
-add_executable(p2p_tests
+add_executable(axon_tests
     unit/test_status.cpp
     unit/test_memory.cpp
     unit/test_future.cpp
@@ -1167,38 +1167,38 @@ add_executable(p2p_tests
     unit/test_endpoint.cpp
     unit/test_tag_matching.cpp
 )
-target_link_libraries(p2p_tests PRIVATE
-    p2p
+target_link_libraries(axon_tests PRIVATE
+    axon
     GTest::gtest_main
     GTest::gmock
 )
-target_compile_options(p2p_tests PRIVATE -fsanitize=address,undefined)
-target_link_options(p2p_tests PRIVATE -fsanitize=address,undefined)
+target_compile_options(axon_tests PRIVATE -fsanitize=address,undefined)
+target_link_options(axon_tests PRIVATE -fsanitize=address,undefined)
 
 include(GoogleTest)
-gtest_discover_tests(p2p_tests
+gtest_discover_tests(axon_tests
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     PROPERTIES TIMEOUT 30
 )
 
 # --- Benchmarks ---
-add_executable(p2p_benchmarks
+add_executable(axon_benchmarks
     bench/bench_tag_send.cpp
     bench/bench_memory_registration.cpp
     bench/bench_future.cpp
 )
-target_link_libraries(p2p_benchmarks PRIVATE
-    p2p
+target_link_libraries(axon_benchmarks PRIVATE
+    axon
     benchmark::benchmark_main
 )
-target_compile_options(p2p_benchmarks PRIVATE -O3 -march=native -DNDEBUG)
+target_compile_options(axon_benchmarks PRIVATE -O3 -march=native -DNDEBUG)
 ```
 
 **CTest Integration**:
 
 ```cmake
 # In root CMakeLists.txt
-if(P2P_BUILD_TESTS)
+if(AXON_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
@@ -1241,9 +1241,9 @@ spdlog is a header-only (or compiled) fast logging library with asynchronous bac
 
 ```cmake
 # In root CMakeLists.txt
-option(P2P_ENABLE_LOGGING "Enable spdlog logging (disable for zero-overhead hot path)" ON)
+option(AXON_ENABLE_LOGGING "Enable spdlog logging (disable for zero-overhead hot path)" ON)
 
-if(P2P_ENABLE_LOGGING)
+if(AXON_ENABLE_LOGGING)
     find_package(spdlog CONFIG QUIET)
     if(NOT spdlog_FOUND)
         FetchContent_Declare(
@@ -1254,8 +1254,8 @@ if(P2P_ENABLE_LOGGING)
         )
         FetchContent_MakeAvailable(spdlog)
     endif()
-    target_link_libraries(p2p PRIVATE spdlog::spdlog)
-    target_compile_definitions(p2p PRIVATE P2P_LOGGING_ENABLED)
+    target_link_libraries(axon PRIVATE spdlog::spdlog)
+    target_compile_definitions(axon PRIVATE AXON_LOGGING_ENABLED)
 endif()
 ```
 
@@ -1263,17 +1263,17 @@ endif()
 
 ```cpp
 // src/core/logging.h  (internal header)
-#ifdef P2P_LOGGING_ENABLED
+#ifdef AXON_LOGGING_ENABLED
 #  include <spdlog/spdlog.h>
-#  define P2P_LOG_DEBUG(...)  spdlog::debug(__VA_ARGS__)
-#  define P2P_LOG_INFO(...)   spdlog::info(__VA_ARGS__)
-#  define P2P_LOG_WARN(...)   spdlog::warn(__VA_ARGS__)
-#  define P2P_LOG_ERROR(...)  spdlog::error(__VA_ARGS__)
+#  define AXON_LOG_DEBUG(...)  spdlog::debug(__VA_ARGS__)
+#  define AXON_LOG_INFO(...)   spdlog::info(__VA_ARGS__)
+#  define AXON_LOG_WARN(...)   spdlog::warn(__VA_ARGS__)
+#  define AXON_LOG_ERROR(...)  spdlog::error(__VA_ARGS__)
 #else
-#  define P2P_LOG_DEBUG(...)  do {} while(0)
-#  define P2P_LOG_INFO(...)   do {} while(0)
-#  define P2P_LOG_WARN(...)   do {} while(0)
-#  define P2P_LOG_ERROR(...)  do {} while(0)
+#  define AXON_LOG_DEBUG(...)  do {} while(0)
+#  define AXON_LOG_INFO(...)   do {} while(0)
+#  define AXON_LOG_WARN(...)   do {} while(0)
+#  define AXON_LOG_ERROR(...)  do {} while(0)
 #endif
 ```
 
@@ -1369,20 +1369,20 @@ T Future<T>::get() {
 
 ### 3.2 std::error_code Integration
 
-**Decision**: Implement a custom `std::error_category` for `p2p::ErrorCode`; register via `is_error_code_enum` specialization to enable implicit conversion.
+**Decision**: Implement a custom `std::error_category` for `axon::ErrorCode`; register via `is_error_code_enum` specialization to enable implicit conversion.
 
 **Rationale**:
 
-`std::error_code` integration allows p2p errors to work with generic error-handling code (logging frameworks, standard library I/O error handling, Asio, etc.) without any conversion layer.
+`std::error_code` integration allows axon errors to work with generic error-handling code (logging frameworks, standard library I/O error handling, Asio, etc.) without any conversion layer.
 
 ```cpp
 // common.h (already implemented in this project)
 
 // 1. Define the category class
-class P2PErrorCategory : public std::error_category {
+class AXONErrorCategory : public std::error_category {
 public:
     const char* name() const noexcept override {
-        return "p2p";
+        return "axon";
     }
 
     std::string message(int ev) const override {
@@ -1398,7 +1398,7 @@ public:
         }
     }
 
-    // Optional: map p2p errors to equivalent std::errc conditions
+    // Optional: map axon errors to equivalent std::errc conditions
     std::error_condition default_error_condition(int ev) const noexcept override {
         switch (static_cast<ErrorCode>(ev)) {
             case ErrorCode::kConnectionRefused:
@@ -1414,23 +1414,23 @@ public:
 };
 
 // 2. Singleton accessor
-const std::error_category& p2p_category() noexcept {
-    static P2PErrorCategory cat;
+const std::error_category& axon_category() noexcept {
+    static AXONErrorCategory cat;
     return cat;
 }
 
 // 3. Factory function
 inline std::error_code make_error_code(ErrorCode ec) noexcept {
-    return {static_cast<int>(ec), p2p_category()};
+    return {static_cast<int>(ec), axon_category()};
 }
 ```
 
 ```cpp
 // namespace std (in common.h)
 namespace std {
-    template<> struct is_error_code_enum<p2p::ErrorCode> : true_type {};
+    template<> struct is_error_code_enum<axon::ErrorCode> : true_type {};
 }
-// This enables: std::error_code ec = p2p::ErrorCode::kConnectionRefused;
+// This enables: std::error_code ec = axon::ErrorCode::kConnectionRefused;
 ```
 
 **Usage in error-generic code**:
@@ -1483,7 +1483,7 @@ if (!status.ok()) [[unlikely]] {
 // Status::OK() = { code_ = kSuccess, message_ = "" (empty, no heap) }
 //
 // On the error path: allocate the string only if there's a message
-Status ucx_to_p2p_status(ucs_status_t s) {
+Status ucx_to_axon_status(ucs_status_t s) {
     if (s == UCS_OK) return Status::OK();   // zero allocation
 
     // Only here do we pay the string construction cost
@@ -1703,7 +1703,7 @@ Future<void> Endpoint::tag_send(const void* buf, size_t len, Tag tag) {
                         | UCP_OP_ATTR_FIELD_USER_DATA;
     params.cb.send      = [](void* req, ucs_status_t s, void* ud) {
         auto* st = static_cast<SharedState<void>*>(ud);
-        st->set_result(ucx_to_p2p_status(s));
+        st->set_result(ucx_to_axon_status(s));
         // Release back to pool is done by Future destructor
         ucp_request_free(req);
     };
@@ -1715,7 +1715,7 @@ Future<void> Endpoint::tag_send(const void* buf, size_t len, Tag tag) {
         // Immediate: no UCX request allocated, callback not called
         state->set_result(Status::OK());
     } else if (UCS_PTR_IS_ERR(ucx_req)) {
-        state->set_result(ucx_to_p2p_status(UCS_PTR_STATUS(ucx_req)));
+        state->set_result(ucx_to_axon_status(UCS_PTR_STATUS(ucx_req)));
     }
     // else: pending, callback will call set_result
 
@@ -1808,7 +1808,7 @@ for (auto& msg : messages) {
 }
 
 // Drive progress until all complete
-p2p::Status result = p2p::wait_all(sends);
+axon::Status result = axon::wait_all(sends);
 if (!result.ok()) { /* first error */ }
 ```
 

@@ -5,16 +5,16 @@
 ///   This example demonstrates the tag-matching API.
 ///   Full two-process test requires bootstrap mechanism.
 
-#include <p2p/config.h>
-#include <p2p/worker.h>
-#include <p2p/endpoint.h>
+#include <axon/config.h>
+#include <axon/worker.h>
+#include <axon/endpoint.h>
 
 #include <iostream>
 #include <vector>
 #include <cstring>
 #include <thread>
 
-using namespace p2p;
+using namespace axon;
 
 int main() {
     // Create config - use TCP or shmem

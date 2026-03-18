@@ -9,16 +9,16 @@
 /// Note: RDMA requires actual hardware (InfiniBand, RoCE) or proper setup.
 ///       This example shows the API usage but cannot run without RDMA hardware.
 
-#include <p2p/config.h>
-#include <p2p/worker.h>
-#include <p2p/endpoint.h>
-#include <p2p/memory.h>
+#include <axon/config.h>
+#include <axon/worker.h>
+#include <axon/endpoint.h>
+#include <axon/memory.h>
 
 #include <iostream>
 #include <vector>
 #include <cstring>
 
-using namespace p2p;
+using namespace axon;
 
 int main() {
     // Create config
@@ -78,7 +78,7 @@ int main() {
     // Note about RDMA hardware
     std::cout << "\nTo test RDMA:\n";
     std::cout << "  1. Use RDMA hardware (InfiniBand, RoCE)\n";
-    std::cout << "  2. Set P2P_TRANSPORTS=rdma,rc,verbs\n";
+    std::cout << "  2. Set AXON_TRANSPORTS=rdma,rc,verbs\n";
     std::cout << "  3. Establish connection and exchange rkeys\n";
 
     return 0;

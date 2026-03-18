@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "p2p/config.h"
+#include "axon/config.h"
 
-using namespace p2p;
+using namespace axon;
 
 TEST(ConfigTest, DefaultConfig) {
     auto config = Config::builder().build();
@@ -18,7 +18,7 @@ TEST(ConfigTest, BuilderPattern) {
 
 TEST(ConfigTest, FromEnv) {
     // Set environment variable
-    setenv("P2P_TRANSPORT", "tcp", 1);
+    setenv("AXON_TRANSPORT", "tcp", 1);
     auto config = Config::builder()
         .from_env()
         .build();

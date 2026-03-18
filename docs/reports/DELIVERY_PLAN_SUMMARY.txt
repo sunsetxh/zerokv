@@ -1,5 +1,5 @@
 ================================================================================
-P2P HIGH-PERFORMANCE TRANSPORT LIBRARY MVP
+AXON HIGH-PERFORMANCE TRANSPORT LIBRARY MVP
 DELIVERY PLAN SUMMARY
 ================================================================================
 
@@ -78,7 +78,7 @@ M2: HELLO WORLD MESSAGING (Week 14)
   Use Cases Enabled: Gradient synchronization, KV Cache transfer
   
 M3: RDMA READY (Week 18)
-  Goal: Complete P2P feature set
+  Goal: Complete AXON feature set
   Acceptance: RDMA put/get works with remote keys
   Use Cases Enabled: Parameter servers, low-latency inference
   
@@ -260,7 +260,7 @@ WHAT'S NOT IN MVP (Deferred to Phase 2+)
 ❌ Multi-path RDMA       (Phase 3 - advanced)
 ❌ Observability (metrics/tracing) (Phase 3 - ops nice-to-have)
 
-MVP is intentionally focused on core P2P functionality.
+MVP is intentionally focused on core AXON functionality.
 Phase 2 will add Python, optimization, and plugin ecosystem.
 
 ================================================================================
@@ -358,7 +358,7 @@ DELIVERY_PLAN_SUMMARY.txt (this file)
   → Executive summary; can print and frame!
   → For: One-pagers, presentations, quick lookup
 
-/specs/001-p2p-transport-mvp/spec.md
+/specs/001-axon-transport-mvp/spec.md
   → User stories, acceptance scenarios, requirements
   → For: Development team, test team
   
@@ -374,7 +374,7 @@ DELIVERY_PLAN_SUMMARY.txt (this file)
 THE ELEVATOR PITCH (30 seconds)
 ================================================================================
 
-We will deliver a production-ready P2P transport library in 20 weeks
+We will deliver a production-ready AXON transport library in 20 weeks
 with a 6–8 person team:
 
   Week 4:   Config & initialization (foundation)

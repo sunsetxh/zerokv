@@ -8,7 +8,7 @@
 
 ## 一、项目定位
 
-> 面向AI训练和推理场景的统一P2P传输库，基于UCX实现零SM消耗的高性能数据传输，同时支持NVIDIA GPU和华为Ascend NPU。
+> 面向AI训练和推理场景的统一AXON传输库，基于UCX实现零SM消耗的高性能数据传输，同时支持NVIDIA GPU和华为Ascend NPU。
 
 核心差异化：不做NCCL替代品，而是**统一传输层 + 集合通信Plugin扩展**。
 
@@ -26,7 +26,7 @@
 
 ### 目标用户
 
-1. **AI基础设施工程师** — 痛点：NCCL/HCCL双栈维护、P2P传输消耗GPU SM
+1. **AI基础设施工程师** — 痛点：NCCL/HCCL双栈维护、AXON传输消耗GPU SM
 2. **推理系统开发者** — 痛点：KV Cache传输方案碎片化、需Python+C++双接口
 3. **ML框架开发者** — 痛点：UCX-Py已停止维护、需与NCCL/HCCL无缝协作
 4. **HPC研究人员** — 痛点：MPI接口老旧、需更底层控制
@@ -36,8 +36,8 @@
 | 维度 | NCCL | HCCL | Gloo | UCX/UCXX | NIXL | Mooncake TE | **本项目** |
 |------|------|------|------|----------|------|-------------|-----------|
 | 硬件支持 | NVIDIA only | Ascend only | CPU为主 | 多硬件 | NVIDIA为主 | 多硬件 | **双栈** |
-| 通信类型 | Collective+P2P | Collective+P2P | Collective | P2P+RMA | P2P | P2P | **P2P+Plugin扩展** |
-| GPU SM消耗 | P2P消耗SM | 类似 | N/A | 零 | 零 | 零 | **零SM** |
+| 通信类型 | Collective+AXON | Collective+AXON | Collective | AXON+RMA | AXON | AXON | **AXON+Plugin扩展** |
+| GPU SM消耗 | AXON消耗SM | 类似 | N/A | 零 | 零 | 零 | **零SM** |
 | KV Cache优化 | 无 | 无 | 无 | 无 | 专门优化 | 专门优化 | **内建支持** |
 | 非连续内存 | 有限 | 有限 | 无 | 支持 | 支持 | 支持 | **一等公民** |
 
@@ -49,9 +49,9 @@
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  Python API (nanobind + asyncio)                │  python/p2p/
+│  Python API (nanobind + asyncio)                │  python/axon/
 ├─────────────────────────────────────────────────┤
-│  C++ Public API                                 │  include/p2p/
+│  C++ Public API                                 │  include/axon/
 │  Context │ Worker │ Endpoint │ Future<T>        │
 ├─────────────────────────────────────────────────┤
 │  Plugin Layer (NCCL / HCCL / Custom)            │  plugin/plugin.h
@@ -124,7 +124,7 @@ RegistrationCache → LRU + 区间树
 
 - `CollectivePlugin`抽象类：allreduce/broadcast/allgather/reduce_scatter/alltoall/send/recv
 - 注册方式：静态链接 / `dlopen`动态加载 / 目录自动扫描
-- 导出C工厂函数：`p2p_plugin_create()`
+- 导出C工厂函数：`axon_plugin_create()`
 
 ### 关键实现挑战方案
 
@@ -160,7 +160,7 @@ RegistrationCache → LRU + 区间树
 ### 关键SLA
 
 - GPU传输100%零拷贝（GPUDirect RDMA）
-- P2P传输期间GPU SM占用 = 0
+- AXON传输期间GPU SM占用 = 0
 - 连接建立 < 100ms
 - P99尾延迟 < 3x平均延迟
 - CPU开销 < 5%（单核）
@@ -208,12 +208,12 @@ RegistrationCache → LRU + 区间树
 
 | # | 功能 |
 |---|------|
-| M1 | 基于UCX的P2P send/recv和RMA put/get |
+| M1 | 基于UCX的AXON send/recv和RMA put/get |
 | M2 | CUDA GPU内存直接传输（GPUDirect RDMA） |
 | M3 | InfiniBand / RoCE RDMA传输后端 |
 | M4 | C++核心API（同步+异步） |
 | M5 | Python绑定（nanobind） |
-| M6 | 零SM消耗的P2P传输 |
+| M6 | 零SM消耗的AXON传输 |
 | M7 | 连接管理和端点发现 |
 | M8 | 错误处理和超时机制 |
 | M9 | 1KB-1GB全范围消息大小支持 |
@@ -236,7 +236,7 @@ W1 跨数据中心、W2 AMD ROCm、W3 容错弹性训练、W4 图编排调度
 
 ### 第一期 MVP
 
-- 核心P2P传输：tag send/recv + RMA put/get
+- 核心AXON传输：tag send/recv + RMA put/get
 - Host Memory + RDMA(IB/RoCE) + TCP
 - C++ API（同步+异步）
 - 基本错误处理
@@ -263,9 +263,9 @@ W1 跨数据中心、W2 AMD ROCm、W3 容错弹性训练、W4 图编排调度
 ## 十、已产出代码资产
 
 ```
-p2p/
+axon/
 ├── CMakeLists.txt                          # 构建配置 (95行)
-├── include/p2p/
+├── include/axon/
 │   ├── common.h                            # ErrorCode, Status, Tag, MemoryType (146行)
 │   ├── config.h                            # Config::Builder + Context (149行)
 │   ├── memory.h                            # MemoryRegion/Pool/Cache (182行)
@@ -273,12 +273,12 @@ p2p/
 │   ├── worker.h                            # Worker + Listener (144行)
 │   ├── endpoint.h                          # Endpoint: tag/RMA/stream/atomic (162行)
 │   ├── plugin/plugin.h                     # CollectivePlugin + Registry (254行)
-│   └── p2p.h                               # 聚合头文件 (12行)
+│   └── axon.h                               # 聚合头文件 (12行)
 ├── src/
 │   ├── transport/ucx_impl_notes.h          # 实现技术方案 (264行)
 │   ├── python/bindings.cpp                 # nanobind绑定 (367行)
 │   └── plugin/nccl_plugin.cpp              # NCCL Plugin骨架 (229行)
-├── python/p2p/
+├── python/axon/
 │   ├── __init__.py                         # 包入口 (68行)
 │   └── _core.pyi                           # 类型stub (496行)
 ├── examples/

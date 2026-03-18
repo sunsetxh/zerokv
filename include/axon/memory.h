@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file p2p/memory.h
+/// @file axon/memory.h
 /// @brief Memory registration, remote keys, and memory pool interfaces.
 ///
 /// Key design points:
@@ -9,12 +9,12 @@
 ///   - MemoryPool provides slab-based allocation of registered buffers.
 ///
 /// Usage:
-///   auto region = p2p::MemoryRegion::register_mem(ctx, ptr, len, MemoryType::kHost);
-///   auto pool   = p2p::MemoryPool::create(ctx, 64 * 1024 * 1024);
+///   auto region = axon::MemoryRegion::register_mem(ctx, ptr, len, MemoryType::kHost);
+///   auto pool   = axon::MemoryPool::create(ctx, 64 * 1024 * 1024);
 ///   auto buf    = pool->allocate(4096);
 
-#include "p2p/common.h"
-#include "p2p/config.h"
+#include "axon/common.h"
+#include "axon/config.h"
 
 #include <cstddef>
 #include <functional>
@@ -22,7 +22,7 @@
 #include <span>
 #include <vector>
 
-namespace p2p {
+namespace axon {
 
 // ---------------------------------------------------------------------------
 // MemoryRegion – registered memory for zero-copy RDMA
@@ -180,4 +180,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace p2p
+}  // namespace axon

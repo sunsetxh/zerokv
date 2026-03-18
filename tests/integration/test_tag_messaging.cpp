@@ -1,14 +1,14 @@
 #include <gtest/gtest.h>
-#include "p2p/config.h"
-#include "p2p/worker.h"
-#include "p2p/endpoint.h"
+#include "axon/config.h"
+#include "axon/worker.h"
+#include "axon/endpoint.h"
 
 #include <thread>
 #include <chrono>
 #include <vector>
 #include <cstring>
 
-using namespace p2p;
+using namespace axon;
 
 // Test fixture for messaging tests
 class TagMessagingTest : public ::testing::Test {

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-P2P is a high-performance C++ transport library built on UCX for point-to-point data transfer (1KB-1GB) over RDMA and TCP. It targets AI distributed training, KV Cache inference transfer, and HPC scenarios.
+AXON is a high-performance C++ transport library built on UCX for point-to-point data transfer (1KB-1GB) over RDMA and TCP. It targets AI distributed training, KV Cache inference transfer, and HPC scenarios.
 
 ## Build Commands
 
@@ -33,15 +33,15 @@ cd build && ctest -R UnitConfig --output-on-failure
 
 - **Runtime**: UCX >= 1.14 (`libucx-dev` on Ubuntu/Debian, `ucx-devel` on RHEL/CentOS)
 - **Build**: CMake >= 3.20, C++20 compiler (GCC >= 11 or Clang >= 14)
-- **Test**: Google Test (optional, for `P2P_BUILD_TESTS=ON`)
-- **Benchmark**: Google Benchmark (optional, for `P2P_BUILD_BENCHMARK=ON`)
+- **Test**: Google Test (optional, for `AXON_BUILD_TESTS=ON`)
+- **Benchmark**: Google Benchmark (optional, for `AXON_BUILD_BENCHMARK=ON`)
 
 ## CMake Options
 
-- `P2P_BUILD_STATIC` - Build static library (default: OFF)
-- `P2P_BUILD_EXAMPLES` - Build examples (default: ON)
-- `P2P_BUILD_TESTS` - Build tests (default: ON)
-- `P2P_BUILD_BENCHMARK` - Build benchmarks (default: ON)
+- `AXON_BUILD_STATIC` - Build static library (default: OFF)
+- `AXON_BUILD_EXAMPLES` - Build examples (default: ON)
+- `AXON_BUILD_TESTS` - Build tests (default: ON)
+- `AXON_BUILD_BENCHMARK` - Build benchmarks (default: ON)
 
 ## Architecture
 

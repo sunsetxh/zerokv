@@ -1,12 +1,12 @@
 #pragma once
 
-/// @file p2p/cluster.h
+/// @file axon/cluster.h
 /// @brief Cluster membership and alias-routing API skeleton.
 
-#include "p2p/common.h"
-#include "p2p/config.h"
-#include "p2p/future.h"
-#include "p2p/worker.h"
+#include "axon/common.h"
+#include "axon/config.h"
+#include "axon/future.h"
+#include "axon/worker.h"
 
 #include <chrono>
 #include <memory>
@@ -15,7 +15,7 @@
 #include <string_view>
 #include <vector>
 
-namespace p2p {
+namespace axon {
 
 enum class ClusterState {
     kInit,
@@ -120,4 +120,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace p2p
+}  // namespace axon

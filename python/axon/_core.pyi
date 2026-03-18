@@ -1,5 +1,5 @@
 """
-Type stubs for the p2p._core C extension module (built via nanobind).
+Type stubs for the axon._core C extension module (built via nanobind).
 
 This file serves as the definitive Python API reference.
 The actual _core.so is compiled from src/python/bindings.cpp.
@@ -64,8 +64,8 @@ class ErrorCode(enum.IntEnum):
 # Exceptions
 # ---------------------------------------------------------------------------
 
-class P2PError(Exception):
-    """Base exception for all P2P errors."""
+class AXONError(Exception):
+    """Base exception for all AXON errors."""
     code: ErrorCode
     message: str
 
@@ -131,7 +131,7 @@ class MemoryRegion:
 
 class Config:
     """
-    Configuration for a P2P Context.
+    Configuration for a AXON Context.
     """
 
     def __init__(

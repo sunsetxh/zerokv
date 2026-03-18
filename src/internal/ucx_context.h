@@ -5,7 +5,7 @@
 #include <memory>
 #include <string>
 
-namespace p2p {
+namespace axon {
 namespace internal {
 
 /// RAII wrapper for UCX context
@@ -36,4 +36,4 @@ private:
 };
 
 } // namespace internal
-} // namespace p2p
+} // namespace axon

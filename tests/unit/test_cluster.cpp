@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 
-#include "p2p/cluster.h"
-#include "p2p/config.h"
-#include "p2p/worker.h"
+#include "axon/cluster.h"
+#include "axon/config.h"
+#include "axon/worker.h"
 
-using namespace p2p;
+using namespace axon;
 
 TEST(ClusterTypesTest, RankAliasRoundTrip) {
     EXPECT_EQ(rank_alias(0), "RANK0");

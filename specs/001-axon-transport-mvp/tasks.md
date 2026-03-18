@@ -1,6 +1,6 @@
-# Tasks: P2P High-Performance Transport Library MVP
+# Tasks: AXON High-Performance Transport Library MVP
 
-**Input**: Design documents from `/specs/001-p2p-transport-mvp/`
+**Input**: Design documents from `/specs/001-axon-transport-mvp/`
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/
 
 **Tests**: Tests are NOT requested in spec (spec focuses on acceptance scenarios). Unit tests are implied by SC-009 (80% coverage).
@@ -22,7 +22,7 @@
 - [X] T001 Create CMakeLists.txt with UCX dependency, Google Test, Google Benchmark in cmake/
 - [X] T002 [P] Configure clang-format and clang-tidy in .clang-format and .clang-tidy
 - [X] T003 [P] Create cmake/FindUCX.cmake module for UCX discovery
-- [X] T004 Create initial project structure: include/p2p/, src/, src/internal/, tests/unit/, tests/integration/, tests/benchmark/, examples/
+- [X] T004 Create initial project structure: include/axon/, src/, src/internal/, tests/unit/, tests/integration/, tests/benchmark/, examples/
 
 **Checkpoint**: Project builds with `cmake .. && make`
 
@@ -51,7 +51,7 @@
 
 ### Implementation
 
-- [X] T011 [P] [US6] Implement Config::Builder in include/p2p/config.h
+- [X] T011 [P] [US6] Implement Config::Builder in include/axon/config.h
 - [X] T012 [US6] Implement Config::Builder::from_env() parsing in src/config.cpp
 - [X] T013 [US6] Implement Context::create() factory in src/config.cpp
 - [X] T014 [US6] Implement Context capability queries (supports_rma, supports_memory_type) in src/config.cpp
@@ -87,7 +87,7 @@
 ### Implementation
 
 - [X] T020 [P] [US1] Implement Request class wrapping ucs_status_ptr_t in src/future.cpp
-- [X] T021 [P] [US1] Implement Future<T> template with ready/get/then/on_complete in include/p2p/future.h
+- [X] T021 [P] [US1] Implement Future<T> template with ready/get/then/on_complete in include/axon/future.h
 - [X] T022 [US1] Implement Future<void> specialization in src/future.cpp
 - [X] T023 [US1] Implement Future<size_t> and Future<pair<size_t, Tag>> specializations in src/future.cpp
 - [X] T024 [US1] Implement Endpoint::tag_send() in src/endpoint.cpp
@@ -109,7 +109,7 @@
 - [X] T027 [P] [US5] Implement MemoryRegion::register_mem() in src/memory.cpp
 - [X] T028 [P] [US5] Implement MemoryRegion::allocate() in src/memory.cpp
 - [X] T029 [US5] Implement MemoryRegion::remote_key() serialization in src/memory.cpp
-- [X] T030 [US5] Implement RemoteKey class in include/p2p/memory.h
+- [X] T030 [US5] Implement RemoteKey class in include/axon/memory.h
 
 **Checkpoint**: Memory can be registered and remote keys obtained
 

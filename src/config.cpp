@@ -1,6 +1,6 @@
-#include "p2p/config.h"
+#include "axon/config.h"
 
-#include "p2p/common.h"
+#include "axon/common.h"
 
 #include <ucp/api/ucp.h>
 
@@ -8,7 +8,7 @@
 #include <string>
 #include <chrono>
 
-namespace p2p {
+namespace axon {
 
 // ============================================================================
 // Config::Impl
@@ -91,14 +91,14 @@ Config::Builder& Config::Builder::set(std::string key, std::string value) {
 }
 
 Config::Builder& Config::Builder::from_env() {
-    // P2P-specific options
-    if (auto* val = std::getenv("P2P_TRANSPORT")) {
+    // AXON-specific options
+    if (auto* val = std::getenv("AXON_TRANSPORT")) {
         impl_->transport_ = val;
     }
-    if (auto* val = std::getenv("P2P_NUM_WORKERS")) {
+    if (auto* val = std::getenv("AXON_NUM_WORKERS")) {
         impl_->num_workers_ = std::stoul(val);
     }
-    if (auto* val = std::getenv("P2P_MEM_POOL_SIZE")) {
+    if (auto* val = std::getenv("AXON_MEM_POOL_SIZE")) {
         impl_->memory_pool_size_ = std::stoul(val);
     }
 
@@ -313,4 +313,4 @@ bool Context::supports_hw_tag_matching() const noexcept {
     return false;
 }
 
-} // namespace p2p
+} // namespace axon

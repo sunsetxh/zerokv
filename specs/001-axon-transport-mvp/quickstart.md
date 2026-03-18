@@ -1,4 +1,4 @@
-# Quick Start Guide: P2P Transport Library
+# Quick Start Guide: AXON Transport Library
 
 ## Installation
 
@@ -42,22 +42,22 @@ cd ucx && ./contrib/configure-release && make -j$(nproc)
 ### 1. Basic Setup
 
 ```cpp
-#include <p2p/p2p.h>
+#include <axon/axon.h>
 
 int main() {
     // Create configuration
-    auto config = p2p::Config::builder()
+    auto config = axon::Config::builder()
         .set_transport("ucx")
         .set_num_workers(4)
         .build();
 
     // Create context
-    auto ctx = p2p::Context::create(config);
+    auto ctx = axon::Context::create(config);
 
     // Create worker
-    auto worker = p2p::Worker::create(ctx);
+    auto worker = axon::Worker::create(ctx);
 
-    std::cout << "P2P context ready!\n";
+    std::cout << "AXON context ready!\n";
     return 0;
 }
 ```
@@ -67,7 +67,7 @@ int main() {
 ```cpp
 // Server: Listen for connections
 auto listener = worker->listen("tcp://0.0.0.0:1234",
-    [](p2p::Endpoint::Ptr ep) {
+    [](axon::Endpoint::Ptr ep) {
         // Handle incoming connection
         std::vector<uint8_t> buffer(4096);
 
@@ -100,7 +100,7 @@ std::cout << "Message sent!\n";
 
 ```cpp
 // Non-blocking send with callback
-endpoint->tag_send(data, size, tag).on_complete([](p2p::Status st) {
+endpoint->tag_send(data, size, tag).on_complete([](axon::Status st) {
     if (st.ok()) {
         std::cout << "Send complete!\n";
     } else {
@@ -120,10 +120,10 @@ endpoint->tag_recv(buf, size, tag).then([](auto result) {
 
 ```cpp
 // Register memory on both sides
-auto local_reg = p2p::MemoryRegion::allocate(ctx, 1024 * 1024);
+auto local_reg = axon::MemoryRegion::allocate(ctx, 1024 * 1024);
 
 // Get remote key (sent via separate channel)
-p2p::RemoteKey remote_key = /* from peer */;
+axon::RemoteKey remote_key = /* from peer */;
 
 // RDMA Put: Write to remote memory
 auto future = endpoint->put(local_reg, 0,
@@ -138,10 +138,10 @@ future.get();
 ```cpp
 // Python asyncio integration (via Python bindings)
 import asyncio
-import p2p
+import axon
 
 async def main():
-    ctx = p2p.Context()
+    ctx = axon.Context()
     worker = ctx.create_worker()
 
     # Register callback for UCX events
@@ -161,9 +161,9 @@ asyncio.run(main())
 
 ```bash
 # Library options
-export P2P_TRANSPORT=ucx       # Transport: ucx, tcp, rdma
-export P2P_NUM_WORKERS=4       # Worker count (0=auto)
-export P2P_LOG_LEVEL=info      # Debug, info, warn, error
+export AXON_TRANSPORT=ucx       # Transport: ucx, tcp, rdma
+export AXON_NUM_WORKERS=4       # Worker count (0=auto)
+export AXON_LOG_LEVEL=info      # Debug, info, warn, error
 
 # UCX options (passed through)
 export UCX_TLS=rc,ud,sm,tcp   # Transport layers
@@ -174,7 +174,7 @@ export UCX_RNDV_THRESH=8192   # Rendezvous threshold
 ### Programmatic
 
 ```cpp
-auto config = p2p::Config::builder()
+auto config = axon::Config::builder()
     .set_transport("tcp")
     .set_num_workers(8)
     .set_connect_timeout(std::chrono::seconds(30))
@@ -199,14 +199,14 @@ self:rank              - Loopback (same process)
 
 ```cpp
 // Exact match
-ep->tag_recv(buf, size, 42, p2p::kTagMaskAll);
+ep->tag_recv(buf, size, 42, axon::kTagMaskAll);
 
 // Match any tag starting with context 0x1
-uint64_t tag = p2p::make_tag(0x1, user_tag);
+uint64_t tag = axon::make_tag(0x1, user_tag);
 ep->tag_recv(buf, size, tag, 0xFFFFFFFF00000000);
 
 // Wildcard receive
-ep->tag_recv(buf, size, p2p::kTagAny, 0);
+ep->tag_recv(buf, size, axon::kTagAny, 0);
 ```
 
 ### Error Handling

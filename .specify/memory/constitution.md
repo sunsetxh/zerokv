@@ -18,7 +18,7 @@
   Follow-up TODOs: None
 -->
 
-# P2P Transport Library Constitution
+# AXON Transport Library Constitution
 
 ## Core Principles
 

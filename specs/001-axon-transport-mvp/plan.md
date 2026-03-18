@@ -1,11 +1,11 @@
-# Implementation Plan: P2P High-Performance Transport Library MVP
+# Implementation Plan: AXON High-Performance Transport Library MVP
 
-**Branch**: `001-p2p-transport-mvp` | **Date**: 2026-03-04 | **Spec**: [spec.md](spec.md)
-**Input**: Feature specification from `/specs/001-p2p-transport-mvp/spec.md`
+**Branch**: `001-axon-transport-mvp` | **Date**: 2026-03-04 | **Spec**: [spec.md](spec.md)
+**Input**: Feature specification from `/specs/001-axon-transport-mvp/spec.md`
 
 ## Summary
 
-Build a high-performance P2P transport library on top of UCX, providing a C++20
+Build a high-performance AXON transport library on top of UCX, providing a C++20
 API for tag-matched messaging, RDMA one-sided operations, and connection
 lifecycle management. The library targets AI distributed training, KV Cache
 inference transfer, and HPC workloads, supporting message sizes from 0 bytes to
@@ -43,7 +43,7 @@ memory only, no GPU or Python bindings.
 ### Documentation (this feature)
 
 ```text
-specs/001-p2p-transport-mvp/
+specs/001-axon-transport-mvp/
 ├── plan.md              # This file
 ├── research.md          # Phase 0 output
 ├── data-model.md        # Phase 1 output
@@ -55,14 +55,14 @@ specs/001-p2p-transport-mvp/
 ### Source Code (repository root)
 
 ```text
-include/p2p/
+include/axon/
 ├── common.h             # ErrorCode, Status, Tag, MemoryType
 ├── config.h             # Config, Config::Builder, Context
 ├── worker.h             # Worker, Listener
 ├── endpoint.h           # Endpoint (tag_send/recv, put/get/flush)
 ├── future.h             # Future<T>, Request
 ├── memory.h             # MemoryRegion
-└── p2p.h               # Umbrella header
+└── axon.h               # Umbrella header
 
 src/
 ├── config.cpp           # Config/Context implementation
@@ -86,7 +86,7 @@ examples/
 CMakeLists.txt
 ```
 
-**Structure Decision**: Single-project library layout. Public headers in `include/p2p/`, implementation in `src/`.
+**Structure Decision**: Single-project library layout. Public headers in `include/axon/`, implementation in `src/`.
 
 ## Complexity Tracking
 

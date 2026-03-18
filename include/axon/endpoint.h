@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file p2p/endpoint.h
+/// @file axon/endpoint.h
 /// @brief Endpoint – a connection to a remote peer with send/recv and RDMA APIs.
 ///
 /// An Endpoint is always associated with exactly one Worker.
@@ -15,16 +15,16 @@
 ///   ep->put(local_region, remote_addr, remote_key);
 ///   ep->get(local_region, remote_addr, remote_key);
 
-#include "p2p/common.h"
-#include "p2p/config.h"
-#include "p2p/future.h"
-#include "p2p/memory.h"
-#include "p2p/worker.h"
+#include "axon/common.h"
+#include "axon/config.h"
+#include "axon/future.h"
+#include "axon/memory.h"
+#include "axon/worker.h"
 
 #include <memory>
 #include <string>
 
-namespace p2p {
+namespace axon {
 
 // Forward declarations
 class Worker;
@@ -174,4 +174,4 @@ private:
     friend class Worker;
 };
 
-}  // namespace p2p
+}  // namespace axon

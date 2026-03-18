@@ -1,4 +1,4 @@
-# P2P MVP Delivery Plan — Documentation Hub
+# AXON MVP Delivery Plan — Documentation Hub
 
 **Created**: 2026-03-04  
 **Status**: Final  
@@ -219,7 +219,7 @@ This stages value delivery and de-risks the schedule:
 - [`test-strategy.md`](test-strategy.md) — Test plan, performance baselines, CI/CD strategy
 
 **In specs**:
-- [`/specs/001-p2p-transport-mvp/spec.md`](/specs/001-p2p-transport-mvp/spec.md) — Full feature specification (6 user stories)
+- [`/specs/001-axon-transport-mvp/spec.md`](/specs/001-axon-transport-mvp/spec.md) — Full feature specification (6 user stories)
 
 ---
 
@@ -243,7 +243,7 @@ This stages value delivery and de-risks the schedule:
 4. Use for: Team allocation, milestone tracking, stakeholder communication
 
 ### As a Developer
-1. Focus on [`/specs/001-p2p-transport-mvp/spec.md`](/specs/001-p2p-transport-mvp/spec.md) for what to build
+1. Focus on [`/specs/001-axon-transport-mvp/spec.md`](/specs/001-axon-transport-mvp/spec.md) for what to build
 2. Glance at phase timeline to know what's in scope for your phase
 3. Use for: Sprint planning, acceptance criteria, merge readiness
 
@@ -276,12 +276,12 @@ This stages value delivery and de-risks the schedule:
 
 If you have questions about this plan, refer to the appropriate document:
 
-- **"What should we deliver?"** → Read `/specs/001-p2p-transport-mvp/spec.md`
+- **"What should we deliver?"** → Read `/specs/001-axon-transport-mvp/spec.md`
 - **"What's the timeline?"** → Read `DELIVERY_PLAN_SUMMARY.txt` or `pm-mvp-quick-reference.md`
 - **"Why this order?"** → Read full `pm-mvp-delivery-plan.md`, Part 1
 - **"What are the risks?"** → Read full `pm-mvp-delivery-plan.md`, Part 3
 - **"How do we implement this?"** → Read `report-arch-design.md` and `test-strategy.md`
-- **"What's the acceptance criteria?"** → Read `/specs/001-p2p-transport-mvp/spec.md`
+- **"What's the acceptance criteria?"** → Read `/specs/001-axon-transport-mvp/spec.md`
 
 ---
 

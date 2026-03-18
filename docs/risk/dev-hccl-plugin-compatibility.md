@@ -10,7 +10,7 @@
 
 ### 数据类型映射（完整覆盖）
 
-| P2P DataType | HCCL HcclDataType | 支持 |
+| AXON DataType | HCCL HcclDataType | 支持 |
 |--------------|-------------------|------|
 | kFloat16 | HCCL_DATA_TYPE_FP16 | 支持 |
 | kFloat32 | HCCL_DATA_TYPE_FP32 | 支持 |
@@ -23,7 +23,7 @@
 
 ### ReduceOp 映射
 
-| P2P ReduceOp | HCCL HcclReduceOp | 支持 |
+| AXON ReduceOp | HCCL HcclReduceOp | 支持 |
 |--------------|-------------------|------|
 | kSum | HCCL_REDUCE_SUM | 支持 |
 | kProd | HCCL_REDUCE_PROD | 支持 |
@@ -91,12 +91,12 @@ struct CommOptions {
 ## 四、产出文件
 
 - `src/plugin/hccl_plugin.cpp` — 骨架实现（可编译 skeleton）
-- `CMakeLists.txt` — 新增 `P2P_BUILD_HCCL` 构建选项
+- `CMakeLists.txt` — 新增 `AXON_BUILD_HCCL` 构建选项
 
 ---
 
 **参考资料：**
 - [HCCL hccl.h header](https://gitee.com/ascend/pytorch/blob/83742e7653ebd4747b61a1880f5115f85ed3c933/third_party/hccl/inc/hccl/hccl.h)
 - [HCCL hccl_types.h](https://gitee.com/mindspore/graphengine/blob/704a9eb441a711cd9f83e6462d283a1d049e6c6f/inc/external/hccl/hccl_types.h)
-- [HCCL P2P test](https://github.com/zzudongxiang/ascend.cl/blob/master/hccl/hccl_p2p_rootinfo_test.cc)
+- [HCCL AXON test](https://github.com/zzudongxiang/ascend.cl/blob/master/hccl/hccl_axon_rootinfo_test.cc)
 - [HCCL API Reference](https://www.hiascend.com/document/detail/en/canncommercial/800/apiref/hcclapiref/hcclcpp_07_0011.html)

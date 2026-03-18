@@ -2,7 +2,7 @@
 
 **Purpose**: Validate performance requirements quality in the specification
 **Created**: 2026-03-04
-**Feature**: P2P Transport Library MVP
+**Feature**: AXON Transport Library MVP
 **Focus**: Performance requirements validation (latency, throughput, scalability)
 
 ---

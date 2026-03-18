@@ -1,4 +1,4 @@
-# Data Model: P2P Transport Library
+# Data Model: AXON Transport Library
 
 ## Core Entities
 
@@ -61,7 +61,7 @@ Progress engine bound to a single thread.
 
 ### Endpoint
 
-Connection handle for P2P communication.
+Connection handle for AXON communication.
 
 | Method | Returns | Description |
 |--------|---------|-------------|

@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include "p2p/cluster.h"
-#include "p2p/config.h"
-#include "p2p/worker.h"
+#include "axon/cluster.h"
+#include "axon/config.h"
+#include "axon/worker.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -13,7 +13,7 @@
 #include <array>
 #include <thread>
 
-using namespace p2p;
+using namespace axon;
 
 namespace {
 

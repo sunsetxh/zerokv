@@ -1,4 +1,4 @@
-# Specification Quality Checklist: P2P High-Performance Transport Library MVP
+# Specification Quality Checklist: AXON High-Performance Transport Library MVP
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-03-04

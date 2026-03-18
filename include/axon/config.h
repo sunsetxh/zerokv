@@ -1,24 +1,24 @@
 #pragma once
 
-/// @file p2p/config.h
-/// @brief Configuration and context initialization for the P2P library.
+/// @file axon/config.h
+/// @brief Configuration and context initialization for the AXON library.
 ///
 /// Usage:
-///   auto cfg = p2p::Config::builder()
+///   auto cfg = axon::Config::builder()
 ///                  .set_transport("ucx")
 ///                  .set_num_workers(4)
 ///                  .set_memory_pool_size(256 * 1024 * 1024)
 ///                  .build();
-///   auto ctx = p2p::Context::create(cfg);
+///   auto ctx = axon::Context::create(cfg);
 
-#include "p2p/common.h"
+#include "axon/common.h"
 
 #include <chrono>
 #include <memory>
 #include <string>
 #include <unordered_map>
 
-namespace p2p {
+namespace axon {
 
 // ---------------------------------------------------------------------------
 // Config
@@ -95,7 +95,7 @@ public:
     /// Examples: ("UCX_TLS", "rc,ud"), ("UCX_NET_DEVICES", "mlx5_0:1").
     Builder& set(std::string key, std::string value);
 
-    /// Populate from environment variables prefixed with P2P_.
+    /// Populate from environment variables prefixed with AXON_.
     Builder& from_env();
 
     Config build();
@@ -148,4 +148,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace p2p
+}  // namespace axon

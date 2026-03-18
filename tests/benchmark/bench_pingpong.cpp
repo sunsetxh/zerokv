@@ -1,12 +1,12 @@
 #include <benchmark/benchmark.h>
-#include "p2p/config.h"
-#include "p2p/worker.h"
-#include "p2p/endpoint.h"
+#include "axon/config.h"
+#include "axon/worker.h"
+#include "axon/endpoint.h"
 
 #include <vector>
 #include <cstring>
 
-using namespace p2p;
+using namespace axon;
 
 static void BenchmarkCreateContext(benchmark::State& state) {
     auto config = Config::builder()

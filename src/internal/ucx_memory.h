@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace p2p {
+namespace axon {
 namespace internal {
 
 /// RAII wrapper for UCX memory registration
@@ -53,4 +53,4 @@ private:
 };
 
 } // namespace internal
-} // namespace p2p
+} // namespace axon

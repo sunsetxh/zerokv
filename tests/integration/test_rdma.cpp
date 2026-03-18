@@ -1,13 +1,13 @@
 #include <gtest/gtest.h>
-#include "p2p/config.h"
-#include "p2p/worker.h"
-#include "p2p/endpoint.h"
-#include "p2p/memory.h"
+#include "axon/config.h"
+#include "axon/worker.h"
+#include "axon/endpoint.h"
+#include "axon/memory.h"
 
 #include <vector>
 #include <cstring>
 
-using namespace p2p;
+using namespace axon;
 
 class RdmaTest : public ::testing::Test {
 protected:

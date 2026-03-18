@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "p2p/common.h"
+#include "axon/common.h"
 
-using namespace p2p;
+using namespace axon;
 
 TEST(StatusTest, DefaultStatus) {
     Status s;
