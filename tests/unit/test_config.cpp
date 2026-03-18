@@ -18,10 +18,18 @@ TEST(ConfigTest, BuilderPattern) {
 
 TEST(ConfigTest, FromEnv) {
     // Set environment variable
-    setenv("P2P_TRANSPORTS", "tcp,shmem", 1);
+    setenv("P2P_TRANSPORT", "tcp", 1);
     auto config = Config::builder()
         .from_env()
         .build();
-    // Config should have values from env
-    (void)config;
+    EXPECT_EQ(config.transport(), "tcp");
+}
+
+TEST(ConfigTest, InvalidUcXOptionFailsContextCreation) {
+    auto config = Config::builder()
+        .set("UCX_TLS", "__definitely_invalid_transport__")
+        .build();
+
+    auto context = Context::create(config);
+    EXPECT_EQ(context, nullptr);
 }

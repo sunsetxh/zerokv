@@ -133,11 +133,13 @@ class Config;
 class Context;
 class Worker;
 class Endpoint;
+class Cluster;
 class MemoryRegion;
 class MemoryPool;
 class Request;
 
 template <typename T> class Future;
+template <typename T> class Promise;
 
 }  // namespace p2p
 

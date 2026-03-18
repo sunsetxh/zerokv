@@ -96,3 +96,58 @@ TEST_F(LoopbackTest, TagRecvCanBePosted) {
     // Should return a valid future (even though no data will arrive)
     EXPECT_NE(future.request(), nullptr);
 }
+
+TEST_F(LoopbackTest, EndpointCloseReturnsTrackedRequest) {
+    auto worker1 = Worker::create(context_);
+    auto worker2 = Worker::create(context_);
+    ASSERT_NE(worker1, nullptr);
+    ASSERT_NE(worker2, nullptr);
+
+    auto connect_future = worker1->connect(worker2->address());
+    ASSERT_TRUE(connect_future.status().ok());
+    auto ep = connect_future.get();
+    ASSERT_NE(ep, nullptr);
+
+    auto close_future = ep->close();
+    EXPECT_NE(close_future.request(), nullptr);
+    EXPECT_FALSE(ep->is_connected());
+
+    for (int i = 0; i < 200 && !close_future.ready(); ++i) {
+        worker1->progress();
+        worker2->progress();
+    }
+    EXPECT_TRUE(close_future.ready());
+}
+
+TEST_F(LoopbackTest, EndpointTagRecvReceivesData) {
+    auto worker1 = Worker::create(context_);
+    auto worker2 = Worker::create(context_);
+    ASSERT_NE(worker1, nullptr);
+    ASSERT_NE(worker2, nullptr);
+
+    auto sender = worker1->connect(worker2->address()).get();
+    auto receiver = worker2->connect(worker1->address()).get();
+    ASSERT_NE(sender, nullptr);
+    ASSERT_NE(receiver, nullptr);
+
+    std::vector<char> buffer(64, 0);
+
+    constexpr Tag kTag = 77;
+    auto recv_future = receiver->tag_recv(buffer.data(), buffer.size(), kTag);
+
+    const char payload[] = "loopback-region";
+    auto send_future = sender->tag_send(payload, sizeof(payload), kTag);
+
+    for (int i = 0; i < 500 && (!recv_future.ready() || !send_future.ready()); ++i) {
+        worker1->progress();
+        worker2->progress();
+    }
+
+    ASSERT_TRUE(send_future.ready());
+    ASSERT_TRUE(recv_future.ready());
+
+    auto [bytes, matched_tag] = recv_future.get();
+    EXPECT_EQ(matched_tag, kTag);
+    EXPECT_EQ(bytes, sizeof(payload));
+    EXPECT_EQ(std::memcmp(buffer.data(), payload, sizeof(payload)), 0);
+}

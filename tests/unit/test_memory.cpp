@@ -26,6 +26,16 @@ TEST_F(MemoryTest, Allocate) {
     EXPECT_EQ(region->memory_type(), MemoryType::kHost);
 }
 
+TEST_F(MemoryTest, AllocateNonAlignedSize) {
+    if (!context_) {
+        GTEST_SKIP() << "Context creation failed";
+    }
+    auto region = MemoryRegion::allocate(context_, 123);
+    ASSERT_NE(region, nullptr);
+    EXPECT_NE(region->address(), nullptr);
+    EXPECT_EQ(region->length(), 123u);
+}
+
 TEST_F(MemoryTest, RegisterMem) {
     if (!context_) {
         GTEST_SKIP() << "Context creation failed";

@@ -82,7 +82,10 @@ MemoryRegion::Ptr MemoryRegion::allocate(const Context::Ptr& ctx,
         return nullptr;
     }
 
-    void* addr = std::aligned_alloc(4096, length);
+    constexpr size_t kAlignment = 4096;
+    const size_t aligned_length = ((length + kAlignment - 1) / kAlignment) * kAlignment;
+
+    void* addr = std::aligned_alloc(kAlignment, aligned_length);
     if (!addr) {
         return nullptr;
     }

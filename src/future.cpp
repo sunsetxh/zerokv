@@ -15,7 +15,7 @@ namespace p2p {
 // Request
 // ============================================================================
 
-Request::Ptr Request::create(void* ucx_request, ucp_worker_h worker) {
+Request::Ptr Request::create(void* ucx_request, ucp_worker_h worker, size_t initial_bytes) {
     if (!ucx_request) {
         return nullptr;
     }
@@ -23,6 +23,53 @@ Request::Ptr Request::create(void* ucx_request, ucp_worker_h worker) {
     req->impl_ = std::make_unique<Impl>();
     req->impl_->ucx_request_ = ucx_request;
     req->impl_->worker_ = worker;
+    req->impl_->bytes_transferred_ = initial_bytes;
+    return req;
+}
+
+Request::Ptr Request::create(void* ucx_request, ucp_worker_h worker, size_t initial_bytes,
+                              std::shared_ptr<void> keep_alive) {
+    if (!ucx_request) {
+        return nullptr;
+    }
+    auto req = Ptr(new Request());
+    req->impl_ = std::make_unique<Impl>();
+    req->impl_->ucx_request_ = ucx_request;
+    req->impl_->worker_ = worker;
+    req->impl_->bytes_transferred_ = initial_bytes;
+    req->impl_->keep_alive_ = std::move(keep_alive);
+    return req;
+}
+
+Request::Ptr Request::create(void* ucx_request, ucp_worker_h worker,
+                             std::shared_ptr<size_t> async_bytes_transferred,
+                             std::shared_ptr<void> keep_alive) {
+    if (!ucx_request) {
+        return nullptr;
+    }
+    auto req = Ptr(new Request());
+    req->impl_ = std::make_unique<Impl>();
+    req->impl_->ucx_request_ = ucx_request;
+    req->impl_->worker_ = worker;
+    req->impl_->async_bytes_transferred_ = std::move(async_bytes_transferred);
+    req->impl_->keep_alive_ = std::move(keep_alive);
+    return req;
+}
+
+Request::Ptr Request::create(void* ucx_request, ucp_worker_h worker,
+                             std::shared_ptr<size_t> async_bytes_transferred,
+                             std::shared_ptr<Tag> async_matched_tag,
+                             std::shared_ptr<void> keep_alive) {
+    if (!ucx_request) {
+        return nullptr;
+    }
+    auto req = Ptr(new Request());
+    req->impl_ = std::make_unique<Impl>();
+    req->impl_->ucx_request_ = ucx_request;
+    req->impl_->worker_ = worker;
+    req->impl_->async_bytes_transferred_ = std::move(async_bytes_transferred);
+    req->impl_->async_matched_tag_ = std::move(async_matched_tag);
+    req->impl_->keep_alive_ = std::move(keep_alive);
     return req;
 }
 
@@ -49,11 +96,7 @@ bool Request::is_complete() const noexcept {
     if (!impl_ || !impl_->ucx_request_) {
         return true;
     }
-    bool complete = ucp_request_check_status(impl_->ucx_request_) != UCS_INPROGRESS;
-    if (complete) {
-        populate_recv_info();
-    }
-    return complete;
+    return ucp_request_check_status(impl_->ucx_request_) != UCS_INPROGRESS;
 }
 
 Status Request::status() const noexcept {
@@ -97,8 +140,6 @@ Status Request::wait(std::chrono::milliseconds timeout) {
         return Status(ErrorCode::kTransportError, ucs_status_string(ucs_status));
     }
 
-    // Extract receive info for tag receive operations
-    populate_recv_info();
     return Status::OK();
 }
 
@@ -106,12 +147,18 @@ size_t Request::bytes_transferred() const noexcept {
     if (!impl_ || !impl_->ucx_request_) {
         return 0;
     }
+    if (impl_->async_bytes_transferred_) {
+        return *impl_->async_bytes_transferred_;
+    }
     return impl_->bytes_transferred_;
 }
 
 Tag Request::matched_tag() const noexcept {
     if (!impl_ || !impl_->ucx_request_) {
         return 0;
+    }
+    if (impl_->async_matched_tag_) {
+        return *impl_->async_matched_tag_;
     }
     return impl_->matched_tag_;
 }
@@ -124,32 +171,7 @@ void Request::cancel() {
 }
 
 void Request::populate_recv_info() const {
-    if (!impl_ || !impl_->ucx_request_ || impl_->recv_info_populated_) {
-        return;
-    }
-
-    // Check if request is complete
-    ucs_status_t status = ucp_request_check_status(impl_->ucx_request_);
-    if (status == UCS_INPROGRESS) {
-        return;  // Not complete yet
-    }
-
-    // Try to get tag receive info using ucp_tag_recv_request_test
-    // This function only works for tag receive requests
-    ucp_tag_recv_info_t recv_info;
-    ucs_status_ptr_t req_ptr = impl_->ucx_request_;
-
-    // ucp_tag_recv_request_test returns the request status and fills recv_info
-    // Note: This is a UCX internal detail - the request data structure contains
-    // the receive info after completion
-    ucs_status_t recv_status = ucp_tag_recv_request_test(req_ptr, &recv_info);
-
-    if (recv_status != UCS_INPROGRESS && recv_status != UCS_ERR_NOT_IMPLEMENTED) {
-        // Successfully got receive info
-        impl_->bytes_transferred_ = recv_info.length;
-        impl_->matched_tag_ = recv_info.sender_tag;
-        impl_->recv_info_populated_ = true;
-    }
+    // Completion metadata is captured via per-operation callbacks.
 }
 
 } // namespace p2p

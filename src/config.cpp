@@ -212,15 +212,54 @@ Context::Context(const Config& config) : impl_(std::make_unique<Impl>()) {
 Context::Ptr Context::create(const Config& config) {
     ucp_params_t params = {};
     params.field_mask = UCP_PARAM_FIELD_FEATURES |
-                       UCP_PARAM_FIELD_REQUEST_SIZE;
+                       UCP_PARAM_FIELD_REQUEST_SIZE |
+                       UCP_PARAM_FIELD_MT_WORKERS_SHARED;  // Allow workers to be shared across threads
 
     // Enable RMA (Remote Memory Access) and TAG matching
     params.features = UCP_FEATURE_TAG | UCP_FEATURE_STREAM | UCP_FEATURE_RMA;
 
     params.request_size = 0;  // Use UCX default
+    params.mt_workers_shared = 1;  // Enable multi-threaded worker access
 
     ucp_config_t* config_obj = nullptr;
-    ucp_config_read(nullptr, nullptr, &config_obj);
+    ucs_status_t config_status = ucp_config_read(nullptr, nullptr, &config_obj);
+    if (config_status != UCS_OK) {
+        return nullptr;
+    }
+
+    auto apply_option = [&](const std::string& key, const std::string& value) -> bool {
+        return ucp_config_modify(config_obj, key.c_str(), value.c_str()) == UCS_OK;
+    };
+
+    const std::string transport = config.transport();
+    if (transport == "tcp") {
+        if (!apply_option("TLS", "tcp")) {
+            ucp_config_release(config_obj);
+            return nullptr;
+        }
+    } else if (transport == "shmem") {
+        if (!apply_option("TLS", "sm")) {
+            ucp_config_release(config_obj);
+            return nullptr;
+        }
+    } else if (!transport.empty() && transport != "ucx") {
+        if (!apply_option("TLS", transport)) {
+            ucp_config_release(config_obj);
+            return nullptr;
+        }
+    }
+
+    for (const auto& [key, value] : config.impl_->ucx_options_) {
+        std::string option_key = key;
+        constexpr std::string_view ucx_prefix = "UCX_";
+        if (option_key.rfind(ucx_prefix, 0) == 0) {
+            option_key.erase(0, ucx_prefix.size());
+        }
+        if (!apply_option(option_key, value)) {
+            ucp_config_release(config_obj);
+            return nullptr;
+        }
+    }
 
     ucp_context_h ctx = nullptr;
     ucs_status_t status = ucp_init(&params, config_obj, &ctx);
@@ -248,7 +287,7 @@ void* Context::native_handle() const noexcept {
 }
 
 bool Context::supports_rma() const noexcept {
-    return true;
+    return false;
 }
 
 bool Context::supports_memory_type(MemoryType type) const noexcept {

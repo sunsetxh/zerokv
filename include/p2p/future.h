@@ -62,7 +62,21 @@ public:
     /// Native UCX request pointer.
     [[nodiscard]] void* native_handle() const noexcept;
 
-    static Ptr create(void* ucx_request, ucp_worker_h worker);
+    static Ptr create(void* ucx_request, ucp_worker_h worker, size_t initial_bytes = 0);
+
+    // For operations with MemoryRegion that needs to keep it alive
+    static Ptr create(void* ucx_request, ucp_worker_h worker, size_t initial_bytes,
+                      std::shared_ptr<void> keep_alive);
+
+    // For operations that report transferred bytes via async callbacks.
+    static Ptr create(void* ucx_request, ucp_worker_h worker,
+                      std::shared_ptr<size_t> async_bytes_transferred,
+                      std::shared_ptr<void> keep_alive = {});
+
+    static Ptr create(void* ucx_request, ucp_worker_h worker,
+                      std::shared_ptr<size_t> async_bytes_transferred,
+                      std::shared_ptr<Tag> async_matched_tag,
+                      std::shared_ptr<void> keep_alive = {});
 
 private:
     friend class Worker;
@@ -75,7 +89,9 @@ private:
         Status status_;
         mutable size_t bytes_transferred_ = 0;
         mutable Tag matched_tag_ = 0;
-        mutable bool recv_info_populated_ = false;
+        std::shared_ptr<size_t> async_bytes_transferred_;
+        std::shared_ptr<Tag> async_matched_tag_;
+        std::shared_ptr<void> keep_alive_;  // Keeps MemoryRegion alive for async ops
     };
     std::unique_ptr<Impl> impl_;
 };

@@ -65,6 +65,26 @@ TEST_F(ConnectionTest, Progress) {
     (void)made_progress;
 }
 
+TEST_F(ConnectionTest, RunStopTerminatesLoop) {
+    auto worker = Worker::create(context_);
+    ASSERT_NE(worker, nullptr);
+
+    std::thread runner([&]() {
+        worker->run();
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    worker->stop();
+    runner.join();
+
+    SUCCEED();
+}
+
+TEST_F(ConnectionTest, ContextReportsRmaUnavailable) {
+    ASSERT_NE(context_, nullptr);
+    EXPECT_FALSE(context_->supports_rma());
+}
+
 // Test with shared memory transport
 class ShmemConnectionTest : public ::testing::Test {
 protected:

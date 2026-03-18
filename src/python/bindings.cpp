@@ -321,7 +321,11 @@ NB_MODULE(_core, m) {
                 loop = asyncio.attr("get_running_loop")();
             }
             loop.attr("remove_reader")(self.event_fd());
-        }, "loop"_a = nb::none());
+        }, "loop"_a = nb::none())
+        // Background progress thread for true async operation
+        .def("start_progress_thread", &p2p::Worker::start_progress_thread)
+        .def("stop_progress_thread", &p2p::Worker::stop_progress_thread)
+        .def_prop_ro("progress_thread_running", &p2p::Worker::is_progress_thread_running);
 
     // --- Listener ------------------------------------------------------------
 

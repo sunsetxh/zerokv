@@ -69,6 +69,7 @@ public:
     static Builder builder();
 
 private:
+    friend class Context;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

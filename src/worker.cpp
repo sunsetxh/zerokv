@@ -15,8 +15,37 @@
 #include <cstdlib>
 #include <map>
 #include <mutex>
+#include <thread>
+#include <atomic>
+#include <condition_variable>
+#include <poll.h>
 
 namespace p2p {
+
+namespace {
+
+struct TagRecvCallbackState {
+    size_t* bytes = nullptr;
+    Tag* tag = nullptr;
+};
+
+void tag_recv_callback(void* /*request*/, ucs_status_t status,
+                       const ucp_tag_recv_info_t* tag_info, void* user_data) {
+    auto* state = static_cast<TagRecvCallbackState*>(user_data);
+    if (state == nullptr || state->bytes == nullptr || state->tag == nullptr) {
+        return;
+    }
+
+    if (status == UCS_OK && tag_info != nullptr) {
+        *state->bytes = tag_info->length;
+        *state->tag = tag_info->sender_tag;
+    } else {
+        *state->bytes = 0;
+        *state->tag = 0;
+    }
+}
+
+}  // namespace
 
 // ============================================================================
 // Connection request storage for accept callback
@@ -47,7 +76,22 @@ struct Worker::Impl {
     int event_fd_ = -1;
     size_t index_ = 0;
 
+    // Background progress thread
+    std::thread progress_thread_;
+    std::atomic<bool> progress_thread_running_{false};
+    std::atomic<bool> progress_thread_stop_{false};
+    std::mutex progress_mutex_;
+    std::condition_variable progress_cv_;
+
     ~Impl() {
+        // Ensure thread is stopped before destruction
+        if (progress_thread_running_.load()) {
+            progress_thread_stop_.store(true);
+            progress_cv_.notify_all();
+            if (progress_thread_.joinable()) {
+                progress_thread_.join();
+            }
+        }
         if (handle_) {
             ucp_worker_destroy(handle_);
         }
@@ -81,9 +125,8 @@ Worker::Ptr Worker::create(const Context::Ptr& ctx, size_t index) {
     }
 
     ucp_worker_params_t params = {};
-    params.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE |
-                       UCP_WORKER_PARAM_FIELD_EVENT_FD;
-    params.thread_mode = UCS_THREAD_MODE_SINGLE;
+    params.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
+    params.thread_mode = UCS_THREAD_MODE_MULTI;  // Allow concurrent access from multiple threads
 
     ucp_worker_h worker = nullptr;
     ucs_status_t status = ucp_worker_create(
@@ -132,12 +175,48 @@ bool Worker::wait(std::chrono::milliseconds timeout) {
 // run_until is defined inline in worker.h as template
 
 void Worker::run() {
+    run_stop_.store(false);
     run_until([] { return false; });  // Infinite loop
 }
 
 void Worker::stop() noexcept {
-    // Worker doesn't have explicit stop in UCX
-    (void)this;
+    run_stop_.store(true);
+}
+
+// Background progress thread
+void Worker::start_progress_thread() {
+    if (impl_->progress_thread_running_.load()) {
+        return;  // Already running
+    }
+
+    impl_->progress_thread_stop_.store(false);
+    impl_->progress_thread_running_.store(true);  // Set before starting thread
+
+    impl_->progress_thread_ = std::thread([this]() {
+        while (!impl_->progress_thread_stop_.load()) {
+            if (ucp_worker_progress(impl_->handle_) == 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+
+        impl_->progress_thread_running_.store(false);
+    });
+}
+
+void Worker::stop_progress_thread() {
+    if (!impl_->progress_thread_running_.load()) {
+        return;  // Not running
+    }
+
+    impl_->progress_thread_stop_.store(true);
+
+    if (impl_->progress_thread_.joinable()) {
+        impl_->progress_thread_.join();
+    }
+}
+
+bool Worker::is_progress_thread_running() const noexcept {
+    return impl_->progress_thread_running_.load();
 }
 
 // Worker-level tag recv (for any-source receives)
@@ -148,8 +227,18 @@ Future<std::pair<size_t, Tag>> Worker::tag_recv(void* buffer, size_t length,
             Status(ErrorCode::kInvalidArgument, "Invalid parameters"));
     }
 
+    auto bytes = std::make_shared<size_t>(0);
+    auto matched_tag = std::make_shared<Tag>(0);
+    auto callback_state = std::make_shared<TagRecvCallbackState>();
+    callback_state->bytes = bytes.get();
+    callback_state->tag = matched_tag.get();
+
     ucp_request_param_t params = {};
-    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
+                          UCP_OP_ATTR_FIELD_CALLBACK |
+                          UCP_OP_ATTR_FIELD_USER_DATA;
+    params.cb.recv = tag_recv_callback;
+    params.user_data = callback_state.get();
 
     ucs_status_ptr_t status = ucp_tag_recv_nbx(
         impl_->handle_,
@@ -170,15 +259,21 @@ Future<std::pair<size_t, Tag>> Worker::tag_recv(void* buffer, size_t length,
     }
 
     // Valid request pointer - operation is pending
-    auto req = Request::create(status, impl_->handle_);
+    auto req = Request::create(status, impl_->handle_, bytes, matched_tag, callback_state);
     return Future<std::pair<size_t, Tag>>::make_request(req);
 }
 
-Future<std::pair<size_t, Tag>> Worker::tag_recv(const MemoryRegion::Ptr& /*region*/,
-                                                Tag /*tag*/, Tag /*tag_mask*/) {
-    // TODO: Implement with memory region
+Future<std::pair<size_t, Tag>> Worker::tag_recv(const MemoryRegion::Ptr& region,
+                                                Tag tag, Tag tag_mask) {
+    (void)region;
+    (void)tag;
+    (void)tag_mask;
+    if (!impl_ || !impl_->handle_) {
+        return Future<std::pair<size_t, Tag>>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Invalid parameters"));
+    }
     return Future<std::pair<size_t, Tag>>::make_error(
-        Status(ErrorCode::kNotImplemented, "tag_recv from region not implemented"));
+        Status(ErrorCode::kNotImplemented, "tag_recv into MemoryRegion is not implemented"));
 }
 
 Future<std::shared_ptr<Endpoint>> Worker::connect(const std::vector<uint8_t>& remote_address) {

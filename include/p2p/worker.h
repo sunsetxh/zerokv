@@ -3,10 +3,9 @@
 /// @file p2p/worker.h
 /// @brief Worker – the UCX progress engine and endpoint factory.
 ///
-/// Each Worker owns one ucp_worker_h.  A Worker is **single-threaded**: only
-/// one thread may call progress()/poll() or initiate operations at a time.
-/// For multi-threaded use, create one Worker per thread (or per NUMA node)
-/// and partition endpoints across workers.
+/// Each Worker owns one ucp_worker_h. The implementation enables UCX's
+/// multi-threaded worker mode, but callers should still treat progress and
+/// lifecycle control as coordinated operations.
 ///
 /// Usage:
 ///   auto worker = p2p::Worker::create(ctx);
@@ -21,6 +20,9 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <thread>
+#include <atomic>
+#include <condition_variable>
 
 namespace p2p {
 
@@ -119,7 +121,7 @@ public:
     /// Run the progress loop until @p pred returns true.
     template <typename Pred>
     void run_until(Pred pred) {
-        while (!pred()) {
+        while (!run_stop_.load() && !pred()) {
             if (!progress()) {
                 wait(std::chrono::milliseconds{1});
             }
@@ -132,6 +134,21 @@ public:
 
     /// Signal the worker to stop its run() loop.
     void stop() noexcept;
+
+    // --- Background progress thread ------------------------------------------------
+
+    /// Start a background thread that continuously calls progress().
+    /// This enables truly asynchronous operation - the caller doesn't need to
+    /// manually drive progress or block waiting.
+    /// @param spin_timeout  How long to wait for the thread to stop in stop_progress_thread()
+    void start_progress_thread();
+
+    /// Stop the background progress thread.
+    /// Waits for the thread to finish.
+    void stop_progress_thread();
+
+    /// Check if background progress thread is running.
+    [[nodiscard]] bool is_progress_thread_running() const noexcept;
 
     // --- Worker-level tag recv -----------------------------------------------
 
@@ -164,6 +181,7 @@ private:
     explicit Worker(const Context::Ptr& ctx, size_t index);
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    std::atomic<bool> run_stop_{false};
     friend class Endpoint;
 };
 

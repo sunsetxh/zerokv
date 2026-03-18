@@ -6,8 +6,52 @@
 #include "p2p/common.h"
 
 #include <ucp/api/ucp.h>
+#include <memory>
 
 namespace p2p {
+
+namespace {
+
+struct RmaRequestState {
+    MemoryRegion::Ptr region;
+    ucp_rkey_h rkey = nullptr;
+
+    ~RmaRequestState() {
+        if (rkey != nullptr) {
+            ucp_rkey_destroy(rkey);
+        }
+    }
+};
+
+void stream_recv_callback(void* /*request*/, ucs_status_t status, size_t length, void* user_data) {
+    auto* bytes = static_cast<size_t*>(user_data);
+    if (bytes != nullptr) {
+        *bytes = (status == UCS_OK) ? length : 0;
+    }
+}
+
+struct TagRecvCallbackState {
+    size_t* bytes = nullptr;
+    Tag* tag = nullptr;
+};
+
+void tag_recv_callback(void* /*request*/, ucs_status_t status,
+                       const ucp_tag_recv_info_t* tag_info, void* user_data) {
+    auto* state = static_cast<TagRecvCallbackState*>(user_data);
+    if (state == nullptr || state->bytes == nullptr || state->tag == nullptr) {
+        return;
+    }
+
+    if (status == UCS_OK && tag_info != nullptr) {
+        *state->bytes = tag_info->length;
+        *state->tag = tag_info->sender_tag;
+    } else {
+        *state->bytes = 0;
+        *state->tag = 0;
+    }
+}
+
+}  // namespace
 
 // ============================================================================
 // Endpoint::Impl
@@ -16,6 +60,7 @@ namespace p2p {
 struct Endpoint::Impl {
     Worker::Ptr worker_;
     ucp_ep_h handle_ = nullptr;
+    std::function<void(Status)> error_callback_;
 
     ~Impl() {
         if (handle_) {
@@ -45,8 +90,18 @@ Future<void> Endpoint::tag_send(const void* buffer, size_t length, Tag tag) {
             Status(ErrorCode::kInvalidArgument, "Invalid parameters"));
     }
 
+    auto bytes = std::make_shared<size_t>(0);
+    auto matched_tag = std::make_shared<Tag>(0);
+    auto callback_state = std::make_shared<TagRecvCallbackState>();
+    callback_state->bytes = bytes.get();
+    callback_state->tag = matched_tag.get();
+
     ucp_request_param_t params = {};
-    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
+                          UCP_OP_ATTR_FIELD_CALLBACK |
+                          UCP_OP_ATTR_FIELD_USER_DATA;
+    params.cb.recv = tag_recv_callback;
+    params.user_data = callback_state.get();
 
     ucs_status_ptr_t status = ucp_tag_send_nbx(
         impl_->handle_,
@@ -82,8 +137,18 @@ Future<void> Endpoint::tag_send(const MemoryRegion::Ptr& region, size_t offset,
             Status(ErrorCode::kInvalidArgument, "Offset + length exceeds region size"));
     }
 
+    auto bytes = std::make_shared<size_t>(0);
+    auto matched_tag = std::make_shared<Tag>(0);
+    auto callback_state = std::make_shared<TagRecvCallbackState>();
+    callback_state->bytes = bytes.get();
+    callback_state->tag = matched_tag.get();
+
     ucp_request_param_t params = {};
-    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
+                          UCP_OP_ATTR_FIELD_CALLBACK |
+                          UCP_OP_ATTR_FIELD_USER_DATA;
+    params.cb.recv = tag_recv_callback;
+    params.user_data = callback_state.get();
 
     ucs_status_ptr_t status = ucp_tag_send_nbx(
         impl_->handle_,
@@ -102,7 +167,9 @@ Future<void> Endpoint::tag_send(const MemoryRegion::Ptr& region, size_t offset,
             Status(ErrorCode::kTransportError, std::string("Send from region failed: ") + ucs_status_string(err)));
     }
 
-    auto req = Request::create(status, static_cast<ucp_worker_h>(impl_->worker_->native_handle()));
+    // Keep MemoryRegion alive for async operation
+    auto req = Request::create(status, static_cast<ucp_worker_h>(impl_->worker_->native_handle()),
+                               0, std::shared_ptr<void>(region, region.get()));
     return Future<void>::make_request(req);
 }
 
@@ -113,8 +180,18 @@ Future<std::pair<size_t, Tag>> Endpoint::tag_recv(void* buffer, size_t length,
             Status(ErrorCode::kInvalidArgument, "Invalid parameters"));
     }
 
+    auto bytes = std::make_shared<size_t>(0);
+    auto matched_tag = std::make_shared<Tag>(0);
+    auto callback_state = std::make_shared<TagRecvCallbackState>();
+    callback_state->bytes = bytes.get();
+    callback_state->tag = matched_tag.get();
+
     ucp_request_param_t params = {};
-    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
+                          UCP_OP_ATTR_FIELD_CALLBACK |
+                          UCP_OP_ATTR_FIELD_USER_DATA;
+    params.cb.recv = tag_recv_callback;
+    params.user_data = callback_state.get();
 
     // Use worker handle for tag recv (not endpoint handle)
     ucs_status_ptr_t status = ucp_tag_recv_nbx(
@@ -137,8 +214,22 @@ Future<std::pair<size_t, Tag>> Endpoint::tag_recv(void* buffer, size_t length,
     }
 
     // Valid request pointer - operation is pending
-    auto req = Request::create(status, static_cast<ucp_worker_h>(impl_->worker_->native_handle()));
+    auto req = Request::create(status, static_cast<ucp_worker_h>(impl_->worker_->native_handle()),
+                               bytes, matched_tag, callback_state);
     return Future<std::pair<size_t, Tag>>::make_request(req);
+}
+
+Future<std::pair<size_t, Tag>> Endpoint::tag_recv(const MemoryRegion::Ptr& region,
+                                                  Tag tag, Tag tag_mask) {
+    (void)region;
+    (void)tag;
+    (void)tag_mask;
+    if (!impl_ || !impl_->worker_) {
+        return Future<std::pair<size_t, Tag>>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Invalid parameters"));
+    }
+    return Future<std::pair<size_t, Tag>>::make_error(
+        Status(ErrorCode::kNotImplemented, "tag_recv into MemoryRegion is not implemented"));
 }
 
 // RDMA
@@ -167,6 +258,10 @@ Future<void> Endpoint::put(const MemoryRegion::Ptr& local, size_t local_offset,
                    std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
     }
 
+    auto state = std::make_shared<RmaRequestState>();
+    state->region = local;
+    state->rkey = ucx_rkey;
+
     ucp_request_param_t params = {};
     params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
 
@@ -178,20 +273,20 @@ Future<void> Endpoint::put(const MemoryRegion::Ptr& local, size_t local_offset,
         ucx_rkey,
         &params);
 
-    // Destroy rkey after operation is initiated
-    ucp_rkey_destroy(ucx_rkey);
-
     if (req == nullptr) {
+        state.reset();
         return Future<void>::make_ready();
     }
 
     if (UCS_PTR_IS_ERR(req)) {
         ucs_status_t err = UCS_PTR_STATUS(req);
+        state.reset();
         return Future<void>::make_error(
             Status(ErrorCode::kTransportError, std::string("RDMA put failed: ") + ucs_status_string(err)));
     }
 
-    auto request = Request::create(req, static_cast<ucp_worker_h>(impl_->worker_->native_handle()));
+    auto request = Request::create(req, static_cast<ucp_worker_h>(impl_->worker_->native_handle()),
+                                   0, state);
     return Future<void>::make_request(request);
 }
 
@@ -220,6 +315,10 @@ Future<void> Endpoint::get(const MemoryRegion::Ptr& local, size_t local_offset,
                    std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
     }
 
+    auto state = std::make_shared<RmaRequestState>();
+    state->region = local;
+    state->rkey = ucx_rkey;
+
     ucp_request_param_t params = {};
     params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
 
@@ -231,20 +330,20 @@ Future<void> Endpoint::get(const MemoryRegion::Ptr& local, size_t local_offset,
         ucx_rkey,
         &params);
 
-    // Destroy rkey after operation is initiated
-    ucp_rkey_destroy(ucx_rkey);
-
     if (req == nullptr) {
+        state.reset();
         return Future<void>::make_ready();
     }
 
     if (UCS_PTR_IS_ERR(req)) {
         ucs_status_t err = UCS_PTR_STATUS(req);
+        state.reset();
         return Future<void>::make_error(
             Status(ErrorCode::kTransportError, std::string("RDMA get failed: ") + ucs_status_string(err)));
     }
 
-    auto request = Request::create(req, static_cast<ucp_worker_h>(impl_->worker_->native_handle()));
+    auto request = Request::create(req, static_cast<ucp_worker_h>(impl_->worker_->native_handle()),
+                                   0, state);
     return Future<void>::make_request(request);
 }
 
@@ -292,7 +391,10 @@ Future<void> Endpoint::flush() {
         return Future<void>::make_ready();
     }
 
-    ucs_status_ptr_t status = ucp_ep_flush_nbx(impl_->handle_, 0);
+    ucp_request_param_t params = {};
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+
+    ucs_status_ptr_t status = ucp_ep_flush_nbx(impl_->handle_, &params);
 
     if (status == nullptr) {
         return Future<void>::make_ready();
@@ -304,7 +406,8 @@ Future<void> Endpoint::flush() {
             Status(ErrorCode::kTransportError, std::string("Flush failed: ") + ucs_status_string(err)));
     }
 
-    return Future<void>::make_ready();
+    auto req = Request::create(status, static_cast<ucp_worker_h>(impl_->worker_->native_handle()));
+    return Future<void>::make_request(req);
 }
 
 // Stream operations
@@ -333,12 +436,40 @@ Future<void> Endpoint::stream_send(const void* buffer, size_t length) {
             Status(ErrorCode::kTransportError, std::string("Stream send failed: ") + ucs_status_string(err)));
     }
 
-    return Future<void>::make_ready();
+    auto req = Request::create(status, static_cast<ucp_worker_h>(impl_->worker_->native_handle()));
+    return Future<void>::make_request(req);
 }
 
-Future<void> Endpoint::stream_send(const MemoryRegion::Ptr& /*region*/) {
-    return Future<void>::make_error(
-        Status(ErrorCode::kNotImplemented, "stream_send from region not implemented"));
+Future<void> Endpoint::stream_send(const MemoryRegion::Ptr& region) {
+    if (!impl_ || !impl_->handle_ || !region) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Invalid parameters"));
+    }
+
+    ucp_request_param_t params = {};
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+
+    ucs_status_ptr_t status = ucp_stream_send_nbx(
+        impl_->handle_,
+        region->address(),
+        region->length(),
+        &params);
+
+    if (status == nullptr) {
+        return Future<void>::make_ready();
+    }
+
+    if (UCS_PTR_IS_ERR(status)) {
+        ucs_status_t err = UCS_PTR_STATUS(status);
+        return Future<void>::make_error(
+            Status(ErrorCode::kTransportError,
+                   std::string("Stream send from region failed: ") + ucs_status_string(err)));
+    }
+
+    // Keep MemoryRegion alive for async operation
+    auto req = Request::create(status, static_cast<ucp_worker_h>(impl_->worker_->native_handle()),
+                               0, std::shared_ptr<void>(region, region.get()));
+    return Future<void>::make_request(req);
 }
 
 Future<size_t> Endpoint::stream_recv(void* buffer, size_t length) {
@@ -347,19 +478,23 @@ Future<size_t> Endpoint::stream_recv(void* buffer, size_t length) {
             Status(ErrorCode::kInvalidArgument, "Invalid parameters"));
     }
 
-    size_t received = 0;
+    auto received = std::make_shared<size_t>(0);
     ucp_request_param_t params = {};
-    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
+                          UCP_OP_ATTR_FIELD_CALLBACK |
+                          UCP_OP_ATTR_FIELD_USER_DATA;
+    params.cb.recv_stream = stream_recv_callback;
+    params.user_data = received.get();
 
     ucs_status_ptr_t status = ucp_stream_recv_nbx(
         impl_->handle_,
         buffer,
         length,
-        &received,
+        received.get(),
         &params);
 
     if (status == nullptr) {
-        return Future<size_t>::make_ready(received);
+        return Future<size_t>::make_ready(*received);
     }
 
     if (UCS_PTR_IS_ERR(status)) {
@@ -368,12 +503,46 @@ Future<size_t> Endpoint::stream_recv(void* buffer, size_t length) {
             Status(ErrorCode::kTransportError, std::string("Stream recv failed: ") + ucs_status_string(err)));
     }
 
-    return Future<size_t>::make_ready(received);
+    auto req = Request::create(status, static_cast<ucp_worker_h>(impl_->worker_->native_handle()),
+                               received);
+    return Future<size_t>::make_request(req);
 }
 
-Future<size_t> Endpoint::stream_recv(const MemoryRegion::Ptr& /*region*/) {
-    return Future<size_t>::make_error(
-        Status(ErrorCode::kNotImplemented, "stream_recv to region not implemented"));
+Future<size_t> Endpoint::stream_recv(const MemoryRegion::Ptr& region) {
+    if (!impl_ || !impl_->handle_ || !region) {
+        return Future<size_t>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Invalid parameters"));
+    }
+
+    auto received = std::make_shared<size_t>(0);
+    ucp_request_param_t params = {};
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
+                          UCP_OP_ATTR_FIELD_CALLBACK |
+                          UCP_OP_ATTR_FIELD_USER_DATA;
+    params.cb.recv_stream = stream_recv_callback;
+    params.user_data = received.get();
+
+    ucs_status_ptr_t status = ucp_stream_recv_nbx(
+        impl_->handle_,
+        region->address(),
+        region->length(),
+        received.get(),
+        &params);
+
+    if (status == nullptr) {
+        return Future<size_t>::make_ready(*received);
+    }
+
+    if (UCS_PTR_IS_ERR(status)) {
+        ucs_status_t err = UCS_PTR_STATUS(status);
+        return Future<size_t>::make_error(
+            Status(ErrorCode::kTransportError,
+                   std::string("Stream recv to region failed: ") + ucs_status_string(err)));
+    }
+
+    auto req = Request::create(status, static_cast<ucp_worker_h>(impl_->worker_->native_handle()),
+                               received, std::shared_ptr<void>(region, region.get()));
+    return Future<size_t>::make_request(req);
 }
 
 // Atomic
@@ -390,7 +559,10 @@ Future<void> Endpoint::close() {
         return Future<void>::make_ready();
     }
 
-    ucs_status_ptr_t status_ptr = ucp_ep_close_nbx(impl_->handle_, 0);
+    ucp_request_param_t params = {};
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
+
+    ucs_status_ptr_t status_ptr = ucp_ep_close_nbx(impl_->handle_, &params);
 
     if (status_ptr == nullptr) {
         // Immediate close
@@ -405,11 +577,9 @@ Future<void> Endpoint::close() {
             Status(ErrorCode::kEndpointClosed, std::string("Close failed: ") + ucs_status_string(err)));
     }
 
-    // Async close - need to wait for completion
-    // For now, return a ready future (UCX will complete in background)
-    // A full implementation would track the close request
+    auto req = Request::create(status_ptr, static_cast<ucp_worker_h>(impl_->worker_->native_handle()));
     impl_->handle_ = nullptr;
-    return Future<void>::make_ready();
+    return Future<void>::make_request(req);
 }
 
 bool Endpoint::is_connected() const noexcept {
@@ -422,8 +592,10 @@ std::string Endpoint::remote_address() const {
     return {};
 }
 
-void Endpoint::set_error_callback(std::function<void(Status)> /*cb*/) {
-    // TODO: Implement error callback
+void Endpoint::set_error_callback(std::function<void(Status)> cb) {
+    if (impl_) {
+        impl_->error_callback_ = std::move(cb);
+    }
 }
 
 Worker::Ptr Endpoint::worker() const noexcept {

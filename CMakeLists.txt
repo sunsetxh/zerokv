@@ -73,6 +73,7 @@ endif()
 # ---------------------------------------------------------------------------
 set(P2P_SOURCES
     src/status.cpp
+    src/cluster.cpp
     src/config.cpp
     src/worker.cpp
     src/endpoint.cpp
@@ -137,6 +138,10 @@ if(P2P_BUILD_TESTS)
     target_link_libraries(test_memory PRIVATE p2p GTest::gtest GTest::gtest_main)
     add_test(NAME UnitMemory COMMAND test_memory)
 
+    add_executable(test_cluster tests/unit/test_cluster.cpp)
+    target_link_libraries(test_cluster PRIVATE p2p GTest::gtest GTest::gtest_main)
+    add_test(NAME UnitCluster COMMAND test_cluster)
+
     # Integration tests
     add_executable(test_connection tests/integration/test_connection.cpp)
     target_link_libraries(test_connection PRIVATE p2p GTest::gtest GTest::gtest_main)
@@ -152,6 +157,10 @@ if(P2P_BUILD_TESTS)
     add_executable(test_loopback tests/integration/test_loopback.cpp)
     target_link_libraries(test_loopback PRIVATE p2p GTest::gtest GTest::gtest_main)
     add_test(NAME IntegrationLoopback COMMAND test_loopback)
+
+    add_executable(test_cluster_discovery tests/integration/test_cluster_discovery.cpp)
+    target_link_libraries(test_cluster_discovery PRIVATE p2p GTest::gtest GTest::gtest_main)
+    add_test(NAME IntegrationClusterDiscovery COMMAND test_cluster_discovery)
 endif()
 
 # ---------------------------------------------------------------------------

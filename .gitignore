@@ -53,3 +53,17 @@ Thumbs.db
 # Environment
 .env*
 *.local
+
+# Tool-specific directories
+.agent-memory/
+.ccb/
+.claude/
+.specify/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# External artifacts
+*.tgz
+

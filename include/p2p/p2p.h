@@ -4,6 +4,7 @@
 /// @brief Convenience header – includes the full public API.
 
 #include "p2p/common.h"
+#include "p2p/cluster.h"
 #include "p2p/config.h"
 #include "p2p/endpoint.h"
 #include "p2p/future.h"
