@@ -66,4 +66,7 @@ __pycache__/
 
 # External artifacts
 *.tgz
+*.tar.gz
 
+# Local VM artifacts
+scripts/qemu_rdma/.vm_work/
