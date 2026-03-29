@@ -48,25 +48,6 @@ void tag_recv_callback(void* /*request*/, ucs_status_t status,
 }  // namespace
 
 // ============================================================================
-// Connection request storage for accept callback
-// ============================================================================
-
-static std::map<ucp_conn_request_h, Listener::Ptr>* g_conn_request_listeners = nullptr;
-static std::mutex g_conn_mutex;
-
-static void connection_handler(ucp_conn_request_h conn_request, void* arg) {
-    // Store the connection request for later acceptance
-    // The callback is invoked when a connection request arrives
-    (void)arg;
-    std::lock_guard<std::mutex> lock(g_conn_mutex);
-    if (g_conn_request_listeners) {
-        // Just acknowledge the connection request for now
-        // Full implementation would create endpoint from conn_request
-        (*g_conn_request_listeners)[conn_request] = nullptr;
-    }
-}
-
-// ============================================================================
 // Worker::Impl
 // ============================================================================
 
@@ -114,6 +95,40 @@ struct Listener::Impl {
         }
     }
 };
+
+// ============================================================================
+// Connection handler — defined after Listener::Impl is complete
+// ============================================================================
+
+static void connection_handler(ucp_conn_request_h conn_request, void* arg) {
+    auto* listener_impl = static_cast<Listener::Impl*>(arg);
+    if (!listener_impl) return;
+
+    // Check if there is an accept callback before creating the endpoint
+    if (!listener_impl->on_accept_) {
+        // No callback registered — reject the connection
+        ucp_listener_reject(listener_impl->handle_, conn_request);
+        return;
+    }
+
+    ucp_worker_h worker = static_cast<ucp_worker_h>(listener_impl->worker_->native_handle());
+
+    // Create server-side endpoint from the connection request
+    ucp_ep_params_t ep_params = {};
+    ep_params.field_mask = UCP_EP_PARAM_FIELD_CONN_REQUEST;
+    ep_params.conn_request = conn_request;
+
+    ucp_ep_h ep_handle = nullptr;
+    ucs_status_t status = ucp_ep_create(worker, &ep_params, &ep_handle);
+    if (status != UCS_OK) {
+        return;
+    }
+
+    auto ep = Endpoint::create(listener_impl->worker_, ep_handle);
+
+    // Invoke the accept callback (guaranteed non-null due to check above)
+    listener_impl->on_accept_(ep);
+}
 
 // ============================================================================
 // Worker
@@ -304,34 +319,65 @@ Future<std::shared_ptr<Endpoint>> Worker::connect(const std::vector<uint8_t>& re
 }
 
 Future<std::shared_ptr<Endpoint>> Worker::connect(const std::string& address) {
-    // Parse address: "tcp://host:port" or "host:port"
+    if (!impl_ || !impl_->handle_) {
+        return Future<std::shared_ptr<Endpoint>>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Worker not initialized"));
+    }
+
+    // Parse address: "host:port"
     std::string host;
     uint16_t port = 0;
 
-    // Simple parsing - look for colon
-    size_t colon_pos = address.find(':');
+    size_t colon_pos = address.rfind(':');
     if (colon_pos != std::string::npos) {
         host = address.substr(0, colon_pos);
         try {
-            port = static_cast<uint16_t>(std::stoi(address.substr(colon_pos + 1)));
+            int port_int = std::stoi(address.substr(colon_pos + 1));
+            if (port_int < 1 || port_int > 65535) {
+                return Future<std::shared_ptr<Endpoint>>::make_error(
+                    Status(ErrorCode::kInvalidArgument, "Port must be between 1 and 65535"));
+            }
+            port = static_cast<uint16_t>(port_int);
         } catch (...) {
             return Future<std::shared_ptr<Endpoint>>::make_error(
                 Status(ErrorCode::kInvalidArgument, "Invalid port in address"));
         }
     } else {
-        host = address;
+        return Future<std::shared_ptr<Endpoint>>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Address must be in host:port format"));
     }
 
-    // Get peer's worker address via DNS or service name resolution
-    // For now, use a simplified approach - the actual implementation would
-    // need a bootstrap mechanism (e.g., share addresses via file, environment, etc.)
+    // Build sockaddr_in
+    struct sockaddr_in addr;
+    std::memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
 
-    // TODO: Implement proper address resolution and connection
-    // For now, return not implemented
-    (void)host;
-    (void)port;
-    return Future<std::shared_ptr<Endpoint>>::make_error(
-        Status(ErrorCode::kNotImplemented, "connect requires bootstrap mechanism"));
+    if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1) {
+        return Future<std::shared_ptr<Endpoint>>::make_error(
+            Status(ErrorCode::kInvalidArgument,
+                   std::string("Invalid IP address: ") + host));
+    }
+
+    // Create endpoint using sockaddr (client-server connection)
+    ucp_ep_params_t ep_params = {};
+    ep_params.field_mask = UCP_EP_PARAM_FIELD_FLAGS |
+                           UCP_EP_PARAM_FIELD_SOCK_ADDR;
+    ep_params.flags = UCP_EP_PARAMS_FLAGS_CLIENT_SERVER;
+    ep_params.sockaddr.addr = reinterpret_cast<struct sockaddr*>(&addr);
+    ep_params.sockaddr.addrlen = sizeof(addr);
+
+    ucp_ep_h ep_handle = nullptr;
+    ucs_status_t status = ucp_ep_create(impl_->handle_, &ep_params, &ep_handle);
+
+    if (status != UCS_OK) {
+        return Future<std::shared_ptr<Endpoint>>::make_error(
+            Status(ErrorCode::kTransportError,
+                   std::string("Failed to connect to ") + address + ": " + ucs_status_string(status)));
+    }
+
+    auto ep = Endpoint::create(shared_from_this(), ep_handle);
+    return Future<std::shared_ptr<Endpoint>>::make_ready(ep);
 }
 
 Listener::Ptr Worker::listen(const std::string& address,
@@ -370,21 +416,19 @@ Listener::Ptr Worker::listen(const std::string& address,
         inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
     }
 
-    // Initialize connection request storage if needed
-    if (!g_conn_request_listeners) {
-        g_conn_request_listeners = new std::map<ucp_conn_request_h, Listener::Ptr>();
-    }
+    // Pre-create the Listener::Impl so we can pass it as the callback arg
+    auto listener_impl = std::make_unique<Listener::Impl>();
+    listener_impl->worker_ = shared_from_this();
+    listener_impl->on_accept_ = on_accept;  // copy before move
 
     // Create listener params with connection handler callback
     ucp_listener_params_t params = {};
     params.field_mask = UCP_LISTENER_PARAM_FIELD_SOCK_ADDR |
                        UCP_LISTENER_PARAM_FIELD_CONN_HANDLER;
 
-    // Setup connection handler callback
-    // Note: In UCX 1.20.0, the callback is invoked when connection request arrives
-    // The callback will store conn_request for later processing
+    // Setup connection handler callback — pass the impl as arg
     params.conn_handler.cb = connection_handler;
-    params.conn_handler.arg = nullptr;  // Will be set after listener is created
+    params.conn_handler.arg = listener_impl.get();
 
     // Create sockaddr length
     params.sockaddr.addrlen = sizeof(addr);
@@ -397,12 +441,11 @@ Listener::Ptr Worker::listen(const std::string& address,
         return nullptr;
     }
 
-    // Create Listener wrapper using new + shared_ptr (requires public constructor)
+    // Create Listener wrapper
     auto listener_ptr = std::shared_ptr<Listener>(new Listener());
-    listener_ptr->impl_ = std::make_unique<Listener::Impl>();
-    listener_ptr->impl_->worker_ = shared_from_this();
-    listener_ptr->impl_->handle_ = listener;
-    listener_ptr->impl_->on_accept_ = std::move(on_accept);
+    listener_impl->handle_ = listener;
+    listener_impl->on_accept_ = std::move(on_accept);
+    listener_ptr->impl_ = std::move(listener_impl);
 
     // Get the actual bound address
     ucp_listener_attr_t attr = {};
@@ -475,6 +518,17 @@ Context::Ptr Listener::context() const noexcept {
         return impl_->worker_->context();
     }
     return nullptr;
+}
+
+void Listener::add_connection_request(ucp_conn_request_h req) {
+    (void)req;
+    // Connection requests are handled via the global pending list
+}
+
+bool Listener::accept() {
+    // Connections are accepted immediately in the connection_handler callback.
+    // This polling interface is no longer needed — always returns false.
+    return false;
 }
 
 void Listener::close() {

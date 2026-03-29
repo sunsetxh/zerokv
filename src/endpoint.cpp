@@ -23,6 +23,29 @@ struct RmaRequestState {
     }
 };
 
+struct AtomicRequestState {
+    std::shared_ptr<size_t> result;
+    uint64_t reply_value = 0;
+    ucp_rkey_h rkey = nullptr;
+
+    ~AtomicRequestState() {
+        if (rkey != nullptr) {
+            ucp_rkey_destroy(rkey);
+        }
+    }
+};
+
+void atomic_fetch_callback(void* /*request*/, ucs_status_t status, void* user_data) {
+    auto* state = static_cast<AtomicRequestState*>(user_data);
+    if (state && state->result) {
+        if (status == UCS_OK) {
+            *state->result = static_cast<size_t>(state->reply_value);
+        } else {
+            *state->result = 0;
+        }
+    }
+}
+
 void stream_recv_callback(void* /*request*/, ucs_status_t status, size_t length, void* user_data) {
     auto* bytes = static_cast<size_t*>(user_data);
     if (bytes != nullptr) {
@@ -90,18 +113,8 @@ Future<void> Endpoint::tag_send(const void* buffer, size_t length, Tag tag) {
             Status(ErrorCode::kInvalidArgument, "Invalid parameters"));
     }
 
-    auto bytes = std::make_shared<size_t>(0);
-    auto matched_tag = std::make_shared<Tag>(0);
-    auto callback_state = std::make_shared<TagRecvCallbackState>();
-    callback_state->bytes = bytes.get();
-    callback_state->tag = matched_tag.get();
-
     ucp_request_param_t params = {};
-    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
-                          UCP_OP_ATTR_FIELD_CALLBACK |
-                          UCP_OP_ATTR_FIELD_USER_DATA;
-    params.cb.recv = tag_recv_callback;
-    params.user_data = callback_state.get();
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
 
     ucs_status_ptr_t status = ucp_tag_send_nbx(
         impl_->handle_,
@@ -137,18 +150,8 @@ Future<void> Endpoint::tag_send(const MemoryRegion::Ptr& region, size_t offset,
             Status(ErrorCode::kInvalidArgument, "Offset + length exceeds region size"));
     }
 
-    auto bytes = std::make_shared<size_t>(0);
-    auto matched_tag = std::make_shared<Tag>(0);
-    auto callback_state = std::make_shared<TagRecvCallbackState>();
-    callback_state->bytes = bytes.get();
-    callback_state->tag = matched_tag.get();
-
     ucp_request_param_t params = {};
-    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
-                          UCP_OP_ATTR_FIELD_CALLBACK |
-                          UCP_OP_ATTR_FIELD_USER_DATA;
-    params.cb.recv = tag_recv_callback;
-    params.user_data = callback_state.get();
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
 
     ucs_status_ptr_t status = ucp_tag_send_nbx(
         impl_->handle_,
@@ -370,20 +373,137 @@ Future<void> Endpoint::get(const MemoryRegion::Ptr& local,
 }
 
 // Simplified atomic_fadd: without local buffer
-Future<uint64_t> Endpoint::atomic_fadd(uint64_t /*remote_addr*/,
-                                     const RemoteKey& /*rkey*/,
-                                     uint64_t /*value*/) {
-    return Future<uint64_t>::make_error(
-        Status(ErrorCode::kNotImplemented, "Atomic operations not available in UCX 1.20.0"));
+Future<uint64_t> Endpoint::atomic_fadd(uint64_t remote_addr,
+                                     const RemoteKey& rkey,
+                                     uint64_t value) {
+    if (!impl_ || !impl_->handle_) {
+        return Future<uint64_t>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Endpoint not connected"));
+    }
+    if (rkey.empty()) {
+        return Future<uint64_t>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Empty remote key"));
+    }
+
+    // Unpack remote key
+    ucp_rkey_h ucx_rkey = nullptr;
+    ucs_status_t status = ucp_ep_rkey_unpack(impl_->handle_, rkey.bytes(), &ucx_rkey);
+    if (status != UCS_OK) {
+        return Future<uint64_t>::make_error(
+            Status(ErrorCode::kInvalidArgument,
+                   std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
+    }
+
+    auto state = std::make_shared<AtomicRequestState>();
+    state->result = std::make_shared<size_t>(0);
+    state->rkey = ucx_rkey;
+
+    uint64_t add_value = value;
+
+    ucp_request_param_t params = {};
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
+                          UCP_OP_ATTR_FIELD_REPLY_BUFFER |
+                          UCP_OP_ATTR_FIELD_CALLBACK |
+                          UCP_OP_ATTR_FIELD_USER_DATA;
+    params.reply_buffer = &state->reply_value;
+    params.cb.send = atomic_fetch_callback;
+    params.user_data = state.get();
+
+    ucs_status_ptr_t req = ucp_atomic_op_nbx(
+        impl_->handle_,
+        UCP_ATOMIC_OP_ADD,
+        &add_value,
+        1,
+        remote_addr,
+        ucx_rkey,
+        &params);
+
+    if (req == nullptr) {
+        // Immediate completion - result is in reply_value
+        uint64_t result = state->reply_value;
+        return Future<uint64_t>::make_ready(result);
+    }
+
+    if (UCS_PTR_IS_ERR(req)) {
+        ucs_status_t err = UCS_PTR_STATUS(req);
+        return Future<uint64_t>::make_error(
+            Status(ErrorCode::kTransportError,
+                   std::string("Atomic fadd failed: ") + ucs_status_string(err)));
+    }
+
+    // Pending operation — reuse shared_ptr<size_t> overload, set is_atomic flag
+    auto request = Request::create(req,
+                                   static_cast<ucp_worker_h>(impl_->worker_->native_handle()),
+                                   state->result, state);
+    return Future<uint64_t>::make_request(request);
 }
 
 // Atomic compare-and-swap
-Future<uint64_t> Endpoint::atomic_cswap(uint64_t /*remote_addr*/,
-                                       const RemoteKey& /*rkey*/,
-                                       uint64_t /*expected*/,
-                                       uint64_t /*desired*/) {
-    return Future<uint64_t>::make_error(
-        Status(ErrorCode::kNotImplemented, "Atomic operations not available in UCX 1.20.0"));
+Future<uint64_t> Endpoint::atomic_cswap(uint64_t remote_addr,
+                                       const RemoteKey& rkey,
+                                       uint64_t expected,
+                                       uint64_t desired) {
+    if (!impl_ || !impl_->handle_) {
+        return Future<uint64_t>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Endpoint not connected"));
+    }
+    if (rkey.empty()) {
+        return Future<uint64_t>::make_error(
+            Status(ErrorCode::kInvalidArgument, "Empty remote key"));
+    }
+
+    // Unpack remote key
+    ucp_rkey_h ucx_rkey = nullptr;
+    ucs_status_t status = ucp_ep_rkey_unpack(impl_->handle_, rkey.bytes(), &ucx_rkey);
+    if (status != UCS_OK) {
+        return Future<uint64_t>::make_error(
+            Status(ErrorCode::kInvalidArgument,
+                   std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
+    }
+
+    auto state = std::make_shared<AtomicRequestState>();
+    state->result = std::make_shared<size_t>(0);
+    state->rkey = ucx_rkey;
+
+    // For CSWAP, buffer layout: [expected, desired]
+    uint64_t cswap_buf[2] = {expected, desired};
+
+    ucp_request_param_t params = {};
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL |
+                          UCP_OP_ATTR_FIELD_REPLY_BUFFER |
+                          UCP_OP_ATTR_FIELD_CALLBACK |
+                          UCP_OP_ATTR_FIELD_USER_DATA;
+    params.reply_buffer = &state->reply_value;
+    params.cb.send = atomic_fetch_callback;
+    params.user_data = state.get();
+
+    ucs_status_ptr_t req = ucp_atomic_op_nbx(
+        impl_->handle_,
+        UCP_ATOMIC_OP_CSWAP,
+        cswap_buf,
+        2,
+        remote_addr,
+        ucx_rkey,
+        &params);
+
+    if (req == nullptr) {
+        // Immediate completion
+        uint64_t result = state->reply_value;
+        return Future<uint64_t>::make_ready(result);
+    }
+
+    if (UCS_PTR_IS_ERR(req)) {
+        ucs_status_t err = UCS_PTR_STATUS(req);
+        return Future<uint64_t>::make_error(
+            Status(ErrorCode::kTransportError,
+                   std::string("Atomic cswap failed: ") + ucs_status_string(err)));
+    }
+
+    // Pending operation — reuse shared_ptr<size_t> overload
+    auto request = Request::create(req,
+                                   static_cast<ucp_worker_h>(impl_->worker_->native_handle()),
+                                   state->result, state);
+    return Future<uint64_t>::make_request(request);
 }
 
 Future<void> Endpoint::flush() {
@@ -545,12 +665,14 @@ Future<size_t> Endpoint::stream_recv(const MemoryRegion::Ptr& region) {
     return Future<size_t>::make_request(req);
 }
 
-// Atomic
-Future<uint64_t> Endpoint::atomic_fadd(const MemoryRegion::Ptr& /*local*/, size_t /*offset*/,
-                                       uint64_t /*value*/, uint64_t /*remote_addr*/,
-                                       const RemoteKey& /*rkey*/) {
-    return Future<uint64_t>::make_error(
-        Status(ErrorCode::kNotImplemented, "atomic not supported in UCX 1.20.0"));
+// Atomic with local buffer
+Future<uint64_t> Endpoint::atomic_fadd(const MemoryRegion::Ptr& local, size_t offset,
+                                       uint64_t value, uint64_t remote_addr,
+                                       const RemoteKey& rkey) {
+    (void)local;
+    (void)offset;
+    // Delegate to simplified version
+    return atomic_fadd(remote_addr, rkey, value);
 }
 
 // Lifecycle

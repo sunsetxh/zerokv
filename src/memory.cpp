@@ -137,10 +137,27 @@ MemoryType MemoryRegion::memory_type() const noexcept {
 }
 
 RemoteKey MemoryRegion::remote_key() const {
-    // In UCX 1.20.0, rkey packing requires a connected endpoint
-    // Return empty key for now - RDMA will require endpoint connection
-    (void)impl_;
-    return RemoteKey{};
+    if (!impl_ || !impl_->handle_ || !impl_->context_) {
+        return RemoteKey{};
+    }
+
+    void* rkey_buffer = nullptr;
+    size_t rkey_size = 0;
+    ucs_status_t status = ucp_rkey_pack(
+        static_cast<ucp_context_h>(impl_->context_->native_handle()),
+        impl_->handle_,
+        &rkey_buffer,
+        &rkey_size);
+
+    if (status != UCS_OK) {
+        return RemoteKey{};
+    }
+
+    RemoteKey rkey;
+    rkey.data.resize(rkey_size);
+    std::memcpy(rkey.data.data(), rkey_buffer, rkey_size);
+    ucp_rkey_buffer_release(rkey_buffer);
+    return rkey;
 }
 
 void* MemoryRegion::native_handle() const noexcept {

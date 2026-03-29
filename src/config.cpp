@@ -215,8 +215,8 @@ Context::Ptr Context::create(const Config& config) {
                        UCP_PARAM_FIELD_REQUEST_SIZE |
                        UCP_PARAM_FIELD_MT_WORKERS_SHARED;  // Allow workers to be shared across threads
 
-    // Enable RMA (Remote Memory Access) and TAG matching
-    params.features = UCP_FEATURE_TAG | UCP_FEATURE_STREAM | UCP_FEATURE_RMA;
+    // Enable RMA (Remote Memory Access), TAG matching, and AMO (Atomic Operations)
+    params.features = UCP_FEATURE_TAG | UCP_FEATURE_STREAM | UCP_FEATURE_RMA | UCP_FEATURE_AMO64;
 
     params.request_size = 0;  // Use UCX default
     params.mt_workers_shared = 1;  // Enable multi-threaded worker access
@@ -239,6 +239,16 @@ Context::Ptr Context::create(const Config& config) {
         }
     } else if (transport == "shmem") {
         if (!apply_option("TLS", "sm")) {
+            ucp_config_release(config_obj);
+            return nullptr;
+        }
+    } else if (transport == "rdma") {
+        if (!apply_option("TLS", "rc,sm,self")) {
+            ucp_config_release(config_obj);
+            return nullptr;
+        }
+    } else if (transport == "rdma_ud") {
+        if (!apply_option("TLS", "ud,sm,self")) {
             ucp_config_release(config_obj);
             return nullptr;
         }
@@ -287,7 +297,8 @@ void* Context::native_handle() const noexcept {
 }
 
 bool Context::supports_rma() const noexcept {
-    return false;
+    // We always request UCP_FEATURE_RMA during context creation
+    return impl_ && impl_->handle_;
 }
 
 bool Context::supports_memory_type(MemoryType type) const noexcept {

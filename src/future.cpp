@@ -167,6 +167,13 @@ void* Request::native_handle() const noexcept {
     return impl_ ? impl_->ucx_request_ : nullptr;
 }
 
+uint64_t Request::atomic_result() const noexcept {
+    if (!impl_ || !impl_->is_atomic_ || !impl_->async_bytes_transferred_) {
+        return 0;
+    }
+    return static_cast<uint64_t>(*impl_->async_bytes_transferred_);
+}
+
 void Request::cancel() {
 }
 

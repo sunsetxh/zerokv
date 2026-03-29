@@ -78,6 +78,10 @@ public:
                       std::shared_ptr<Tag> async_matched_tag,
                       std::shared_ptr<void> keep_alive = {});
 
+    /// Atomic operation result (valid after atomic completion).
+    /// Reads from async_bytes_transferred when is_atomic_ is true.
+    [[nodiscard]] uint64_t atomic_result() const noexcept;
+
 private:
     friend class Worker;
     friend class Endpoint;
@@ -91,6 +95,7 @@ private:
         mutable Tag matched_tag_ = 0;
         std::shared_ptr<size_t> async_bytes_transferred_;
         std::shared_ptr<Tag> async_matched_tag_;
+        bool is_atomic_ = false;  // When true, async_bytes_transferred_ holds atomic result
         std::shared_ptr<void> keep_alive_;  // Keeps MemoryRegion alive for async ops
     };
     std::unique_ptr<Impl> impl_;
@@ -229,6 +234,10 @@ private:
         } else if constexpr (std::is_same_v<T, size_t>) {
             if (request_) {
                 return request_->bytes_transferred();
+            }
+        } else if constexpr (std::is_same_v<T, uint64_t>) {
+            if (request_) {
+                return request_->atomic_result();
             }
         }
         return value_;
