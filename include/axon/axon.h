@@ -8,6 +8,7 @@
 #include "axon/config.h"
 #include "axon/endpoint.h"
 #include "axon/future.h"
+#include "axon/kv.h"
 #include "axon/memory.h"
 #include "axon/worker.h"
 #include "axon/plugin/plugin.h"

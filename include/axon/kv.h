@@ -1,0 +1,112 @@
+#pragma once
+
+/// @file axon/kv.h
+/// @brief High-level RDMA KV MVP API built on top of axon transport primitives.
+
+#include "axon/common.h"
+#include "axon/config.h"
+#include "axon/future.h"
+#include "axon/memory.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace axon::kv {
+
+struct KeyInfo {
+    std::string key;
+    size_t size = 0;
+    uint64_t version = 0;
+};
+
+struct FetchResult {
+    std::vector<std::byte> data;
+    std::string owner_node_id;
+    uint64_t version = 0;
+};
+
+struct ServerConfig {
+    std::string listen_addr;
+};
+
+struct NodeConfig {
+    std::string server_addr;
+    std::string local_data_addr;
+    std::string node_id;
+};
+
+class KVServer {
+public:
+    using Ptr = std::shared_ptr<KVServer>;
+
+    static Ptr create(const axon::Config& cfg = {});
+
+    ~KVServer();
+    KVServer(const KVServer&) = delete;
+    KVServer& operator=(const KVServer&) = delete;
+
+    axon::Status start(const ServerConfig& cfg);
+    void stop();
+
+    [[nodiscard]] bool is_running() const noexcept;
+    [[nodiscard]] std::string address() const;
+    [[nodiscard]] std::optional<KeyInfo> lookup(const std::string& key) const;
+    [[nodiscard]] std::vector<std::string> list_keys() const;
+
+private:
+    explicit KVServer(const axon::Config& cfg);
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+class KVNode {
+public:
+    using Ptr = std::shared_ptr<KVNode>;
+
+    static Ptr create(const axon::Config& cfg = {});
+
+    ~KVNode();
+    KVNode(const KVNode&) = delete;
+    KVNode& operator=(const KVNode&) = delete;
+
+    axon::Status start(const NodeConfig& cfg);
+    void stop();
+
+    [[nodiscard]] bool is_running() const noexcept;
+    [[nodiscard]] std::string node_id() const;
+    [[nodiscard]] size_t published_count() const noexcept;
+
+    /// Copy-publish semantics: the implementation owns the data after the
+    /// returned future completes, so the caller may release the input buffer.
+    axon::Future<void> publish(const std::string& key,
+                               const void* data,
+                               size_t size);
+
+    /// Zero-copy publish semantics: the caller must keep the region alive
+    /// until the key is unpublished or the node stops.
+    axon::Future<void> publish_region(const std::string& key,
+                                      const axon::MemoryRegion::Ptr& region,
+                                      size_t size);
+
+    /// Convenience API that allocates a local buffer and fetches into it.
+    axon::Future<FetchResult> fetch(const std::string& key);
+
+    /// Primary zero-copy fetch API.
+    axon::Future<void> fetch_to(const std::string& key,
+                                const axon::MemoryRegion::Ptr& local_region,
+                                size_t length,
+                                size_t local_offset = 0);
+
+    axon::Future<void> unpublish(const std::string& key);
+
+private:
+    explicit KVNode(const axon::Config& cfg);
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+}  // namespace axon::kv

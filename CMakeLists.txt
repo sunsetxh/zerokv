@@ -79,6 +79,12 @@ set(AXON_SOURCES
     src/endpoint.cpp
     src/future.cpp
     src/memory.cpp
+    src/kv/protocol.cpp
+    src/kv/metadata_store.cpp
+    src/kv/tcp_transport.cpp
+    src/kv/tcp_framing.cpp
+    src/kv/server.cpp
+    src/kv/node.cpp
 )
 
 add_library(axon SHARED ${AXON_SOURCES})
@@ -112,6 +118,9 @@ if(AXON_BUILD_EXAMPLES)
 
     add_executable(rdma_put_get examples/rdma_put_get.cpp)
     target_link_libraries(rdma_put_get PRIVATE axon)
+
+    add_executable(kv_demo examples/kv_demo.cpp)
+    target_link_libraries(kv_demo PRIVATE axon)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -142,6 +151,11 @@ if(AXON_BUILD_TESTS)
     target_link_libraries(test_cluster PRIVATE axon GTest::gtest GTest::gtest_main)
     add_test(NAME UnitCluster COMMAND test_cluster)
 
+    add_executable(test_kv_metadata_store tests/unit/test_kv_metadata_store.cpp)
+    target_link_libraries(test_kv_metadata_store PRIVATE axon GTest::gtest GTest::gtest_main)
+    target_include_directories(test_kv_metadata_store PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME UnitKvMetadataStore COMMAND test_kv_metadata_store)
+
     # Integration tests
     add_executable(test_connection tests/integration/test_connection.cpp)
     target_link_libraries(test_connection PRIVATE axon GTest::gtest GTest::gtest_main)
@@ -161,6 +175,16 @@ if(AXON_BUILD_TESTS)
     add_executable(test_cluster_discovery tests/integration/test_cluster_discovery.cpp)
     target_link_libraries(test_cluster_discovery PRIVATE axon GTest::gtest GTest::gtest_main)
     add_test(NAME IntegrationClusterDiscovery COMMAND test_cluster_discovery)
+
+    add_executable(test_kv_server tests/integration/test_kv_server.cpp)
+    target_link_libraries(test_kv_server PRIVATE axon GTest::gtest GTest::gtest_main)
+    target_include_directories(test_kv_server PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME IntegrationKvServer COMMAND test_kv_server)
+
+    add_executable(test_kv_node tests/integration/test_kv_node.cpp)
+    target_link_libraries(test_kv_node PRIVATE axon GTest::gtest GTest::gtest_main)
+    target_include_directories(test_kv_node PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME IntegrationKvNode COMMAND test_kv_node)
 endif()
 
 # ---------------------------------------------------------------------------
