@@ -53,6 +53,40 @@ void wait_until_stopped() {
     }
 }
 
+void print_publish_metrics(const KVNode::Ptr& node) {
+    if (!node) {
+        return;
+    }
+    auto metrics = node->last_publish_metrics();
+    if (!metrics.has_value()) {
+        return;
+    }
+    std::cout << "publish_metrics"
+              << " total_us=" << metrics->total_us
+              << " prepare_region_us=" << metrics->prepare_region_us
+              << " pack_rkey_us=" << metrics->pack_rkey_us
+              << " put_meta_rpc_us=" << metrics->put_meta_rpc_us
+              << " ok=" << (metrics->ok ? 1 : 0) << "\n";
+}
+
+void print_fetch_metrics(const KVNode::Ptr& node) {
+    if (!node) {
+        return;
+    }
+    auto metrics = node->last_fetch_metrics();
+    if (!metrics.has_value()) {
+        return;
+    }
+    std::cout << "fetch_metrics"
+              << " total_us=" << metrics->total_us
+              << " local_buffer_prepare_us=" << metrics->local_buffer_prepare_us
+              << " get_meta_rpc_us=" << metrics->get_meta_rpc_us
+              << " peer_connect_us=" << metrics->peer_connect_us
+              << " rdma_prepare_us=" << metrics->rdma_prepare_us
+              << " rdma_get_us=" << metrics->rdma_get_us
+              << " ok=" << (metrics->ok ? 1 : 0) << "\n";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -163,6 +197,7 @@ int main(int argc, char** argv) {
         }
         publish.get();
         std::cout << "Published key=" << key << " bytes=" << value.size() << "\n";
+        print_publish_metrics(node);
 
         if (hold) {
             std::cout << "Holding publisher alive. Press Ctrl+C to exit.\n";
@@ -188,6 +223,7 @@ int main(int argc, char** argv) {
                   << " owner=" << result.owner_node_id
                   << " version=" << result.version
                   << " value=" << fetched << "\n";
+        print_fetch_metrics(node);
         node->stop();
         return 0;
     }

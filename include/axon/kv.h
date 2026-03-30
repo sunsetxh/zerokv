@@ -29,6 +29,24 @@ struct FetchResult {
     uint64_t version = 0;
 };
 
+struct PublishMetrics {
+    uint64_t total_us = 0;
+    uint64_t prepare_region_us = 0;
+    uint64_t pack_rkey_us = 0;
+    uint64_t put_meta_rpc_us = 0;
+    bool ok = false;
+};
+
+struct FetchMetrics {
+    uint64_t total_us = 0;
+    uint64_t local_buffer_prepare_us = 0;
+    uint64_t get_meta_rpc_us = 0;
+    uint64_t peer_connect_us = 0;
+    uint64_t rdma_prepare_us = 0;
+    uint64_t rdma_get_us = 0;
+    bool ok = false;
+};
+
 struct ServerConfig {
     std::string listen_addr;
 };
@@ -79,6 +97,8 @@ public:
     [[nodiscard]] bool is_running() const noexcept;
     [[nodiscard]] std::string node_id() const;
     [[nodiscard]] size_t published_count() const noexcept;
+    [[nodiscard]] std::optional<PublishMetrics> last_publish_metrics() const;
+    [[nodiscard]] std::optional<FetchMetrics> last_fetch_metrics() const;
 
     /// Copy-publish semantics: the implementation owns the data after the
     /// returned future completes, so the caller may release the input buffer.

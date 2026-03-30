@@ -24,6 +24,16 @@ namespace axon::kv {
 
 namespace {
 
+using SteadyClock = std::chrono::steady_clock;
+
+uint64_t elapsed_us(SteadyClock::time_point start, SteadyClock::time_point end) {
+    const auto us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    if (end > start && us == 0) {
+        return 1;
+    }
+    return static_cast<uint64_t>(us);
+}
+
 std::string generate_node_id() {
     static std::atomic<uint64_t> next_id{1};
     const auto value = next_id.fetch_add(1);
@@ -73,10 +83,23 @@ struct KVNode::Impl {
     std::mutex control_mu_;  // Serializes control-plane request/response operations.
     std::mutex published_mu_;
     std::mutex peer_mu_;
+    std::mutex metrics_mu_;
     std::unordered_map<std::string, PublishedObject> published_;
     std::unordered_map<std::string, Endpoint::Ptr> peer_eps_;
     std::vector<Endpoint::Ptr> inbound_eps_;
     std::atomic<uint64_t> next_request_id_{1};
+    std::optional<PublishMetrics> last_publish_metrics_;
+    std::optional<FetchMetrics> last_fetch_metrics_;
+
+    void record_publish_metrics(PublishMetrics metrics) {
+        std::lock_guard<std::mutex> lock(metrics_mu_);
+        last_publish_metrics_ = metrics;
+    }
+
+    void record_fetch_metrics(FetchMetrics metrics) {
+        std::lock_guard<std::mutex> lock(metrics_mu_);
+        last_fetch_metrics_ = metrics;
+    }
 
     Status register_with_server() {
         detail::RegisterNodeRequest req;
@@ -214,7 +237,9 @@ struct KVNode::Impl {
         return status_from_msg(resp->status, resp->message, ErrorCode::kInternalError);
     }
 
-    std::optional<detail::KeyMetadata> get_meta(const std::string& key, Status* status_out) {
+    std::optional<detail::KeyMetadata> get_meta(const std::string& key,
+                                                Status* status_out,
+                                                FetchMetrics* metrics = nullptr) {
         std::lock_guard<std::mutex> lock(control_mu_);
         if (control_fd_ < 0) {
             if (status_out) {
@@ -227,7 +252,11 @@ struct KVNode::Impl {
         req.key = key;
         auto payload = detail::encode(req);
         const uint64_t request_id = next_request_id_.fetch_add(1);
+        const auto rpc_start = SteadyClock::now();
         if (!detail::send_frame(control_fd_, detail::MsgType::kGetMeta, request_id, payload)) {
+            if (metrics) {
+                metrics->get_meta_rpc_us = elapsed_us(rpc_start, SteadyClock::now());
+            }
             if (status_out) {
                 *status_out = Status(ErrorCode::kConnectionReset, "failed to send get_meta request");
             }
@@ -237,10 +266,16 @@ struct KVNode::Impl {
         detail::MsgHeader header;
         std::vector<uint8_t> response_payload;
         if (!detail::recv_frame(control_fd_, &header, &response_payload)) {
+            if (metrics) {
+                metrics->get_meta_rpc_us = elapsed_us(rpc_start, SteadyClock::now());
+            }
             if (status_out) {
                 *status_out = Status(ErrorCode::kConnectionReset, "failed to read get_meta response");
             }
             return std::nullopt;
+        }
+        if (metrics) {
+            metrics->get_meta_rpc_us = elapsed_us(rpc_start, SteadyClock::now());
         }
         if (header.request_id != request_id) {
             if (status_out) {
@@ -349,7 +384,8 @@ struct KVNode::Impl {
     Future<void> fetch_to_impl(const detail::KeyMetadata& meta,
                                const MemoryRegion::Ptr& local_region,
                                size_t length,
-                               size_t local_offset) {
+                               size_t local_offset,
+                               FetchMetrics* metrics) {
         if (!running_.load()) {
             return Future<void>::make_error(Status(ErrorCode::kConnectionReset, "KVNode is not running"));
         }
@@ -364,15 +400,28 @@ struct KVNode::Impl {
         }
 
         Status peer_status;
+        const auto connect_start = SteadyClock::now();
         auto peer = get_or_connect_peer(meta.owner_node_id, meta.owner_data_addr, &peer_status);
+        if (metrics) {
+            metrics->peer_connect_us = elapsed_us(connect_start, SteadyClock::now());
+        }
         if (!peer) {
             return Future<void>::make_error(peer_status);
         }
 
+        const auto prepare_start = SteadyClock::now();
         RemoteKey rkey;
         rkey.data = meta.rkey;
         auto get = peer->get(local_region, local_offset, meta.remote_addr, rkey, meta.size);
+        const auto prepare_end = SteadyClock::now();
+        if (metrics) {
+            metrics->rdma_prepare_us = elapsed_us(prepare_start, prepare_end);
+        }
+        const auto get_start = SteadyClock::now();
         get.get();
+        if (metrics) {
+            metrics->rdma_get_us = elapsed_us(get_start, SteadyClock::now());
+        }
         auto status = get.status();
         if (!status.ok()) {
             return Future<void>::make_error(status);
@@ -382,7 +431,8 @@ struct KVNode::Impl {
 
     Future<void> publish_impl(const std::string& key,
                               const MemoryRegion::Ptr& region,
-                              size_t size) {
+                              size_t size,
+                              PublishMetrics* metrics) {
         if (!running_.load()) {
             return Future<void>::make_error(Status(ErrorCode::kConnectionReset, "KVNode is not running"));
         }
@@ -395,7 +445,11 @@ struct KVNode::Impl {
 
         PublishedObject object;
         object.region = region;
+        const auto pack_start = SteadyClock::now();
         object.rkey = region->remote_key();
+        if (metrics) {
+            metrics->pack_rkey_us = elapsed_us(pack_start, SteadyClock::now());
+        }
         object.size = size;
         {
             std::lock_guard<std::mutex> lock(published_mu_);
@@ -412,7 +466,11 @@ struct KVNode::Impl {
         meta.size = size;
         meta.version = object.version;
 
+        const auto rpc_start = SteadyClock::now();
         auto status = put_meta(meta);
+        if (metrics) {
+            metrics->put_meta_rpc_us = elapsed_us(rpc_start, SteadyClock::now());
+        }
         if (!status.ok()) {
             return Future<void>::make_error(status);
         }
@@ -546,19 +604,50 @@ size_t KVNode::published_count() const noexcept {
     return impl_->published_.size();
 }
 
+std::optional<PublishMetrics> KVNode::last_publish_metrics() const {
+    if (!impl_) {
+        return std::nullopt;
+    }
+    std::lock_guard<std::mutex> lock(impl_->metrics_mu_);
+    return impl_->last_publish_metrics_;
+}
+
+std::optional<FetchMetrics> KVNode::last_fetch_metrics() const {
+    if (!impl_) {
+        return std::nullopt;
+    }
+    std::lock_guard<std::mutex> lock(impl_->metrics_mu_);
+    return impl_->last_fetch_metrics_;
+}
+
 Future<void> KVNode::publish(const std::string& key, const void* data, size_t size) {
     if (!impl_) {
         return Future<void>::make_error(Status(ErrorCode::kInternalError, "KVNode not initialized"));
     }
+    PublishMetrics metrics;
+    const auto total_start = SteadyClock::now();
     if (data == nullptr || size == 0) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_publish_metrics(metrics);
         return Future<void>::make_error(Status(ErrorCode::kInvalidArgument, "data and size are required"));
     }
+    const auto prepare_start = SteadyClock::now();
     auto region = MemoryRegion::allocate(impl_->context_, size);
     if (!region) {
+        metrics.prepare_region_us = elapsed_us(prepare_start, SteadyClock::now());
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_publish_metrics(metrics);
         return Future<void>::make_error(Status(ErrorCode::kRegistrationFailed, "failed to allocate publish region"));
     }
     std::memcpy(region->address(), data, size);
-    return impl_->publish_impl(key, region, size);
+    metrics.prepare_region_us = elapsed_us(prepare_start, SteadyClock::now());
+    auto publish = impl_->publish_impl(key, region, size, &metrics);
+    metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+    metrics.ok = publish.status().ok();
+    impl_->record_publish_metrics(metrics);
+    return publish;
 }
 
 Future<void> KVNode::publish_region(const std::string& key,
@@ -567,7 +656,15 @@ Future<void> KVNode::publish_region(const std::string& key,
     if (!impl_) {
         return Future<void>::make_error(Status(ErrorCode::kInternalError, "KVNode not initialized"));
     }
-    return impl_->publish_impl(key, region, size);
+    PublishMetrics metrics;
+    const auto total_start = SteadyClock::now();
+    const auto prepare_start = SteadyClock::now();
+    metrics.prepare_region_us = elapsed_us(prepare_start, SteadyClock::now());
+    auto publish = impl_->publish_impl(key, region, size, &metrics);
+    metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+    metrics.ok = publish.status().ok();
+    impl_->record_publish_metrics(metrics);
+    return publish;
 }
 
 Future<FetchResult> KVNode::fetch(const std::string& key) {
@@ -576,23 +673,40 @@ Future<FetchResult> KVNode::fetch(const std::string& key) {
     }
 
     Status status;
-    auto meta = impl_->get_meta(key, &status);
+    FetchMetrics metrics;
+    const auto total_start = SteadyClock::now();
+    auto meta = impl_->get_meta(key, &status, &metrics);
     if (!meta.has_value()) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_fetch_metrics(metrics);
         return Future<FetchResult>::make_error(status);
     }
 
+    const auto prepare_start = SteadyClock::now();
     auto local_region = MemoryRegion::allocate(impl_->context_, meta->size);
     if (!local_region) {
+        metrics.local_buffer_prepare_us = elapsed_us(prepare_start, SteadyClock::now());
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_fetch_metrics(metrics);
         return Future<FetchResult>::make_error(
             Status(ErrorCode::kRegistrationFailed, "failed to allocate fetch buffer"));
     }
+    metrics.local_buffer_prepare_us = elapsed_us(prepare_start, SteadyClock::now());
 
-    auto fetch = impl_->fetch_to_impl(*meta, local_region, meta->size, 0);
+    auto fetch = impl_->fetch_to_impl(*meta, local_region, meta->size, 0, &metrics);
     if (!fetch.status().ok()) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_fetch_metrics(metrics);
         return Future<FetchResult>::make_error(fetch.status());
     }
     fetch.get();
     if (!fetch.status().ok()) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_fetch_metrics(metrics);
         return Future<FetchResult>::make_error(fetch.status());
     }
 
@@ -601,6 +715,9 @@ Future<FetchResult> KVNode::fetch(const std::string& key) {
     result.version = meta->version;
     result.data.resize(meta->size);
     std::memcpy(result.data.data(), local_region->address(), meta->size);
+    metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+    metrics.ok = true;
+    impl_->record_fetch_metrics(metrics);
     return Future<FetchResult>::make_ready(std::move(result));
 }
 
@@ -612,12 +729,24 @@ Future<void> KVNode::fetch_to(const std::string& key,
         return Future<void>::make_error(Status(ErrorCode::kInternalError, "KVNode not initialized"));
     }
 
+    FetchMetrics metrics;
+    const auto total_start = SteadyClock::now();
+    const auto prepare_start = SteadyClock::now();
+    metrics.local_buffer_prepare_us = elapsed_us(prepare_start, SteadyClock::now());
+
     Status status;
-    auto meta = impl_->get_meta(key, &status);
+    auto meta = impl_->get_meta(key, &status, &metrics);
     if (!meta.has_value()) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_fetch_metrics(metrics);
         return Future<void>::make_error(status);
     }
-    return impl_->fetch_to_impl(*meta, local_region, length, local_offset);
+    auto fetch = impl_->fetch_to_impl(*meta, local_region, length, local_offset, &metrics);
+    metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+    metrics.ok = fetch.status().ok();
+    impl_->record_fetch_metrics(metrics);
+    return fetch;
 }
 
 Future<void> KVNode::unpublish(const std::string& key) {

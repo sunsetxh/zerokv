@@ -104,6 +104,30 @@ TEST(KvNodeIntegrationTest, StartRegistersNodeAndStopDropsLiveness) {
     server->stop();
 }
 
+TEST(KvNodeIntegrationTest, MetricsAreEmptyBeforeAnyOperation) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto node = KVNode::create(cfg);
+    ASSERT_NE(node, nullptr);
+    ASSERT_TRUE(node->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:20007",
+        .node_id = "metrics-empty-node",
+    }).ok());
+
+    auto publish_metrics = node->last_publish_metrics();
+    auto fetch_metrics = node->last_fetch_metrics();
+    EXPECT_FALSE(publish_metrics.has_value());
+    EXPECT_FALSE(fetch_metrics.has_value());
+
+    node->stop();
+    server->stop();
+}
+
 TEST(KvNodeIntegrationTest, StartGeneratesNodeIdWhenMissing) {
     auto cfg = axon::Config::builder().set_transport("tcp").build();
 
@@ -189,6 +213,51 @@ TEST(KvNodeIntegrationTest, PublishRegistersMetadataAndTracksCount) {
 
     node->stop();
     EXPECT_EQ(node->published_count(), 0u);
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, PublishMetricsAreRecordedAndOverwritten) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto node = KVNode::create(cfg);
+    ASSERT_NE(node, nullptr);
+    ASSERT_TRUE(node->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:21012",
+        .node_id = "publisher-metrics",
+    }).ok());
+
+    const std::string first_value = "metrics-publish-1";
+    auto first = node->publish("metrics-key-1", first_value.data(), first_value.size());
+    ASSERT_TRUE(first.status().ok());
+    first.get();
+
+    auto first_metrics = node->last_publish_metrics();
+    ASSERT_TRUE(first_metrics.has_value());
+    EXPECT_TRUE(first_metrics->ok);
+    EXPECT_GT(first_metrics->total_us, 0u);
+    EXPECT_GT(first_metrics->prepare_region_us, 0u);
+    EXPECT_GT(first_metrics->pack_rkey_us, 0u);
+    EXPECT_GT(first_metrics->put_meta_rpc_us, 0u);
+
+    const std::string second_value = "metrics-publish-2";
+    auto second = node->publish("metrics-key-2", second_value.data(), second_value.size());
+    ASSERT_TRUE(second.status().ok());
+    second.get();
+
+    auto second_metrics = node->last_publish_metrics();
+    ASSERT_TRUE(second_metrics.has_value());
+    EXPECT_TRUE(second_metrics->ok);
+    EXPECT_GT(second_metrics->total_us, 0u);
+    EXPECT_GT(second_metrics->prepare_region_us, 0u);
+    EXPECT_GT(second_metrics->pack_rkey_us, 0u);
+    EXPECT_GT(second_metrics->put_meta_rpc_us, 0u);
+
+    node->stop();
     server->stop();
 }
 
@@ -301,6 +370,16 @@ TEST(KvNodeIntegrationTest, FetchReturnsPublishedBytesAcrossNodes) {
     ASSERT_EQ(result.data.size(), value.size());
     EXPECT_EQ(std::memcmp(result.data.data(), value.data(), value.size()), 0);
 
+    auto metrics = reader->last_fetch_metrics();
+    ASSERT_TRUE(metrics.has_value());
+    EXPECT_TRUE(metrics->ok);
+    EXPECT_GT(metrics->total_us, 0u);
+    EXPECT_GT(metrics->local_buffer_prepare_us, 0u);
+    EXPECT_GT(metrics->get_meta_rpc_us, 0u);
+    EXPECT_GT(metrics->peer_connect_us, 0u);
+    EXPECT_GT(metrics->rdma_prepare_us, 0u);
+    EXPECT_GT(metrics->rdma_get_us, 0u);
+
     reader->stop();
     publisher->stop();
     server->stop();
@@ -345,6 +424,11 @@ TEST(KvNodeIntegrationTest, FetchToWritesIntoCallerRegion) {
 
     const auto* bytes = static_cast<const char*>(region->address());
     EXPECT_EQ(std::memcmp(bytes + 8, value.data(), value.size()), 0);
+
+    auto metrics = reader->last_fetch_metrics();
+    ASSERT_TRUE(metrics.has_value());
+    EXPECT_TRUE(metrics->ok);
+    EXPECT_GT(metrics->rdma_get_us, 0u);
 
     reader->stop();
     publisher->stop();
@@ -391,6 +475,11 @@ TEST(KvNodeIntegrationTest, FetchFailsAfterUnpublish) {
 
     auto missing_fetch = reader->fetch("temp-key");
     EXPECT_FALSE(missing_fetch.status().ok());
+
+    auto missing_metrics = reader->last_fetch_metrics();
+    ASSERT_TRUE(missing_metrics.has_value());
+    EXPECT_FALSE(missing_metrics->ok);
+    EXPECT_GT(missing_metrics->get_meta_rpc_us, 0u);
 
     reader->stop();
     publisher->stop();
