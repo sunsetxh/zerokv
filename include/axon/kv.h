@@ -29,6 +29,19 @@ struct FetchResult {
     uint64_t version = 0;
 };
 
+struct WaitKeysResult {
+    std::vector<std::string> ready;
+    std::vector<std::string> timed_out;
+    bool completed = false;
+};
+
+struct BatchFetchResult {
+    std::vector<std::pair<std::string, FetchResult>> fetched;
+    std::vector<std::string> failed;
+    std::vector<std::string> timed_out;
+    bool completed = false;
+};
+
 struct PublishMetrics {
     uint64_t total_us = 0;
     uint64_t prepare_region_us = 0;
@@ -124,6 +137,14 @@ public:
     [[nodiscard]] std::optional<FetchMetrics> last_fetch_metrics() const;
     [[nodiscard]] std::optional<PushMetrics> last_push_metrics() const;
     [[nodiscard]] std::vector<SubscriptionEvent> drain_subscription_events();
+    axon::Status wait_for_key(const std::string& key,
+                              std::chrono::milliseconds timeout);
+    WaitKeysResult wait_for_keys(const std::vector<std::string>& keys,
+                                 std::chrono::milliseconds timeout);
+    FetchResult subscribe_and_fetch_once(const std::string& key,
+                                         std::chrono::milliseconds timeout);
+    BatchFetchResult subscribe_and_fetch_once_many(const std::vector<std::string>& keys,
+                                                   std::chrono::milliseconds timeout);
 
     /// Copy-publish semantics: the implementation owns the data after the
     /// returned future completes, so the caller may release the input buffer.

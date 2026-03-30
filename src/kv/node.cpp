@@ -8,6 +8,7 @@
 #include "kv/tcp_transport.h"
 
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <cstdint>
@@ -17,6 +18,7 @@
 #include <thread>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -27,6 +29,8 @@ namespace {
 using SteadyClock = std::chrono::steady_clock;
 constexpr uint32_t kPushInboxMagic = 0x50555831;  // "PUX1"
 constexpr size_t kDefaultPushInboxCapacity = 64 * 1024;
+constexpr auto kWaitLookupRetryInterval = std::chrono::milliseconds(100);
+constexpr auto kWaitPollSleep = std::chrono::milliseconds(10);
 
 struct PushInboxHeader {
     uint32_t magic = kPushInboxMagic;
@@ -56,6 +60,18 @@ std::string generate_node_id() {
     const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
     return "node-" + std::to_string(static_cast<unsigned long long>(now)) + "-" +
            std::to_string(static_cast<unsigned long long>(value));
+}
+
+std::vector<std::string> dedupe_keys(const std::vector<std::string>& keys) {
+    std::vector<std::string> result;
+    result.reserve(keys.size());
+    std::unordered_set<std::string> seen;
+    for (const auto& key : keys) {
+        if (seen.insert(key).second) {
+            result.push_back(key);
+        }
+    }
+    return result;
 }
 
 Status status_from_msg(detail::MsgStatus status, const std::string& message, ErrorCode fallback) {
@@ -111,11 +127,13 @@ struct KVNode::Impl {
     std::mutex published_mu_;
     std::mutex peer_mu_;
     std::mutex subscription_mu_;
+    std::mutex subscription_state_mu_;
     std::mutex metrics_mu_;
     std::unordered_map<std::string, PublishedObject> published_;
     std::unordered_map<std::string, Endpoint::Ptr> peer_eps_;
     std::vector<Endpoint::Ptr> inbound_eps_;
     std::vector<SubscriptionEvent> subscription_events_;
+    std::unordered_map<std::string, size_t> subscription_refs_;
     std::atomic<uint64_t> next_request_id_{1};
     std::optional<PublishMetrics> last_publish_metrics_;
     std::optional<FetchMetrics> last_fetch_metrics_;
@@ -1064,6 +1082,290 @@ std::vector<SubscriptionEvent> KVNode::drain_subscription_events() {
     return drained;
 }
 
+Status KVNode::wait_for_key(const std::string& key, std::chrono::milliseconds timeout) {
+    if (!impl_ || !impl_->running_.load()) {
+        return Status(ErrorCode::kConnectionRefused, "KVNode is not running");
+    }
+    if (key.empty()) {
+        return Status(ErrorCode::kInvalidArgument, "key is required");
+    }
+
+    auto result = wait_for_keys({key}, timeout);
+    if (result.completed) {
+        return Status::OK();
+    }
+    return Status(ErrorCode::kTimeout, "timed out waiting for key");
+}
+
+WaitKeysResult KVNode::wait_for_keys(const std::vector<std::string>& keys,
+                                     std::chrono::milliseconds timeout) {
+    WaitKeysResult result;
+    if (!impl_ || !impl_->running_.load()) {
+        Status(ErrorCode::kConnectionRefused, "KVNode is not running").throw_if_error();
+    }
+
+    auto deduped = dedupe_keys(keys);
+    if (deduped.empty()) {
+        Status(ErrorCode::kInvalidArgument, "at least one key is required").throw_if_error();
+    }
+    for (const auto& key : deduped) {
+        if (key.empty()) {
+            Status(ErrorCode::kInvalidArgument, "key is required").throw_if_error();
+        }
+    }
+
+    auto exists_now = [this](const std::string& key) {
+        Status status;
+        auto meta = impl_->get_meta(key, &status, nullptr);
+        if (meta.has_value()) {
+            return true;
+        }
+        if (status.code() != ErrorCode::kInvalidArgument) {
+            status.throw_if_error();
+        }
+        return false;
+    };
+
+    std::unordered_set<std::string> pending;
+    std::vector<std::string> subscribed_here;
+    for (const auto& key : deduped) {
+        if (exists_now(key)) {
+            result.ready.push_back(key);
+            continue;
+        }
+        pending.insert(key);
+        auto subscribe_future = subscribe(key);
+        if (!subscribe_future.status().ok()) {
+            for (const auto& subscribed_key : subscribed_here) {
+                auto unsubscribe_future = unsubscribe(subscribed_key);
+                if (unsubscribe_future.status().ok()) {
+                    unsubscribe_future.get();
+                }
+            }
+            subscribe_future.status().throw_if_error();
+        }
+        subscribe_future.get();
+        subscribed_here.push_back(key);
+    }
+
+    const auto deadline = SteadyClock::now() + timeout;
+    auto next_lookup = SteadyClock::now();
+    while (!pending.empty() && SteadyClock::now() < deadline) {
+        auto drained = drain_subscription_events();
+        std::vector<SubscriptionEvent> unmatched;
+        for (auto& event : drained) {
+            if (!pending.count(event.key)) {
+                unmatched.push_back(std::move(event));
+                continue;
+            }
+            if (event.type != SubscriptionEventType::kPublished &&
+                event.type != SubscriptionEventType::kUpdated) {
+                unmatched.push_back(std::move(event));
+                continue;
+            }
+            if (exists_now(event.key)) {
+                pending.erase(event.key);
+                result.ready.push_back(event.key);
+            }
+        }
+        if (!unmatched.empty()) {
+            std::lock_guard<std::mutex> lock(impl_->subscription_mu_);
+            impl_->subscription_events_.insert(
+                impl_->subscription_events_.end(),
+                std::make_move_iterator(unmatched.begin()),
+                std::make_move_iterator(unmatched.end()));
+        }
+
+        if (!pending.empty() && SteadyClock::now() >= next_lookup) {
+            std::vector<std::string> completed;
+            for (const auto& key : pending) {
+                if (exists_now(key)) {
+                    completed.push_back(key);
+                }
+            }
+            for (const auto& key : completed) {
+                pending.erase(key);
+                result.ready.push_back(key);
+            }
+            next_lookup = SteadyClock::now() + kWaitLookupRetryInterval;
+        }
+
+        if (!pending.empty()) {
+            std::this_thread::sleep_for(kWaitPollSleep);
+        }
+    }
+
+    for (const auto& key : deduped) {
+        if (pending.count(key)) {
+            result.timed_out.push_back(key);
+        }
+    }
+    result.completed = pending.empty();
+
+    for (const auto& key : subscribed_here) {
+        auto unsubscribe_future = unsubscribe(key);
+        if (unsubscribe_future.status().ok()) {
+            unsubscribe_future.get();
+        }
+    }
+
+    return result;
+}
+
+FetchResult KVNode::subscribe_and_fetch_once(const std::string& key,
+                                             std::chrono::milliseconds timeout) {
+    auto batch = subscribe_and_fetch_once_many({key}, timeout);
+    if (!batch.fetched.empty()) {
+        return std::move(batch.fetched.front().second);
+    }
+    if (!batch.failed.empty()) {
+        Status(ErrorCode::kInternalError, "failed to fetch key: " + key).throw_if_error();
+    }
+    Status(ErrorCode::kTimeout, "timed out waiting to fetch key: " + key).throw_if_error();
+    return {};
+}
+
+BatchFetchResult KVNode::subscribe_and_fetch_once_many(const std::vector<std::string>& keys,
+                                                       std::chrono::milliseconds timeout) {
+    BatchFetchResult result;
+    if (!impl_ || !impl_->running_.load()) {
+        Status(ErrorCode::kConnectionRefused, "KVNode is not running").throw_if_error();
+    }
+
+    auto deduped = dedupe_keys(keys);
+    if (deduped.empty()) {
+        Status(ErrorCode::kInvalidArgument, "at least one key is required").throw_if_error();
+    }
+    for (const auto& key : deduped) {
+        if (key.empty()) {
+            Status(ErrorCode::kInvalidArgument, "key is required").throw_if_error();
+        }
+    }
+
+    struct FetchAttempt {
+        enum class State {
+            kSuccess,
+            kPending,
+            kFailed,
+        } state = State::kPending;
+        std::optional<FetchResult> result;
+    };
+
+    auto try_fetch = [this](const std::string& key) -> FetchAttempt {
+        auto fetch_future = fetch(key);
+        if (!fetch_future.status().ok()) {
+            if (fetch_future.status().code() != ErrorCode::kInvalidArgument) {
+                return FetchAttempt{FetchAttempt::State::kFailed, std::nullopt};
+            }
+            return FetchAttempt{FetchAttempt::State::kPending, std::nullopt};
+        }
+        return FetchAttempt{FetchAttempt::State::kSuccess, fetch_future.get()};
+    };
+
+    std::unordered_set<std::string> pending;
+    std::vector<std::string> subscribed_here;
+
+    for (const auto& key : deduped) {
+        auto fetched = try_fetch(key);
+        if (fetched.state == FetchAttempt::State::kSuccess) {
+            result.fetched.emplace_back(key, std::move(*fetched.result));
+            continue;
+        }
+        if (fetched.state == FetchAttempt::State::kFailed) {
+            result.failed.push_back(key);
+            continue;
+        }
+        pending.insert(key);
+        auto subscribe_future = subscribe(key);
+        if (!subscribe_future.status().ok()) {
+            for (const auto& subscribed_key : subscribed_here) {
+                auto unsubscribe_future = unsubscribe(subscribed_key);
+                if (unsubscribe_future.status().ok()) {
+                    unsubscribe_future.get();
+                }
+            }
+            subscribe_future.status().throw_if_error();
+        }
+        subscribe_future.get();
+        subscribed_here.push_back(key);
+    }
+
+    const auto deadline = SteadyClock::now() + timeout;
+    auto next_lookup = SteadyClock::now();
+    while (!pending.empty() && SteadyClock::now() < deadline) {
+        auto drained = drain_subscription_events();
+        std::vector<SubscriptionEvent> unmatched;
+        for (auto& event : drained) {
+            if (!pending.count(event.key)) {
+                unmatched.push_back(std::move(event));
+                continue;
+            }
+            if (event.type != SubscriptionEventType::kPublished &&
+                event.type != SubscriptionEventType::kUpdated) {
+                unmatched.push_back(std::move(event));
+                continue;
+            }
+            auto fetched = try_fetch(event.key);
+            if (fetched.state == FetchAttempt::State::kSuccess) {
+                result.fetched.emplace_back(event.key, std::move(*fetched.result));
+                pending.erase(event.key);
+            } else if (fetched.state == FetchAttempt::State::kFailed) {
+                result.failed.push_back(event.key);
+                pending.erase(event.key);
+            }
+        }
+        if (!unmatched.empty()) {
+            std::lock_guard<std::mutex> lock(impl_->subscription_mu_);
+            impl_->subscription_events_.insert(
+                impl_->subscription_events_.end(),
+                std::make_move_iterator(unmatched.begin()),
+                std::make_move_iterator(unmatched.end()));
+        }
+
+        if (!pending.empty() && SteadyClock::now() >= next_lookup) {
+            std::vector<std::string> completed;
+            std::vector<std::string> failed;
+            for (const auto& key : pending) {
+                auto fetched = try_fetch(key);
+                if (fetched.state == FetchAttempt::State::kSuccess) {
+                    result.fetched.emplace_back(key, std::move(*fetched.result));
+                    completed.push_back(key);
+                } else if (fetched.state == FetchAttempt::State::kFailed) {
+                    failed.push_back(key);
+                }
+            }
+            for (const auto& key : completed) {
+                pending.erase(key);
+            }
+            for (const auto& key : failed) {
+                pending.erase(key);
+                result.failed.push_back(key);
+            }
+            next_lookup = SteadyClock::now() + kWaitLookupRetryInterval;
+        }
+
+        if (!pending.empty()) {
+            std::this_thread::sleep_for(kWaitPollSleep);
+        }
+    }
+
+    for (const auto& key : deduped) {
+        if (pending.count(key)) {
+            result.timed_out.push_back(key);
+        }
+    }
+    result.completed = pending.empty();
+
+    for (const auto& key : subscribed_here) {
+        auto unsubscribe_future = unsubscribe(key);
+        if (unsubscribe_future.status().ok()) {
+            unsubscribe_future.get();
+        }
+    }
+
+    return result;
+}
+
 Future<void> KVNode::publish(const std::string& key, const void* data, size_t size) {
     if (!impl_) {
         return Future<void>::make_error(Status(ErrorCode::kInternalError, "KVNode not initialized"));
@@ -1364,9 +1666,24 @@ Future<void> KVNode::subscribe(const std::string& key) {
         return Future<void>::make_error(
             Status(ErrorCode::kInvalidArgument, "subscribe key must not be empty"));
     }
+
+    {
+        std::lock_guard<std::mutex> lock(impl_->subscription_state_mu_);
+        auto it = impl_->subscription_refs_.find(key);
+        if (it != impl_->subscription_refs_.end()) {
+            ++it->second;
+            return Future<void>::make_ready();
+        }
+    }
+
     auto status = impl_->subscribe_remote(key);
     if (!status.ok()) {
         return Future<void>::make_error(status);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(impl_->subscription_state_mu_);
+        ++impl_->subscription_refs_[key];
     }
     return Future<void>::make_ready();
 }
@@ -1380,9 +1697,35 @@ Future<void> KVNode::unsubscribe(const std::string& key) {
         return Future<void>::make_error(
             Status(ErrorCode::kInvalidArgument, "unsubscribe key must not be empty"));
     }
+
+    {
+        std::lock_guard<std::mutex> lock(impl_->subscription_state_mu_);
+        auto it = impl_->subscription_refs_.find(key);
+        if (it == impl_->subscription_refs_.end()) {
+            return Future<void>::make_error(
+                Status(ErrorCode::kInvalidArgument, "key is not subscribed locally"));
+        }
+        if (it->second > 1) {
+            --it->second;
+            return Future<void>::make_ready();
+        }
+    }
+
     auto status = impl_->unsubscribe_remote(key);
     if (!status.ok()) {
         return Future<void>::make_error(status);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(impl_->subscription_state_mu_);
+        auto it = impl_->subscription_refs_.find(key);
+        if (it != impl_->subscription_refs_.end()) {
+            if (it->second > 1) {
+                --it->second;
+            } else {
+                impl_->subscription_refs_.erase(it);
+            }
+        }
     }
     return Future<void>::make_ready();
 }

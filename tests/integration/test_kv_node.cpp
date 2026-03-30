@@ -148,6 +148,276 @@ TEST(KvNodeIntegrationTest, StartFailsWithinConnectTimeoutWhenServerIsUnavailabl
     node->stop();
 }
 
+TEST(KvNodeIntegrationTest, WaitForKeyReturnsWhenKeyAppears) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto waiter = KVNode::create(cfg);
+    auto publisher = KVNode::create(cfg);
+    ASSERT_TRUE(waiter->start(NodeConfig{server->address(), "127.0.0.1:0", "waiter-a"}).ok());
+    ASSERT_TRUE(publisher->start(NodeConfig{server->address(), "127.0.0.1:0", "publisher-a"}).ok());
+
+    std::thread publish_thread([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        const std::string value = "ready-value";
+        auto publish = publisher->publish("wait-key", value.data(), value.size());
+        ASSERT_TRUE(publish.status().ok());
+        publish.get();
+    });
+
+    auto status = waiter->wait_for_key("wait-key", std::chrono::milliseconds(1000));
+    EXPECT_TRUE(status.ok()) << status.message();
+
+    publish_thread.join();
+    publisher->stop();
+    waiter->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceFetchesPublishedKey) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto waiter = KVNode::create(cfg);
+    auto publisher = KVNode::create(cfg);
+    ASSERT_TRUE(waiter->start(NodeConfig{server->address(), "127.0.0.1:0", "waiter-b"}).ok());
+    ASSERT_TRUE(publisher->start(NodeConfig{server->address(), "127.0.0.1:0", "publisher-b"}).ok());
+
+    std::thread publish_thread([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        const std::string value = "fetch-once-value";
+        auto publish = publisher->publish("fetch-once-key", value.data(), value.size());
+        ASSERT_TRUE(publish.status().ok());
+        publish.get();
+    });
+
+    auto result = waiter->subscribe_and_fetch_once("fetch-once-key", std::chrono::milliseconds(1000));
+    EXPECT_EQ(std::string(reinterpret_cast<const char*>(result.data.data()), result.data.size()),
+              "fetch-once-value");
+    EXPECT_EQ(result.owner_node_id, "publisher-b");
+    EXPECT_EQ(result.version, 1u);
+
+    publish_thread.join();
+    publisher->stop();
+    waiter->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, WaitForKeysReturnsWhenAllKeysAppear) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto waiter = KVNode::create(cfg);
+    auto publisher = KVNode::create(cfg);
+    ASSERT_TRUE(waiter->start(NodeConfig{server->address(), "127.0.0.1:0", "waiter-c"}).ok());
+    ASSERT_TRUE(publisher->start(NodeConfig{server->address(), "127.0.0.1:0", "publisher-c"}).ok());
+
+    std::thread publish_thread([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        const std::string first = "value-a";
+        auto first_publish = publisher->publish("batch-a", first.data(), first.size());
+        ASSERT_TRUE(first_publish.status().ok());
+        first_publish.get();
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        const std::string second = "value-b";
+        auto second_publish = publisher->publish("batch-b", second.data(), second.size());
+        ASSERT_TRUE(second_publish.status().ok());
+        second_publish.get();
+    });
+
+    auto result = waiter->wait_for_keys({"batch-a", "batch-b"}, std::chrono::milliseconds(1000));
+    EXPECT_TRUE(result.completed);
+    EXPECT_EQ(result.ready.size(), 2u);
+    EXPECT_TRUE(result.timed_out.empty());
+
+    publish_thread.join();
+    publisher->stop();
+    waiter->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyFetchesEachKeyWhenReady) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto waiter = KVNode::create(cfg);
+    auto publisher = KVNode::create(cfg);
+    ASSERT_TRUE(waiter->start(NodeConfig{server->address(), "127.0.0.1:0", "waiter-d"}).ok());
+    ASSERT_TRUE(publisher->start(NodeConfig{server->address(), "127.0.0.1:0", "publisher-d"}).ok());
+
+    std::thread publish_thread([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        const std::string first = "value-a";
+        auto first_publish = publisher->publish("fetch-a", first.data(), first.size());
+        ASSERT_TRUE(first_publish.status().ok());
+        first_publish.get();
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+        const std::string second = "value-b";
+        auto second_publish = publisher->publish("fetch-b", second.data(), second.size());
+        ASSERT_TRUE(second_publish.status().ok());
+        second_publish.get();
+    });
+
+    auto result = waiter->subscribe_and_fetch_once_many({"fetch-a", "fetch-b"},
+                                                        std::chrono::milliseconds(1000));
+    EXPECT_TRUE(result.completed);
+    EXPECT_EQ(result.fetched.size(), 2u);
+    EXPECT_TRUE(result.failed.empty());
+    EXPECT_TRUE(result.timed_out.empty());
+
+    publish_thread.join();
+    publisher->stop();
+    waiter->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, WaitAndFetchHelpersReturnImmediatelyForExistingKeys) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto waiter = KVNode::create(cfg);
+    auto publisher = KVNode::create(cfg);
+    ASSERT_TRUE(waiter->start(NodeConfig{server->address(), "127.0.0.1:0", "waiter-existing"}).ok());
+    ASSERT_TRUE(publisher->start(NodeConfig{server->address(), "127.0.0.1:0", "publisher-existing"}).ok());
+
+    const std::string value = "already-there";
+    auto publish = publisher->publish("existing-key", value.data(), value.size());
+    ASSERT_TRUE(publish.status().ok());
+    publish.get();
+
+    auto wait_one = waiter->wait_for_key("existing-key", std::chrono::milliseconds(100));
+    EXPECT_TRUE(wait_one.ok()) << wait_one.message();
+
+    auto wait_many = waiter->wait_for_keys({"existing-key"}, std::chrono::milliseconds(100));
+    EXPECT_TRUE(wait_many.completed);
+    ASSERT_EQ(wait_many.ready.size(), 1u);
+    EXPECT_EQ(wait_many.ready[0], "existing-key");
+    EXPECT_TRUE(wait_many.timed_out.empty());
+
+    auto one = waiter->subscribe_and_fetch_once("existing-key", std::chrono::milliseconds(100));
+    EXPECT_EQ(std::string(reinterpret_cast<const char*>(one.data.data()), one.data.size()), value);
+
+    auto many = waiter->subscribe_and_fetch_once_many({"existing-key"}, std::chrono::milliseconds(100));
+    EXPECT_TRUE(many.completed);
+    ASSERT_EQ(many.fetched.size(), 1u);
+    EXPECT_EQ(std::string(reinterpret_cast<const char*>(many.fetched[0].second.data.data()),
+                          many.fetched[0].second.data.size()),
+              value);
+    EXPECT_TRUE(many.failed.empty());
+    EXPECT_TRUE(many.timed_out.empty());
+
+    publisher->stop();
+    waiter->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyReturnsPartialResultsOnTimeout) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto waiter = KVNode::create(cfg);
+    auto publisher = KVNode::create(cfg);
+    ASSERT_TRUE(waiter->start(NodeConfig{server->address(), "127.0.0.1:0", "waiter-timeout"}).ok());
+    ASSERT_TRUE(publisher->start(NodeConfig{server->address(), "127.0.0.1:0", "publisher-timeout"}).ok());
+
+    std::thread publish_thread([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        const std::string value = "partial-value";
+        auto publish = publisher->publish("partial-a", value.data(), value.size());
+        ASSERT_TRUE(publish.status().ok());
+        publish.get();
+    });
+
+    auto result = waiter->subscribe_and_fetch_once_many({"partial-a", "partial-b"},
+                                                        std::chrono::milliseconds(200));
+    EXPECT_FALSE(result.completed);
+    ASSERT_EQ(result.fetched.size(), 1u);
+    EXPECT_TRUE(result.failed.empty());
+    ASSERT_EQ(result.timed_out.size(), 1u);
+    EXPECT_EQ(result.timed_out[0], "partial-b");
+
+    publish_thread.join();
+    publisher->stop();
+    waiter->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyDeduplicatesKeys) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto waiter = KVNode::create(cfg);
+    auto publisher = KVNode::create(cfg);
+    ASSERT_TRUE(waiter->start(NodeConfig{server->address(), "127.0.0.1:0", "waiter-dedupe"}).ok());
+    ASSERT_TRUE(publisher->start(NodeConfig{server->address(), "127.0.0.1:0", "publisher-dedupe"}).ok());
+
+    const std::string value = "dup-value";
+    auto publish = publisher->publish("dup-key", value.data(), value.size());
+    ASSERT_TRUE(publish.status().ok());
+    publish.get();
+
+    auto result = waiter->subscribe_and_fetch_once_many({"dup-key", "dup-key"},
+                                                        std::chrono::milliseconds(500));
+    EXPECT_TRUE(result.completed);
+    ASSERT_EQ(result.fetched.size(), 1u);
+    EXPECT_TRUE(result.failed.empty());
+    EXPECT_TRUE(result.timed_out.empty());
+
+    publisher->stop();
+    waiter->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyLocksFirstSuccessfulVersion) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto waiter = KVNode::create(cfg);
+    auto publisher = KVNode::create(cfg);
+    ASSERT_TRUE(waiter->start(NodeConfig{server->address(), "127.0.0.1:0", "waiter-version"}).ok());
+    ASSERT_TRUE(publisher->start(NodeConfig{server->address(), "127.0.0.1:0", "publisher-version"}).ok());
+
+    std::thread publish_thread([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        const std::string first = "version-one";
+        auto first_publish = publisher->publish("versioned-key", first.data(), first.size());
+        ASSERT_TRUE(first_publish.status().ok());
+        first_publish.get();
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        const std::string second = "version-two";
+        auto second_publish = publisher->publish("versioned-key", second.data(), second.size());
+        ASSERT_TRUE(second_publish.status().ok());
+        second_publish.get();
+    });
+
+    auto result = waiter->subscribe_and_fetch_once_many({"versioned-key"},
+                                                        std::chrono::milliseconds(1000));
+    ASSERT_EQ(result.fetched.size(), 1u);
+    EXPECT_EQ(result.fetched[0].second.version, 1u);
+    EXPECT_TRUE(result.completed);
+
+    publish_thread.join();
+    publisher->stop();
+    waiter->stop();
+    server->stop();
+}
+
 TEST(KvNodeIntegrationTest, MetricsAreEmptyBeforeAnyOperation) {
     auto cfg = axon::Config::builder().set_transport("tcp").build();
 
