@@ -121,6 +121,11 @@ public:
                                 size_t length,
                                 size_t local_offset = 0);
 
+    axon::Future<void> push(const std::string& target_node_id,
+                            const std::string& key,
+                            const void* data,
+                            size_t size);
+
     axon::Future<void> unpublish(const std::string& key);
 
 private:

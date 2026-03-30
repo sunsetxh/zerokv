@@ -45,6 +45,26 @@ detail::GetMetaResponse get_meta_response(detail::MsgStatus status,
     return resp;
 }
 
+detail::GetPushTargetResponse get_push_target_response(detail::MsgStatus status,
+                                                       std::string target_node_id = {},
+                                                       std::string target_data_addr = {},
+                                                       std::string push_control_addr = {},
+                                                       uint64_t push_inbox_remote_addr = 0,
+                                                       std::vector<uint8_t> push_inbox_rkey = {},
+                                                       uint64_t push_inbox_capacity = 0,
+                                                       std::string message = {}) {
+    detail::GetPushTargetResponse resp;
+    resp.status = status;
+    resp.target_node_id = std::move(target_node_id);
+    resp.target_data_addr = std::move(target_data_addr);
+    resp.push_control_addr = std::move(push_control_addr);
+    resp.push_inbox_remote_addr = push_inbox_remote_addr;
+    resp.push_inbox_rkey = std::move(push_inbox_rkey);
+    resp.push_inbox_capacity = push_inbox_capacity;
+    resp.message = std::move(message);
+    return resp;
+}
+
 detail::UnpublishResponse unpublish_response(detail::MsgStatus status, std::string message = {}) {
     detail::UnpublishResponse resp;
     resp.status = status;
@@ -87,6 +107,10 @@ struct KVServer::Impl {
         node.node_id = req.node_id;
         node.control_addr = req.control_addr;
         node.data_addr = req.data_addr;
+        node.push_control_addr = req.push_control_addr;
+        node.push_inbox_remote_addr = req.push_inbox_remote_addr;
+        node.push_inbox_rkey = req.push_inbox_rkey;
+        node.push_inbox_capacity = req.push_inbox_capacity;
         node.last_heartbeat_ms = 0;
         node.state = detail::NodeInfo::State::kAlive;
         if (!store_.register_node(std::move(node))) {
@@ -122,6 +146,29 @@ struct KVServer::Impl {
             return Status(ErrorCode::kConnectionReset, "owner unavailable");
         }
         resp = get_meta_response(detail::MsgStatus::kOk, meta);
+        return Status::OK();
+    }
+
+    Status handle_get_push_target(const detail::GetPushTargetRequest& req,
+                                  detail::GetPushTargetResponse& resp) {
+        auto node = store_.get_node(req.target_node_id);
+        if (!node.has_value()) {
+            resp = get_push_target_response(detail::MsgStatus::kNotFound, {}, {}, {}, 0, {}, 0,
+                                            "target node not found");
+            return Status(ErrorCode::kInvalidArgument, "target node not found");
+        }
+        if (node->state != detail::NodeInfo::State::kAlive) {
+            resp = get_push_target_response(detail::MsgStatus::kStaleOwner, {}, {}, {}, 0, {}, 0,
+                                            "target node unavailable");
+            return Status(ErrorCode::kConnectionReset, "target node unavailable");
+        }
+        resp = get_push_target_response(detail::MsgStatus::kOk,
+                                        node->node_id,
+                                        node->data_addr,
+                                        node->push_control_addr,
+                                        node->push_inbox_remote_addr,
+                                        node->push_inbox_rkey,
+                                        node->push_inbox_capacity);
         return Status::OK();
     }
 
@@ -194,6 +241,19 @@ struct KVServer::Impl {
                     (void)handle_get_meta(*req, resp);
                     auto bytes = detail::encode(resp);
                     (void)detail::send_frame(fd, detail::MsgType::kGetMetaResp, header.request_id, bytes);
+                    break;
+                }
+                case detail::MsgType::kGetPushTarget: {
+                    auto req = detail::decode_get_push_target_request(payload);
+                    if (!req.has_value()) {
+                        auto err = detail::encode(error_response(detail::MsgStatus::kInvalidRequest, "bad get_push_target request"));
+                        (void)detail::send_frame(fd, detail::MsgType::kError, header.request_id, err);
+                        break;
+                    }
+                    detail::GetPushTargetResponse resp;
+                    (void)handle_get_push_target(*req, resp);
+                    auto bytes = detail::encode(resp);
+                    (void)detail::send_frame(fd, detail::MsgType::kGetPushTargetResp, header.request_id, bytes);
                     break;
                 }
                 case detail::MsgType::kUnpublish: {

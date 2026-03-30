@@ -54,6 +54,10 @@ TEST(KvServerIntegrationTest, HandlesRegisterPutLookupAndUnpublish) {
     reg.node_id = "client-a";
     reg.control_addr = "127.0.0.1:19000";
     reg.data_addr = "127.0.0.1:20000";
+    reg.push_control_addr = "127.0.0.1:21000";
+    reg.push_inbox_remote_addr = 0x3000;
+    reg.push_inbox_rkey = {9, 9, 9, 9};
+    reg.push_inbox_capacity = 8192;
     auto reg_frame = make_frame(proto::MsgType::kRegisterNode, 1, reg);
     ASSERT_TRUE(proto::TcpTransport::send_all(fd, reg_frame));
 
@@ -113,6 +117,54 @@ TEST(KvServerIntegrationTest, HandlesRegisterPutLookupAndUnpublish) {
     ASSERT_TRUE(del_resp.has_value());
     EXPECT_EQ(del_resp->status, proto::MsgStatus::kOk);
     EXPECT_FALSE(server->lookup("alpha").has_value());
+
+    proto::TcpTransport::close_fd(&fd);
+    server->stop();
+}
+
+TEST(KvServerIntegrationTest, ReturnsPushTargetMetadata) {
+    auto cfg = axon::Config::builder()
+                   .set_transport("tcp")
+                   .build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    EXPECT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    std::string error;
+    int fd = proto::TcpTransport::connect(server->address(), &error);
+    ASSERT_GE(fd, 0) << error;
+
+    proto::RegisterNodeRequest reg;
+    reg.node_id = "target-a";
+    reg.control_addr = "127.0.0.1:19010";
+    reg.data_addr = "127.0.0.1:20010";
+    reg.push_control_addr = "127.0.0.1:21010";
+    reg.push_inbox_remote_addr = 0x4400;
+    reg.push_inbox_rkey = {7, 7, 7};
+    reg.push_inbox_capacity = 2048;
+    auto reg_frame = make_frame(proto::MsgType::kRegisterNode, 11, reg);
+    ASSERT_TRUE(proto::TcpTransport::send_all(fd, reg_frame));
+
+    auto [reg_header, reg_payload] = recv_frame(fd);
+    EXPECT_EQ(static_cast<proto::MsgType>(reg_header.type), proto::MsgType::kRegisterNodeResp);
+
+    proto::GetPushTargetRequest get;
+    get.target_node_id = "target-a";
+    auto get_frame = make_frame(proto::MsgType::kGetPushTarget, 12, get);
+    ASSERT_TRUE(proto::TcpTransport::send_all(fd, get_frame));
+
+    auto [get_header, get_payload] = recv_frame(fd);
+    EXPECT_EQ(static_cast<proto::MsgType>(get_header.type), proto::MsgType::kGetPushTargetResp);
+    auto get_resp = proto::decode_get_push_target_response(get_payload);
+    ASSERT_TRUE(get_resp.has_value());
+    EXPECT_EQ(get_resp->status, proto::MsgStatus::kOk);
+    EXPECT_EQ(get_resp->target_node_id, "target-a");
+    EXPECT_EQ(get_resp->target_data_addr, "127.0.0.1:20010");
+    EXPECT_EQ(get_resp->push_control_addr, "127.0.0.1:21010");
+    EXPECT_EQ(get_resp->push_inbox_remote_addr, 0x4400u);
+    EXPECT_EQ(get_resp->push_inbox_rkey, (std::vector<uint8_t>{7, 7, 7}));
+    EXPECT_EQ(get_resp->push_inbox_capacity, 2048u);
 
     proto::TcpTransport::close_fd(&fd);
     server->stop();

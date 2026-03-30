@@ -25,6 +25,14 @@ namespace axon::kv {
 namespace {
 
 using SteadyClock = std::chrono::steady_clock;
+constexpr uint32_t kPushInboxMagic = 0x50555831;  // "PUX1"
+constexpr size_t kDefaultPushInboxCapacity = 64 * 1024;
+
+struct PushInboxHeader {
+    uint32_t magic = kPushInboxMagic;
+    uint32_t key_size = 0;
+    uint64_t value_size = 0;
+};
 
 uint64_t elapsed_us(SteadyClock::time_point start, SteadyClock::time_point end) {
     const auto us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
@@ -32,6 +40,14 @@ uint64_t elapsed_us(SteadyClock::time_point start, SteadyClock::time_point end) 
         return 1;
     }
     return static_cast<uint64_t>(us);
+}
+
+std::string make_ephemeral_bind_addr(const std::string& addr) {
+    const auto colon = addr.rfind(':');
+    if (colon == std::string::npos || colon == 0) {
+        return "0.0.0.0:0";
+    }
+    return addr.substr(0, colon) + ":0";
 }
 
 std::string generate_node_id() {
@@ -75,6 +91,14 @@ struct KVNode::Impl {
     Context::Ptr context_;
     Worker::Ptr worker_;
     Listener::Ptr listener_;
+    int push_listen_fd_ = -1;
+    std::string push_control_addr_;
+    std::thread push_accept_thread_;
+    MemoryRegion::Ptr push_inbox_region_;
+    RemoteKey push_inbox_rkey_;
+    size_t push_inbox_capacity_ = kDefaultPushInboxCapacity;
+    std::mutex push_mu_;
+    bool push_busy_ = false;
     std::atomic<bool> running_{false};
     int control_fd_ = -1;
     std::string server_addr_;
@@ -106,6 +130,10 @@ struct KVNode::Impl {
         req.node_id = node_id_;
         req.control_addr.clear();
         req.data_addr = local_data_addr_;
+        req.push_control_addr = push_control_addr_;
+        req.push_inbox_remote_addr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(push_inbox_region_->address()));
+        req.push_inbox_rkey = push_inbox_rkey_.data;
+        req.push_inbox_capacity = static_cast<uint64_t>(push_inbox_capacity_);
 
         auto payload = detail::encode(req);
         const uint64_t request_id = next_request_id_.fetch_add(1);
@@ -148,6 +176,83 @@ struct KVNode::Impl {
         }
         node_id_ = resp->assigned_node_id;
         return Status::OK();
+    }
+
+    std::optional<detail::GetPushTargetResponse> get_push_target(const std::string& target_node_id,
+                                                                 Status* status_out) {
+        std::lock_guard<std::mutex> lock(control_mu_);
+        if (control_fd_ < 0) {
+            if (status_out) {
+                *status_out = Status(ErrorCode::kConnectionReset, "control connection is closed");
+            }
+            return std::nullopt;
+        }
+
+        detail::GetPushTargetRequest req;
+        req.target_node_id = target_node_id;
+        auto payload = detail::encode(req);
+        const uint64_t request_id = next_request_id_.fetch_add(1);
+        if (!detail::send_frame(control_fd_, detail::MsgType::kGetPushTarget, request_id, payload)) {
+            if (status_out) {
+                *status_out = Status(ErrorCode::kConnectionReset, "failed to send get_push_target request");
+            }
+            return std::nullopt;
+        }
+
+        detail::MsgHeader header;
+        std::vector<uint8_t> response_payload;
+        if (!detail::recv_frame(control_fd_, &header, &response_payload)) {
+            if (status_out) {
+                *status_out = Status(ErrorCode::kConnectionReset, "failed to read get_push_target response");
+            }
+            return std::nullopt;
+        }
+        if (header.request_id != request_id) {
+            if (status_out) {
+                *status_out = Status(ErrorCode::kInternalError, "get_push_target response request_id mismatch");
+            }
+            return std::nullopt;
+        }
+
+        const auto type = static_cast<detail::MsgType>(header.type);
+        if (type == detail::MsgType::kError) {
+            auto err = detail::decode_error_response(response_payload);
+            if (!err.has_value()) {
+                if (status_out) {
+                    *status_out = Status(ErrorCode::kInternalError, "failed to decode get_push_target error response");
+                }
+                return std::nullopt;
+            }
+            if (status_out) {
+                *status_out = status_from_msg(err->status, err->message, ErrorCode::kInternalError);
+            }
+            return std::nullopt;
+        }
+        if (type != detail::MsgType::kGetPushTargetResp) {
+            if (status_out) {
+                *status_out = Status(ErrorCode::kInternalError, "unexpected get_push_target response type");
+            }
+            return std::nullopt;
+        }
+
+        auto resp = detail::decode_get_push_target_response(response_payload);
+        if (!resp.has_value()) {
+            if (status_out) {
+                *status_out = Status(ErrorCode::kInternalError, "failed to decode get_push_target response");
+            }
+            return std::nullopt;
+        }
+        auto status = status_from_msg(resp->status, resp->message, ErrorCode::kInternalError);
+        if (!status.ok()) {
+            if (status_out) {
+                *status_out = status;
+            }
+            return std::nullopt;
+        }
+        if (status_out) {
+            *status_out = Status::OK();
+        }
+        return resp;
     }
 
     Status put_meta(const detail::KeyMetadata& meta) {
@@ -481,6 +586,108 @@ struct KVNode::Impl {
         }
         return Future<void>::make_ready();
     }
+
+    Status handle_push_commit(const detail::PushCommitRequest& req) {
+        {
+            std::lock_guard<std::mutex> push_lock(push_mu_);
+            if (push_busy_) {
+                return Status(ErrorCode::kConnectionRefused, "push inbox busy");
+            }
+            push_busy_ = true;
+        }
+        struct ResetBusy {
+            Impl* self;
+            ~ResetBusy() {
+                std::lock_guard<std::mutex> lock(self->push_mu_);
+                self->push_busy_ = false;
+            }
+        } reset{this};
+
+        if (!push_inbox_region_ || req.target_node_id != node_id_) {
+            return Status(ErrorCode::kInvalidArgument, "invalid push target");
+        }
+
+        if (push_inbox_capacity_ < sizeof(PushInboxHeader)) {
+            return Status(ErrorCode::kInternalError, "push inbox not initialized");
+        }
+
+        PushInboxHeader header;
+        std::memcpy(&header, push_inbox_region_->address(), sizeof(header));
+        if (header.magic != kPushInboxMagic) {
+            return Status(ErrorCode::kInvalidArgument, "invalid push inbox header");
+        }
+        if (header.value_size != req.value_size) {
+            return Status(ErrorCode::kInvalidArgument, "push value size mismatch");
+        }
+        const size_t total_size = sizeof(PushInboxHeader) + header.key_size +
+                                  static_cast<size_t>(header.value_size);
+        if (total_size > push_inbox_capacity_) {
+            return Status(ErrorCode::kInvalidArgument, "push payload exceeds inbox capacity");
+        }
+
+        const auto* base = static_cast<const uint8_t*>(push_inbox_region_->address());
+        const auto* key_ptr = base + sizeof(PushInboxHeader);
+        const auto* value_ptr = key_ptr + header.key_size;
+        std::string inbox_key(reinterpret_cast<const char*>(key_ptr), header.key_size);
+        if (inbox_key != req.key) {
+            return Status(ErrorCode::kInvalidArgument, "push key mismatch");
+        }
+
+        auto region = MemoryRegion::allocate(context_, static_cast<size_t>(header.value_size));
+        if (!region) {
+            return Status(ErrorCode::kRegistrationFailed, "failed to allocate push finalize region");
+        }
+        std::memcpy(region->address(), value_ptr, static_cast<size_t>(header.value_size));
+
+        auto publish = publish_impl(req.key, region, static_cast<size_t>(header.value_size), nullptr);
+        return publish.status();
+    }
+
+    void serve_push_connection(int fd) {
+        detail::MsgHeader header;
+        std::vector<uint8_t> payload;
+        if (!detail::recv_frame(fd, &header, &payload)) {
+            detail::TcpTransport::close_fd(&fd);
+            return;
+        }
+
+        if (static_cast<detail::MsgType>(header.type) != detail::MsgType::kPushCommit) {
+            auto err = detail::encode(detail::ErrorResponse{detail::MsgStatus::kInvalidRequest, "unsupported push message"});
+            (void)detail::send_frame(fd, detail::MsgType::kError, header.request_id, err);
+            detail::TcpTransport::close_fd(&fd);
+            return;
+        }
+
+        auto req = detail::decode_push_commit_request(payload);
+        if (!req.has_value()) {
+            auto err = detail::encode(detail::ErrorResponse{detail::MsgStatus::kInvalidRequest, "bad push commit request"});
+            (void)detail::send_frame(fd, detail::MsgType::kError, header.request_id, err);
+            detail::TcpTransport::close_fd(&fd);
+            return;
+        }
+
+        detail::PushCommitResponse resp;
+        auto status = handle_push_commit(*req);
+        resp.status = status.ok() ? detail::MsgStatus::kOk : detail::MsgStatus::kInvalidRequest;
+        resp.message = status.ok() ? std::string{} : status.message();
+        auto bytes = detail::encode(resp);
+        (void)detail::send_frame(fd, detail::MsgType::kPushCommitResp, header.request_id, bytes);
+        detail::TcpTransport::close_fd(&fd);
+    }
+
+    void push_accept_loop() {
+        while (running_.load()) {
+            std::string error;
+            auto conn = detail::TcpTransport::accept(push_listen_fd_, &error);
+            if (conn.fd < 0) {
+                if (!running_.load()) {
+                    break;
+                }
+                continue;
+            }
+            serve_push_connection(conn.fd);
+        }
+    }
 };
 
 KVNode::KVNode(const axon::Config& cfg) : impl_(std::make_unique<Impl>(cfg)) {}
@@ -530,16 +737,45 @@ Status KVNode::start(const NodeConfig& cfg) {
         return Status(ErrorCode::kTransportError, "failed to create KVNode data listener");
     }
     impl_->local_data_addr_ = impl_->listener_->address();
+    std::string error;
+    impl_->push_inbox_region_ = MemoryRegion::allocate(impl_->context_, impl_->push_inbox_capacity_);
+    if (!impl_->push_inbox_region_) {
+        impl_->listener_->close();
+        impl_->listener_.reset();
+        impl_->worker_.reset();
+        impl_->context_.reset();
+        impl_->node_id_.clear();
+        return Status(ErrorCode::kRegistrationFailed, "failed to allocate push inbox region");
+    }
+    impl_->push_inbox_rkey_ = impl_->push_inbox_region_->remote_key();
+    impl_->push_listen_fd_ = detail::TcpTransport::listen(
+        make_ephemeral_bind_addr(impl_->local_data_addr_), &impl_->push_control_addr_, &error);
+    if (impl_->push_listen_fd_ < 0) {
+        impl_->listener_->close();
+        impl_->listener_.reset();
+        impl_->worker_.reset();
+        impl_->context_.reset();
+        impl_->push_inbox_region_.reset();
+        impl_->node_id_.clear();
+        return Status(ErrorCode::kConnectionRefused, error.empty() ? "failed to create push control listener" : error);
+    }
+    impl_->running_.store(true);
+    impl_->push_accept_thread_ = std::thread([impl = impl_.get()]() { impl->push_accept_loop(); });
     impl_->worker_->start_progress_thread();
 
-    std::string error;
     impl_->control_fd_ = detail::TcpTransport::connect(impl_->server_addr_, &error);
     if (impl_->control_fd_ < 0) {
+        detail::TcpTransport::close_fd(&impl_->push_listen_fd_);
+        if (impl_->push_accept_thread_.joinable()) {
+            impl_->push_accept_thread_.join();
+        }
+        impl_->running_.store(false);
         impl_->listener_->close();
         impl_->listener_.reset();
         impl_->worker_->stop_progress_thread();
         impl_->worker_.reset();
         impl_->context_.reset();
+        impl_->push_inbox_region_.reset();
         impl_->node_id_.clear();
         return Status(ErrorCode::kConnectionRefused, error.empty() ? "failed to connect to KV server" : error);
     }
@@ -547,16 +783,20 @@ Status KVNode::start(const NodeConfig& cfg) {
     auto status = impl_->register_with_server();
     if (!status.ok()) {
         detail::TcpTransport::close_fd(&impl_->control_fd_);
+        detail::TcpTransport::close_fd(&impl_->push_listen_fd_);
+        if (impl_->push_accept_thread_.joinable()) {
+            impl_->push_accept_thread_.join();
+        }
+        impl_->running_.store(false);
         impl_->listener_->close();
         impl_->listener_.reset();
         impl_->worker_->stop_progress_thread();
         impl_->worker_.reset();
         impl_->context_.reset();
+        impl_->push_inbox_region_.reset();
         impl_->node_id_.clear();
         return status;
     }
-
-    impl_->running_.store(true);
     return Status::OK();
 }
 
@@ -567,6 +807,10 @@ void KVNode::stop() {
     {
         std::lock_guard<std::mutex> lock(impl_->control_mu_);
         detail::TcpTransport::close_fd(&impl_->control_fd_);
+    }
+    detail::TcpTransport::close_fd(&impl_->push_listen_fd_);
+    if (impl_->push_accept_thread_.joinable()) {
+        impl_->push_accept_thread_.join();
     }
     {
         std::lock_guard<std::mutex> lock(impl_->published_mu_);
@@ -585,6 +829,7 @@ void KVNode::stop() {
         impl_->worker_->stop_progress_thread();
         impl_->worker_.reset();
     }
+    impl_->push_inbox_region_.reset();
     impl_->context_.reset();
 }
 
@@ -747,6 +992,99 @@ Future<void> KVNode::fetch_to(const std::string& key,
     metrics.ok = fetch.status().ok();
     impl_->record_fetch_metrics(metrics);
     return fetch;
+}
+
+Future<void> KVNode::push(const std::string& target_node_id,
+                          const std::string& key,
+                          const void* data,
+                          size_t size) {
+    if (!impl_) {
+        return Future<void>::make_error(Status(ErrorCode::kInternalError, "KVNode not initialized"));
+    }
+    if (!impl_->running_.load()) {
+        return Future<void>::make_error(Status(ErrorCode::kConnectionReset, "KVNode is not running"));
+    }
+    if (target_node_id.empty() || key.empty() || !data || size == 0) {
+        return Future<void>::make_error(Status(ErrorCode::kInvalidArgument, "invalid push arguments"));
+    }
+
+    Status lookup_status;
+    auto target = impl_->get_push_target(target_node_id, &lookup_status);
+    if (!target.has_value()) {
+        return Future<void>::make_error(lookup_status);
+    }
+
+    const size_t frame_size = sizeof(PushInboxHeader) + key.size() + size;
+    if (frame_size > target->push_inbox_capacity) {
+        return Future<void>::make_error(Status(ErrorCode::kInvalidArgument, "push payload exceeds target inbox capacity"));
+    }
+
+    auto local_region = MemoryRegion::allocate(impl_->context_, frame_size);
+    if (!local_region) {
+        return Future<void>::make_error(Status(ErrorCode::kRegistrationFailed, "failed to allocate push frame region"));
+    }
+
+    PushInboxHeader header;
+    header.key_size = static_cast<uint32_t>(key.size());
+    header.value_size = static_cast<uint64_t>(size);
+    auto* base = static_cast<uint8_t*>(local_region->address());
+    std::memcpy(base, &header, sizeof(header));
+    std::memcpy(base + sizeof(header), key.data(), key.size());
+    std::memcpy(base + sizeof(header) + key.size(), data, size);
+
+    Status peer_status;
+    auto peer = impl_->get_or_connect_peer(target->target_node_id, target->target_data_addr, &peer_status);
+    if (!peer) {
+        return Future<void>::make_error(peer_status);
+    }
+
+    RemoteKey rkey;
+    rkey.data = target->push_inbox_rkey;
+    auto put = peer->put(local_region, 0, target->push_inbox_remote_addr, rkey, frame_size);
+    put.get();
+    if (!put.status().ok()) {
+        return Future<void>::make_error(put.status());
+    }
+
+    std::string error;
+    int fd = detail::TcpTransport::connect(target->push_control_addr, &error);
+    if (fd < 0) {
+        return Future<void>::make_error(Status(ErrorCode::kConnectionRefused, error.empty() ? "failed to connect to target push control" : error));
+    }
+
+    detail::PushCommitRequest req;
+    req.target_node_id = target_node_id;
+    req.sender_node_id = impl_->node_id_;
+    req.key = key;
+    req.value_size = static_cast<uint64_t>(size);
+    const uint64_t request_id = impl_->next_request_id_.fetch_add(1);
+    if (!detail::send_frame(fd, detail::MsgType::kPushCommit, request_id, detail::encode(req))) {
+        detail::TcpTransport::close_fd(&fd);
+        return Future<void>::make_error(Status(ErrorCode::kConnectionReset, "failed to send push commit"));
+    }
+
+    detail::MsgHeader resp_header;
+    std::vector<uint8_t> resp_payload;
+    if (!detail::recv_frame(fd, &resp_header, &resp_payload)) {
+        detail::TcpTransport::close_fd(&fd);
+        return Future<void>::make_error(Status(ErrorCode::kConnectionReset, "failed to read push commit response"));
+    }
+    detail::TcpTransport::close_fd(&fd);
+    if (resp_header.request_id != request_id) {
+        return Future<void>::make_error(Status(ErrorCode::kInternalError, "push commit response request_id mismatch"));
+    }
+    if (static_cast<detail::MsgType>(resp_header.type) != detail::MsgType::kPushCommitResp) {
+        return Future<void>::make_error(Status(ErrorCode::kInternalError, "unexpected push commit response type"));
+    }
+    auto resp = detail::decode_push_commit_response(resp_payload);
+    if (!resp.has_value()) {
+        return Future<void>::make_error(Status(ErrorCode::kInternalError, "failed to decode push commit response"));
+    }
+    auto status = status_from_msg(resp->status, resp->message, ErrorCode::kInternalError);
+    if (!status.ok()) {
+        return Future<void>::make_error(status);
+    }
+    return Future<void>::make_ready();
 }
 
 Future<void> KVNode::unpublish(const std::string& key) {

@@ -20,6 +20,10 @@ struct NodeInfo {
     std::string node_id;
     std::string control_addr;
     std::string data_addr;
+    std::string push_control_addr;
+    uint64_t push_inbox_remote_addr = 0;
+    std::vector<uint8_t> push_inbox_rkey;
+    uint64_t push_inbox_capacity = 0;
     uint64_t last_heartbeat_ms = 0;
     State state = State::kAlive;
 };

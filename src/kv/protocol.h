@@ -23,6 +23,10 @@ enum class MsgType : uint16_t {
     kUnpublish = 7,
     kHeartbeat = 8,
     kUnpublishResp = 9,
+    kGetPushTarget = 10,
+    kGetPushTargetResp = 11,
+    kPushCommit = 12,
+    kPushCommitResp = 13,
     kError = 255,
 };
 
@@ -57,6 +61,10 @@ struct RegisterNodeRequest {
     std::string node_id;
     std::string control_addr;
     std::string data_addr;
+    std::string push_control_addr;
+    uint64_t push_inbox_remote_addr = 0;
+    std::vector<uint8_t> push_inbox_rkey;
+    uint64_t push_inbox_capacity = 0;
 };
 
 struct RegisterNodeResponse {
@@ -81,6 +89,33 @@ struct GetMetaRequest {
 struct GetMetaResponse {
     MsgStatus status = MsgStatus::kOk;
     std::optional<KeyMetadata> metadata;
+    std::string message;
+};
+
+struct GetPushTargetRequest {
+    std::string target_node_id;
+};
+
+struct GetPushTargetResponse {
+    MsgStatus status = MsgStatus::kOk;
+    std::string target_node_id;
+    std::string target_data_addr;
+    std::string push_control_addr;
+    uint64_t push_inbox_remote_addr = 0;
+    std::vector<uint8_t> push_inbox_rkey;
+    uint64_t push_inbox_capacity = 0;
+    std::string message;
+};
+
+struct PushCommitRequest {
+    std::string target_node_id;
+    std::string sender_node_id;
+    std::string key;
+    uint64_t value_size = 0;
+};
+
+struct PushCommitResponse {
+    MsgStatus status = MsgStatus::kOk;
     std::string message;
 };
 
@@ -127,6 +162,18 @@ decode_message(std::span<const uint8_t> data);
 
 [[nodiscard]] std::vector<uint8_t> encode(const GetMetaResponse& msg);
 [[nodiscard]] std::optional<GetMetaResponse> decode_get_meta_response(std::span<const uint8_t> data);
+
+[[nodiscard]] std::vector<uint8_t> encode(const GetPushTargetRequest& msg);
+[[nodiscard]] std::optional<GetPushTargetRequest> decode_get_push_target_request(std::span<const uint8_t> data);
+
+[[nodiscard]] std::vector<uint8_t> encode(const GetPushTargetResponse& msg);
+[[nodiscard]] std::optional<GetPushTargetResponse> decode_get_push_target_response(std::span<const uint8_t> data);
+
+[[nodiscard]] std::vector<uint8_t> encode(const PushCommitRequest& msg);
+[[nodiscard]] std::optional<PushCommitRequest> decode_push_commit_request(std::span<const uint8_t> data);
+
+[[nodiscard]] std::vector<uint8_t> encode(const PushCommitResponse& msg);
+[[nodiscard]] std::optional<PushCommitResponse> decode_push_commit_response(std::span<const uint8_t> data);
 
 [[nodiscard]] std::vector<uint8_t> encode(const UnpublishRequest& msg);
 [[nodiscard]] std::optional<UnpublishRequest> decode_unpublish_request(std::span<const uint8_t> data);

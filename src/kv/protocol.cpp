@@ -115,7 +115,11 @@ std::optional<T> decode_checked(std::span<const uint8_t> data, bool (*fn)(Decode
 bool decode_register_node_request_impl(Decoder& dec, RegisterNodeRequest& msg) {
     return dec.str(msg.node_id) &&
            dec.str(msg.control_addr) &&
-           dec.str(msg.data_addr);
+           dec.str(msg.data_addr) &&
+           dec.str(msg.push_control_addr) &&
+           dec.u64(msg.push_inbox_remote_addr) &&
+           dec.blob(msg.push_inbox_rkey) &&
+           dec.u64(msg.push_inbox_capacity);
 }
 
 bool decode_register_node_response_impl(Decoder& dec, RegisterNodeResponse& msg) {
@@ -156,6 +160,37 @@ bool decode_get_meta_response_impl(Decoder& dec, GetMetaResponse& msg) {
         msg.metadata = std::move(metadata);
     }
     return dec.str(msg.message);
+}
+
+bool decode_get_push_target_request_impl(Decoder& dec, GetPushTargetRequest& msg) {
+    return dec.str(msg.target_node_id);
+}
+
+bool decode_get_push_target_response_impl(Decoder& dec, GetPushTargetResponse& msg) {
+    uint16_t status = 0;
+    return dec.u16(status) &&
+           dec.str(msg.target_node_id) &&
+           dec.str(msg.target_data_addr) &&
+           dec.str(msg.push_control_addr) &&
+           dec.u64(msg.push_inbox_remote_addr) &&
+           dec.blob(msg.push_inbox_rkey) &&
+           dec.u64(msg.push_inbox_capacity) &&
+           dec.str(msg.message) &&
+           (msg.status = static_cast<MsgStatus>(status), true);
+}
+
+bool decode_push_commit_request_impl(Decoder& dec, PushCommitRequest& msg) {
+    return dec.str(msg.target_node_id) &&
+           dec.str(msg.sender_node_id) &&
+           dec.str(msg.key) &&
+           dec.u64(msg.value_size);
+}
+
+bool decode_push_commit_response_impl(Decoder& dec, PushCommitResponse& msg) {
+    uint16_t status = 0;
+    return dec.u16(status) &&
+           dec.str(msg.message) &&
+           (msg.status = static_cast<MsgStatus>(status), true);
 }
 
 bool decode_unpublish_request_impl(Decoder& dec, UnpublishRequest& msg) {
@@ -240,6 +275,10 @@ std::vector<uint8_t> encode(const RegisterNodeRequest& msg) {
     enc.str(msg.node_id);
     enc.str(msg.control_addr);
     enc.str(msg.data_addr);
+    enc.str(msg.push_control_addr);
+    enc.u64(msg.push_inbox_remote_addr);
+    enc.blob(msg.push_inbox_rkey);
+    enc.u64(msg.push_inbox_capacity);
     return std::move(enc).finish();
 }
 
@@ -303,6 +342,57 @@ std::vector<uint8_t> encode(const GetMetaResponse& msg) {
 
 std::optional<GetMetaResponse> decode_get_meta_response(std::span<const uint8_t> data) {
     return decode_checked<GetMetaResponse>(data, decode_get_meta_response_impl);
+}
+
+std::vector<uint8_t> encode(const GetPushTargetRequest& msg) {
+    Encoder enc;
+    enc.str(msg.target_node_id);
+    return std::move(enc).finish();
+}
+
+std::optional<GetPushTargetRequest> decode_get_push_target_request(std::span<const uint8_t> data) {
+    return decode_checked<GetPushTargetRequest>(data, decode_get_push_target_request_impl);
+}
+
+std::vector<uint8_t> encode(const GetPushTargetResponse& msg) {
+    Encoder enc;
+    enc.u16(static_cast<uint16_t>(msg.status));
+    enc.str(msg.target_node_id);
+    enc.str(msg.target_data_addr);
+    enc.str(msg.push_control_addr);
+    enc.u64(msg.push_inbox_remote_addr);
+    enc.blob(msg.push_inbox_rkey);
+    enc.u64(msg.push_inbox_capacity);
+    enc.str(msg.message);
+    return std::move(enc).finish();
+}
+
+std::optional<GetPushTargetResponse> decode_get_push_target_response(std::span<const uint8_t> data) {
+    return decode_checked<GetPushTargetResponse>(data, decode_get_push_target_response_impl);
+}
+
+std::vector<uint8_t> encode(const PushCommitRequest& msg) {
+    Encoder enc;
+    enc.str(msg.target_node_id);
+    enc.str(msg.sender_node_id);
+    enc.str(msg.key);
+    enc.u64(msg.value_size);
+    return std::move(enc).finish();
+}
+
+std::optional<PushCommitRequest> decode_push_commit_request(std::span<const uint8_t> data) {
+    return decode_checked<PushCommitRequest>(data, decode_push_commit_request_impl);
+}
+
+std::vector<uint8_t> encode(const PushCommitResponse& msg) {
+    Encoder enc;
+    enc.u16(static_cast<uint16_t>(msg.status));
+    enc.str(msg.message);
+    return std::move(enc).finish();
+}
+
+std::optional<PushCommitResponse> decode_push_commit_response(std::span<const uint8_t> data) {
+    return decode_checked<PushCommitResponse>(data, decode_push_commit_response_impl);
 }
 
 std::vector<uint8_t> encode(const UnpublishRequest& msg) {

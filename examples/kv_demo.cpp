@@ -10,6 +10,9 @@
 ///   Reader:
 ///     ./kv_demo --mode fetch --server-addr 10.0.0.1:15000 --data-addr 10.0.0.2:0
 ///               --node-id reader --key mykey
+///   Pusher:
+///     ./kv_demo --mode push --server-addr 10.0.0.1:15000 --data-addr 10.0.0.2:0
+///               --node-id sender --target-node-id target --key mykey --value hello
 ///
 /// Known issue:
 ///   With UCX 1.20 on Soft-RoCE (`rxe0`) across QEMU VMs, the UCX new protocol
@@ -97,6 +100,7 @@ int main(int argc, char** argv) {
     std::string node_id;
     std::string key;
     std::string value;
+    std::string target_node_id;
     std::string transport = "tcp";
     bool hold = false;
 
@@ -116,6 +120,8 @@ int main(int argc, char** argv) {
             key = argv[++i];
         } else if (arg == "--value" && i + 1 < argc) {
             value = argv[++i];
+        } else if (arg == "--target-node-id" && i + 1 < argc) {
+            target_node_id = argv[++i];
         } else if (arg == "--transport" && i + 1 < argc) {
             transport = argv[++i];
         } else if (arg == "--hold") {
@@ -125,9 +131,9 @@ int main(int argc, char** argv) {
 
     if (mode.empty()) {
         std::cerr << "Usage: " << argv[0]
-                  << " --mode <server|publish|fetch|unpublish>"
+                  << " --mode <server|publish|fetch|push|unpublish>"
                   << " [--listen addr] [--server-addr addr] [--data-addr addr]"
-                  << " [--node-id id] [--key key] [--value value]"
+                  << " [--node-id id] [--target-node-id id] [--key key] [--value value]"
                   << " [--transport tcp|rdma] [--hold]\n";
         return 1;
     }
@@ -203,6 +209,27 @@ int main(int argc, char** argv) {
             std::cout << "Holding publisher alive. Press Ctrl+C to exit.\n";
             wait_until_stopped();
         }
+        node->stop();
+        return 0;
+    }
+
+    if (mode == "push") {
+        if (value.empty() || target_node_id.empty()) {
+            std::cerr << "--value and --target-node-id are required for push mode\n";
+            node->stop();
+            return 1;
+        }
+
+        auto push = node->push(target_node_id, key, value.data(), value.size());
+        if (!push.status().ok()) {
+            std::cerr << "Push failed: " << push.status().message() << "\n";
+            node->stop();
+            return 1;
+        }
+        push.get();
+        std::cout << "Pushed key=" << key
+                  << " target=" << target_node_id
+                  << " bytes=" << value.size() << "\n";
         node->stop();
         return 0;
     }

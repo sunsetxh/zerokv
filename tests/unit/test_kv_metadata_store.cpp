@@ -179,4 +179,26 @@ TEST(KvMetadataStoreTest, ReregisterDeadNodeRevivesButDoesNotRestoreKeys) {
     EXPECT_TRUE(store.get("k2").has_value());
 }
 
+TEST(KvMetadataStoreTest, RegisterNodeStoresPushMetadata) {
+    MetadataStore store;
+
+    NodeInfo node;
+    node.node_id = "node-push";
+    node.control_addr = "127.0.0.1:19001";
+    node.data_addr = "127.0.0.1:20001";
+    node.push_control_addr = "127.0.0.1:21001";
+    node.push_inbox_remote_addr = 0xABCDEF;
+    node.push_inbox_rkey = {1, 2, 3, 4};
+    node.push_inbox_capacity = 4096;
+
+    EXPECT_TRUE(store.register_node(node));
+
+    auto found = store.get_node("node-push");
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->push_control_addr, "127.0.0.1:21001");
+    EXPECT_EQ(found->push_inbox_remote_addr, 0xABCDEFu);
+    EXPECT_EQ(found->push_inbox_rkey, (std::vector<uint8_t>{1, 2, 3, 4}));
+    EXPECT_EQ(found->push_inbox_capacity, 4096u);
+}
+
 }  // namespace

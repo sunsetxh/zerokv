@@ -486,4 +486,167 @@ TEST(KvNodeIntegrationTest, FetchFailsAfterUnpublish) {
     server->stop();
 }
 
+TEST(KvNodeIntegrationTest, PushPublishesOnTarget) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto sender = KVNode::create(cfg);
+    auto target = KVNode::create(cfg);
+    auto reader = KVNode::create(cfg);
+    ASSERT_NE(sender, nullptr);
+    ASSERT_NE(target, nullptr);
+    ASSERT_NE(reader, nullptr);
+
+    ASSERT_TRUE(sender->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:25001",
+        .node_id = "push-sender",
+    }).ok());
+    ASSERT_TRUE(target->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:25002",
+        .node_id = "push-target",
+    }).ok());
+    ASSERT_TRUE(reader->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:25003",
+        .node_id = "push-reader",
+    }).ok());
+
+    const std::string value = "rdma-pushed-value";
+    auto push = sender->push("push-target", "pushed-key", value.data(), value.size());
+    ASSERT_TRUE(push.status().ok());
+    push.get();
+
+    auto fetched = reader->fetch("pushed-key");
+    ASSERT_TRUE(fetched.status().ok());
+    auto result = fetched.get();
+
+    EXPECT_EQ(result.owner_node_id, "push-target");
+    EXPECT_EQ(result.version, 1u);
+    ASSERT_EQ(result.data.size(), value.size());
+    EXPECT_EQ(std::memcmp(result.data.data(), value.data(), value.size()), 0);
+
+    reader->stop();
+    target->stop();
+    sender->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, PushFailsWhenTargetNodeIsUnknown) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto sender = KVNode::create(cfg);
+    ASSERT_NE(sender, nullptr);
+    ASSERT_TRUE(sender->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:23011",
+        .node_id = "push-sender-missing",
+    }).ok());
+
+    const std::string value = "missing-target";
+    auto push = sender->push("no-such-node", "missing-key", value.data(), value.size());
+    EXPECT_FALSE(push.status().ok());
+
+    sender->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, PushFailsWhenPayloadExceedsInboxCapacity) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto sender = KVNode::create(cfg);
+    auto target = KVNode::create(cfg);
+    ASSERT_NE(sender, nullptr);
+    ASSERT_NE(target, nullptr);
+
+    ASSERT_TRUE(sender->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:23012",
+        .node_id = "push-sender-big",
+    }).ok());
+    ASSERT_TRUE(target->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:23013",
+        .node_id = "push-target-big",
+    }).ok());
+
+    std::string big_value(70 * 1024, 'x');
+    auto push = sender->push("push-target-big", "too-big-key", big_value.data(), big_value.size());
+    EXPECT_FALSE(push.status().ok());
+
+    target->stop();
+    sender->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, PushCoexistsWithPublish) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto sender = KVNode::create(cfg);
+    auto target = KVNode::create(cfg);
+    auto reader = KVNode::create(cfg);
+    ASSERT_NE(sender, nullptr);
+    ASSERT_NE(target, nullptr);
+    ASSERT_NE(reader, nullptr);
+
+    ASSERT_TRUE(sender->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:24021",
+        .node_id = "push-sender-coexist",
+    }).ok());
+    ASSERT_TRUE(target->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:24022",
+        .node_id = "push-target-coexist",
+    }).ok());
+    ASSERT_TRUE(reader->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:24023",
+        .node_id = "push-reader-coexist",
+    }).ok());
+
+    const std::string pushed = "pushed-value";
+    auto push = sender->push("push-target-coexist", "pushed-key-2", pushed.data(), pushed.size());
+    ASSERT_TRUE(push.status().ok());
+    push.get();
+
+    const std::string local = "published-value";
+    auto publish = target->publish("published-key-2", local.data(), local.size());
+    ASSERT_TRUE(publish.status().ok());
+    publish.get();
+
+    auto fetched_pushed = reader->fetch("pushed-key-2");
+    ASSERT_TRUE(fetched_pushed.status().ok());
+    auto pushed_result = fetched_pushed.get();
+    ASSERT_EQ(pushed_result.data.size(), pushed.size());
+    EXPECT_EQ(std::memcmp(pushed_result.data.data(), pushed.data(), pushed.size()), 0);
+
+    auto fetched_local = reader->fetch("published-key-2");
+    ASSERT_TRUE(fetched_local.status().ok());
+    auto local_result = fetched_local.get();
+    ASSERT_EQ(local_result.data.size(), local.size());
+    EXPECT_EQ(std::memcmp(local_result.data.data(), local.data(), local.size()), 0);
+
+    reader->stop();
+    target->stop();
+    sender->stop();
+    server->stop();
+}
+
 }  // namespace
