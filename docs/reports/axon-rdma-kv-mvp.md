@@ -650,6 +650,108 @@ For the first real RDMA pass, focus on:
 These are enough to determine whether latency is dominated by control-plane
 lookup, peer connection setup, or RDMA transfer itself.
 
+### KV Benchmark
+
+Use `kv_bench` for size-sweep publish and fetch benchmarking.
+
+Start the benchmark server:
+
+```bash
+./kv_bench --mode server --listen <server_ip>:15000 --transport rdma
+```
+
+Start a stable owner for fetch benchmarking:
+
+```bash
+UCX_NET_DEVICES=<rdma_dev> ./kv_bench \
+  --mode hold-owner \
+  --server-addr <server_ip>:15000 \
+  --data-addr <owner_ip>:0 \
+  --node-id owner \
+  --transport rdma
+```
+
+Run publish benchmark:
+
+```bash
+UCX_NET_DEVICES=<rdma_dev> ./kv_bench \
+  --mode bench-publish \
+  --server-addr <server_ip>:15000 \
+  --data-addr <client_ip>:0 \
+  --node-id bench-publish \
+  --sizes 4K,64K,1M,4M,16M,32M,64M,128M \
+  --total-bytes 1G \
+  --transport rdma
+```
+
+Run fetch benchmark:
+
+```bash
+UCX_NET_DEVICES=<rdma_dev> ./kv_bench \
+  --mode bench-fetch \
+  --server-addr <server_ip>:15000 \
+  --data-addr <client_ip>:0 \
+  --node-id bench-fetch \
+  --owner-node-id owner \
+  --sizes 4K,64K,1M,4M,16M,32M,64M,128M \
+  --total-bytes 1G \
+  --transport rdma
+```
+
+Notes:
+
+- `--iters N` can override the automatic `--total-bytes / size` iteration rule
+- `hold-owner` publishes stable keys named `bench-fetch-<size-bytes>`
+- `bench-publish` uses unique keys and unpublishes after each iteration to
+  avoid metadata accumulation
+
+### Two-VM Soft-RoCE Benchmark Snapshot
+
+The first end-to-end benchmark pass was run on the QEMU VM pair with:
+
+- VM1: benchmark server
+- VM1: fetch owner
+- VM2: benchmark client
+- `UCX_NET_DEVICES=rxe0:1`
+- `UCX_PROTO_ENABLE=n`
+- fixed `--iters 4`
+- TCP control plane, RDMA data plane
+
+This topology was chosen because it gives a real cross-VM RDMA fetch path while
+avoiding an instability seen when `hold-owner` runs on VM2.
+
+Observed publish results:
+
+| Size | Iters | Avg Total | Avg Prepare | Avg Pack RKey | Avg PutMeta RPC | Throughput |
+|---|---:|---:|---:|---:|---:|---:|
+| 4KiB | 4 | 222.25 us | 4.00 us | 1.00 us | 196.75 us | 17.58 MB/s |
+| 64KiB | 4 | 194.00 us | 37.50 us | 1.00 us | 151.25 us | 322.16 MB/s |
+| 1MiB | 4 | 515.00 us | 362.75 us | 1.00 us | 147.75 us | 1941.75 MB/s |
+| 4MiB | 4 | 1286.25 us | 1107.75 us | 1.00 us | 173.75 us | 3109.82 MB/s |
+| 16MiB | 4 | 4601.75 us | 4359.25 us | 1.75 us | 234.75 us | 3476.94 MB/s |
+| 32MiB | 4 | 7807.25 us | 7488.25 us | 4.75 us | 305.25 us | 4098.75 MB/s |
+| 64MiB | 4 | 13801.75 us | 13441.75 us | 7.25 us | 338.25 us | 4637.09 MB/s |
+| 128MiB | 4 | 24159.00 us | 23800.75 us | 8.75 us | 332.50 us | 5298.23 MB/s |
+
+Observed fetch results that were stable in this environment:
+
+| Size | Iters | Avg Total | Avg Prepare | Avg GetMeta RPC | Avg Peer Connect | Avg RDMA Prepare | Avg RDMA Get | Throughput |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 4KiB | 4 | 3569.75 us | 10.25 us | 402.00 us | 39.00 us | 28.75 us | 3059.50 us | 1.09 MB/s |
+| 64KiB | 4 | 3480.50 us | 14.25 us | 648.25 us | 30.75 us | 22.50 us | 2738.25 us | 17.96 MB/s |
+| 1MiB | 4 | 5380.25 us | 139.25 us | 404.75 us | 36.00 us | 21.00 us | 4642.00 us | 185.86 MB/s |
+
+Notes from this VM benchmark pass:
+
+- Publish is stable across the full `4KiB .. 128MiB` sweep.
+- Fetch is stable for `4KiB`, `64KiB`, and `1MiB`.
+- Fetch at `4MiB+` showed severe slowdown or timeout in the QEMU + Soft-RoCE
+  environment and was not treated as a valid benchmark result.
+- The most plausible interpretation is that this is an environment or UCX
+  interaction issue rather than a simple `kv_bench` logic failure.
+- Real NIC validation should re-run `fetch 4MiB+` before drawing any product
+  conclusion about large-message one-sided read throughput.
+
 ### Acceptance Criteria
 
 Functional acceptance on real RDMA hardware:

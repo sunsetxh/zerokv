@@ -76,6 +76,37 @@ rsync -a \
 
 if [[ ${INCLUDE_THIRD_PARTY} -eq 0 ]]; then
     rm -rf "${STAGE_DIR}/third_party"
+else
+    VENDOR_DIR="${STAGE_DIR}/third_party"
+    mkdir -p "${VENDOR_DIR}"
+
+    fetch_vendor() {
+        local name="$1" url="$2"
+        local src="${ROOT_DIR}/third_party/${name}"
+        local dest="${VENDOR_DIR}/${name}"
+        if [[ -d "${src}" ]]; then
+            echo "[vendor] ${name} found locally, copying from ${src}"
+            cp -a "${src}" "${dest}"
+        else
+            echo "[vendor] downloading ${name}"
+            local tmp="$(mktemp -d)"
+            curl -sL "${url}" | tar xz -C "${tmp}"
+            #大多数 GitHub release tarball 解压后带版本号子目录
+            local extracted="$(ls -1 "${tmp}")"
+            mv "${tmp}/${extracted}" "${dest}"
+            rm -rf "${tmp}"
+        fi
+    }
+
+    # Vendor dependencies (release tarballs)
+    fetch_vendor googletest \
+        https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
+    fetch_vendor benchmark \
+        https://github.com/google/benchmark/archive/refs/tags/v1.8.3.tar.gz
+    fetch_vendor nanobind \
+        https://github.com/wjakob/nanobind/archive/refs/tags/v1.9.1.tar.gz
+    fetch_vendor ucx \
+        https://github.com/openucx/ucx/archive/refs/tags/v1.20.0.tar.gz
 fi
 
 ARCHIVE_PATH="${OUT_DIR}/${PKG_NAME}.tar.gz"
