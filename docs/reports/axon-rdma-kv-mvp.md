@@ -115,7 +115,76 @@ The following are not MVP blockers and can be deferred:
 - advanced future chaining
 - full memory pool / registration cache support
 
-## 6. New MVP Components
+## 6. Role Model
+
+The system has only two real node roles:
+
+- `Server`
+  - control-plane role
+  - stores node registrations and key metadata
+  - serves lookup requests
+  - fans out subscription events
+  - does not forward large value payloads
+- `KVNode`
+  - data-plane role
+  - owns registered memory
+  - performs RDMA reads and writes
+  - can publish, fetch, and push data
+
+`publish`, `fetch`, and `push` are not different node types. They are
+different operation modes of the same `KVNode`.
+
+### Operation Roles
+
+#### Publish
+
+- node stores `key -> value` in its own local registered memory
+- node becomes the `owner`
+- server stores metadata only
+- later readers fetch from the owner node
+
+#### Fetch
+
+- node asks server for key metadata
+- node acts as the `reader`
+- node connects to the `owner`
+- node reads the value directly from the owner through RDMA
+
+#### Push
+
+- node acts as the `sender`
+- sender writes `key + value` into a specific target node
+- target becomes the new `owner`
+- later readers fetch from the target, not from the original sender
+
+### Owner Semantics
+
+- after `publish`, `owner = publisher`
+- during `fetch`, owner does not change
+- after `push`, `owner = target`
+
+The same `KVNode` may perform all three operations in one process lifetime:
+
+- publish one key
+- fetch another key
+- push a third key to a different node
+
+Recommended terminology:
+
+- node roles:
+  - `Server`
+  - `KVNode`
+- operation modes:
+  - `publish`
+  - `fetch`
+  - `push`
+- data-flow identities:
+  - `owner`
+  - `reader`
+  - `sender`
+  - `target`
+
+## 7. New MVP Components
 
 ### KVServer
 
@@ -159,7 +228,7 @@ Responsibilities:
 - connect to peer by advertised data-plane address
 - reuse connection for repeated fetch
 
-## 7. Core Data Structures
+## 8. Core Data Structures
 
 ### NodeInfo
 
@@ -189,7 +258,7 @@ Responsibilities:
 - `size`
 - `version`
 
-## 8. MVP APIs
+## 9. MVP APIs
 
 ### KVServer
 
@@ -219,7 +288,7 @@ Public API note:
 - `publish(key, data, size)` should copy data into implementation-managed memory
 - `publish_region(key, region, size)` is the zero-copy path and requires the caller to keep the region alive
 
-## 9. Control Protocol
+## 10. Control Protocol
 
 Recommended message types:
 
