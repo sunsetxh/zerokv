@@ -66,9 +66,9 @@ Each node owns one pre-registered push inbox buffer:
 Push flow:
 
 1. sender asks server for target push inbox metadata
-   - if granted, server reserves that inbox before replying
 2. sender RDMA-puts one framed message into the inbox
-3. sender sends `PUSH_COMMIT`
+3. sender opens a direct TCP commit connection to the target node
+4. sender sends `PUSH_COMMIT`
 4. target copies data from inbox into a normal published `MemoryRegion`
 5. target updates its local published map and server metadata
 
@@ -130,10 +130,10 @@ Extend node registration state with push inbox metadata:
 
 - `push_inbox_data_addr`
   - normally identical to node data-plane address
+- `push_control_addr`
 - `push_inbox_remote_addr`
 - `push_inbox_rkey`
 - `push_inbox_capacity`
-- `push_inbox_busy`
 
 This metadata belongs to the node, not to a specific key.
 
@@ -182,6 +182,7 @@ Response:
 - status
 - `target_node_id`
 - `target_data_addr`
+- `push_control_addr`
 - `push_inbox_remote_addr`
 - `push_inbox_rkey`
 - `push_inbox_capacity`
@@ -214,73 +215,63 @@ needed by the sender for the RDMA put stage.
 4. get or connect peer endpoint to target data address
 5. build `[header][key][payload]` buffer locally
 6. RDMA `put` the framed message to `push_inbox_remote_addr`
-7. send `PUSH_COMMIT`
+7. open a direct TCP connection to `push_control_addr`
+8. send `PUSH_COMMIT`
 8. return success only if commit succeeds
 
 ### Target
 
 1. node starts with a registered inbox region
-2. node registration advertises inbox metadata to server
-3. upon `PUSH_COMMIT`, server routes the request to the target node over the
-   target node's existing control-plane session
-4. target finalization is explicitly split into two phases:
-   - phase 1 runs on the target control-session thread
-   - phase 2 runs on a separate node execution context
-5. phase 1 finalizes the inbox contents by:
+2. node starts a dedicated push-control TCP listener in addition to the existing
+   server control connection
+3. node registration advertises inbox metadata and `push_control_addr` to server
+4. sender connects directly to the target's push-control listener for commit
+5. target finalizes the inbox contents synchronously on the push-control handler
+   thread by:
    - parsing inbox header
    - validating key/value sizes and request consistency
    - allocating a new local `MemoryRegion`
    - copying payload bytes into the new region
-   - publishing locally under the given key in local node state
-   - enqueueing deferred server metadata publication work
+   - issuing the normal `put_meta()` RPC back to the server
+   - updating local published state
    - replying `PUSH_COMMIT_RESP`
-6. phase 2 later performs the `put_meta()` RPC back to the server using the new
-   local published region metadata
-7. server metadata becomes visible after phase 2 completes
-8. server clears inbox busy state after commit completion or failure
 
-This two-phase target finalize model is required to avoid control-plane
-deadlock. The target control-session thread must not call the existing
-synchronous publish path directly, because that path sends `PutMeta` back to the
-server while the server is still waiting for `PUSH_COMMIT_RESP`.
+This synchronous finalize path is safe in the direct-commit design because the
+push-control handler thread is distinct from the node's existing `control_fd_`
+request-response path to the server. Calling `put_meta()` here introduces
+ordinary mutex serialization on `control_mu_`, but does not create the server
+round-trip deadlock that would occur if `PUSH_COMMIT` were routed through the
+same server-managed control session.
 
-The practical effect is:
+### Server Role
 
-- a successful `push()` means the target has durably accepted the data into its
-  local node state
-- there may be a short delay before `fetch(key)` starts succeeding through the
-  global metadata directory, because metadata publication is deferred
-
-### Server Routing Role
-
-Server remains the control-plane authority:
+Server remains the metadata authority:
 
 - `GET_PUSH_TARGET` is answered from registered node inbox metadata
-- server tracks `push_inbox_busy`
-- server rejects concurrent `GET_PUSH_TARGET` while an inbox is busy
-- server routes `PUSH_COMMIT` to the target node's session
-- server clears busy state on commit failure, commit acknowledgement, or node
-  disconnect
+- `put_meta()` after successful target finalize publishes the pushed key to the
+  global metadata directory
+- server does not need to route `PUSH_COMMIT`
 
 ### Busy State Lifecycle
 
-Busy ownership is server-side in this phase.
+Busy ownership is target-side in this phase.
 
 State transitions:
 
 ```text
 idle
-  -> GET_PUSH_TARGET success: mark busy
+  -> sender RDMA put completes and commit handler starts: mark busy
 busy
-  -> PUSH_COMMIT success: clear busy after target acknowledgement
+  -> commit success: clear busy
 busy
-  -> PUSH_COMMIT failure: clear busy
+  -> commit failure: clear busy
 busy
-  -> target disconnect: clear busy as part of node cleanup
+  -> target node stop: clear busy as part of local cleanup
 ```
 
-This reservation-before-write rule prevents overlapping RDMA writes from
-multiple senders into the same fixed inbox.
+This means `GET_PUSH_TARGET` may still hand out inbox metadata to multiple
+senders, but the target commit handler remains the serialization point and must
+reject overlapping commits while busy.
 
 ## Concurrency And Simplifications
 
@@ -289,8 +280,7 @@ time.
 
 Rules:
 
-- if target inbox is busy, `GET_PUSH_TARGET` or `PUSH_COMMIT` should fail with a
-  busy-style error
+- if target inbox is busy, `PUSH_COMMIT` should fail with a busy-style error
 - sender does not retry automatically
 - no multi-producer queueing in this phase
 
@@ -312,8 +302,6 @@ Error policy:
 - sender returns the original failure status
 - target must not publish partial data
 - server should not expose the pushed key unless commit finalization succeeds
-- commit acknowledgement may arrive before the server metadata entry is visible,
-  because metadata publication is deferred to a second execution phase
 
 ## Testing Strategy
 
