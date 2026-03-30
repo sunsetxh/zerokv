@@ -66,6 +66,7 @@ Each node owns one pre-registered push inbox buffer:
 Push flow:
 
 1. sender asks server for target push inbox metadata
+   - if granted, server reserves that inbox before replying
 2. sender RDMA-puts one framed message into the inbox
 3. sender sends `PUSH_COMMIT`
 4. target copies data from inbox into a normal published `MemoryRegion`
@@ -132,6 +133,7 @@ Extend node registration state with push inbox metadata:
 - `push_inbox_remote_addr`
 - `push_inbox_rkey`
 - `push_inbox_capacity`
+- `push_inbox_busy`
 
 This metadata belongs to the node, not to a specific key.
 
@@ -219,16 +221,66 @@ needed by the sender for the RDMA put stage.
 
 1. node starts with a registered inbox region
 2. node registration advertises inbox metadata to server
-3. upon `PUSH_COMMIT`, server routes or validates the request against the
-   target node
-4. target finalizes by:
+3. upon `PUSH_COMMIT`, server routes the request to the target node over the
+   target node's existing control-plane session
+4. target finalization is explicitly split into two phases:
+   - phase 1 runs on the target control-session thread
+   - phase 2 runs on a separate node execution context
+5. phase 1 finalizes the inbox contents by:
    - parsing inbox header
    - validating key/value sizes and request consistency
    - allocating a new local `MemoryRegion`
    - copying payload bytes into the new region
-   - publishing locally under the given key
-   - updating server metadata through the existing publish path
-5. target clears inbox busy state and acknowledges commit
+   - publishing locally under the given key in local node state
+   - enqueueing deferred server metadata publication work
+   - replying `PUSH_COMMIT_RESP`
+6. phase 2 later performs the `put_meta()` RPC back to the server using the new
+   local published region metadata
+7. server metadata becomes visible after phase 2 completes
+8. server clears inbox busy state after commit completion or failure
+
+This two-phase target finalize model is required to avoid control-plane
+deadlock. The target control-session thread must not call the existing
+synchronous publish path directly, because that path sends `PutMeta` back to the
+server while the server is still waiting for `PUSH_COMMIT_RESP`.
+
+The practical effect is:
+
+- a successful `push()` means the target has durably accepted the data into its
+  local node state
+- there may be a short delay before `fetch(key)` starts succeeding through the
+  global metadata directory, because metadata publication is deferred
+
+### Server Routing Role
+
+Server remains the control-plane authority:
+
+- `GET_PUSH_TARGET` is answered from registered node inbox metadata
+- server tracks `push_inbox_busy`
+- server rejects concurrent `GET_PUSH_TARGET` while an inbox is busy
+- server routes `PUSH_COMMIT` to the target node's session
+- server clears busy state on commit failure, commit acknowledgement, or node
+  disconnect
+
+### Busy State Lifecycle
+
+Busy ownership is server-side in this phase.
+
+State transitions:
+
+```text
+idle
+  -> GET_PUSH_TARGET success: mark busy
+busy
+  -> PUSH_COMMIT success: clear busy after target acknowledgement
+busy
+  -> PUSH_COMMIT failure: clear busy
+busy
+  -> target disconnect: clear busy as part of node cleanup
+```
+
+This reservation-before-write rule prevents overlapping RDMA writes from
+multiple senders into the same fixed inbox.
 
 ## Concurrency And Simplifications
 
@@ -260,6 +312,8 @@ Error policy:
 - sender returns the original failure status
 - target must not publish partial data
 - server should not expose the pushed key unless commit finalization succeeds
+- commit acknowledgement may arrive before the server metadata entry is visible,
+  because metadata publication is deferred to a second execution phase
 
 ## Testing Strategy
 
