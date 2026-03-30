@@ -156,6 +156,14 @@ if(AXON_BUILD_TESTS)
     target_include_directories(test_kv_metadata_store PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME UnitKvMetadataStore COMMAND test_kv_metadata_store)
 
+    add_executable(test_kv_bench
+        tests/unit/test_kv_bench.cpp
+        src/kv/bench_utils.cpp
+    )
+    target_link_libraries(test_kv_bench PRIVATE axon GTest::gtest GTest::gtest_main)
+    target_include_directories(test_kv_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME UnitKvBench COMMAND test_kv_bench)
+
     # Integration tests
     add_executable(test_connection tests/integration/test_connection.cpp)
     target_link_libraries(test_connection PRIVATE axon GTest::gtest GTest::gtest_main)
