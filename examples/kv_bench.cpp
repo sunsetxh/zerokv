@@ -7,6 +7,7 @@
 #include <csignal>
 #include <cstddef>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -57,8 +58,11 @@ int main(int argc, char** argv) {
     std::string server_addr;
     std::string data_addr;
     std::string node_id;
+    std::string owner_node_id;
     std::string sizes_arg;
     std::string transport = "tcp";
+    std::optional<uint64_t> explicit_iters;
+    uint64_t total_bytes = 1ull << 30;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -72,10 +76,21 @@ int main(int argc, char** argv) {
             data_addr = argv[++i];
         } else if (arg == "--node-id" && i + 1 < argc) {
             node_id = argv[++i];
+        } else if (arg == "--owner-node-id" && i + 1 < argc) {
+            owner_node_id = argv[++i];
         } else if (arg == "--sizes" && i + 1 < argc) {
             sizes_arg = argv[++i];
         } else if (arg == "--transport" && i + 1 < argc) {
             transport = argv[++i];
+        } else if (arg == "--iters" && i + 1 < argc) {
+            explicit_iters = std::stoull(argv[++i]);
+        } else if (arg == "--total-bytes" && i + 1 < argc) {
+            const auto parsed = detail::parse_size_list(argv[++i]);
+            if (!parsed.ok() || parsed.value().size() != 1u) {
+                std::cerr << "invalid --total-bytes value\n";
+                return 1;
+            }
+            total_bytes = parsed.value().front();
         }
     }
 
@@ -85,7 +100,8 @@ int main(int argc, char** argv) {
         std::cerr << "Usage: " << argv[0]
                   << " --mode <server|hold-owner|bench-publish|bench-fetch>"
                   << " [--listen addr] [--server-addr addr] [--data-addr addr]"
-                  << " [--node-id id] [--sizes list] [--transport tcp|rdma]\n";
+                  << " [--node-id id] [--owner-node-id id] [--sizes list]"
+                  << " [--iters N] [--total-bytes SIZE] [--transport tcp|rdma]\n";
         return 1;
     }
 
@@ -168,6 +184,108 @@ int main(int argc, char** argv) {
 
         std::cout << "hold-owner ready: " << node->node_id() << "\n";
         wait_until_stopped();
+        node->stop();
+        return 0;
+    }
+
+    if (mode == "bench-publish") {
+        if (server_addr.empty() || data_addr.empty()) {
+            std::cerr << "--server-addr and --data-addr are required for bench-publish mode\n";
+            return 1;
+        }
+
+        auto node = KVNode::create(cfg);
+        if (!node) {
+            std::cerr << "Failed to create KVNode\n";
+            return 1;
+        }
+        const auto status = node->start(NodeConfig{
+            .server_addr = server_addr,
+            .local_data_addr = data_addr,
+            .node_id = node_id,
+        });
+        if (!status.ok()) {
+            std::cerr << "Failed to start KVNode: " << status.message() << "\n";
+            return 1;
+        }
+
+        std::vector<uint64_t> sizes;
+        if (sizes_arg.empty()) {
+            sizes = default_sizes();
+        } else {
+            const auto parsed = detail::parse_size_list(sizes_arg);
+            if (!parsed.ok()) {
+                std::cerr << parsed.status.message() << "\n";
+                node->stop();
+                return 1;
+            }
+            sizes = parsed.value();
+        }
+
+        std::vector<detail::PublishBenchRow> rows;
+        for (const auto size_bytes : sizes) {
+            const auto iterations = detail::derive_iterations(size_bytes, explicit_iters, total_bytes);
+            auto payload = make_payload(size_bytes);
+
+            uint64_t total_sum = 0;
+            uint64_t prepare_sum = 0;
+            uint64_t pack_sum = 0;
+            uint64_t rpc_sum = 0;
+
+            for (uint64_t i = 0; i < iterations; ++i) {
+                const auto key = "bench-publish-" + std::to_string(size_bytes) + "-" + std::to_string(i);
+                auto publish = node->publish(key, payload.data(), payload.size());
+                if (!publish.status().ok()) {
+                    std::cerr << "publish benchmark failed: size=" << size_bytes
+                              << " iter=" << i << " error=" << publish.status().message() << "\n";
+                    node->stop();
+                    return 1;
+                }
+                publish.get();
+
+                const auto metrics = node->last_publish_metrics();
+                if (!metrics.has_value() || !metrics->ok) {
+                    std::cerr << "missing publish metrics for size=" << size_bytes
+                              << " iter=" << i << "\n";
+                    node->stop();
+                    return 1;
+                }
+
+                total_sum += metrics->total_us;
+                prepare_sum += metrics->prepare_region_us;
+                pack_sum += metrics->pack_rkey_us;
+                rpc_sum += metrics->put_meta_rpc_us;
+
+                auto unpublish = node->unpublish(key);
+                if (!unpublish.status().ok()) {
+                    std::cerr << "unpublish failed: " << unpublish.status().message() << "\n";
+                    node->stop();
+                    return 1;
+                }
+                unpublish.get();
+            }
+
+            rows.push_back(detail::PublishBenchRow{
+                .size_bytes = size_bytes,
+                .iterations = iterations,
+                .avg_total_us = static_cast<double>(total_sum) / static_cast<double>(iterations),
+                .avg_prepare_us = static_cast<double>(prepare_sum) / static_cast<double>(iterations),
+                .avg_pack_rkey_us = static_cast<double>(pack_sum) / static_cast<double>(iterations),
+                .avg_put_meta_rpc_us = static_cast<double>(rpc_sum) / static_cast<double>(iterations),
+                .throughput_MBps = detail::throughput_mb_per_sec(
+                    size_bytes,
+                    static_cast<double>(total_sum) / static_cast<double>(iterations)),
+            });
+        }
+
+        std::cout << "op=publish transport=" << transport
+                  << " node_id=" << node->node_id()
+                  << " total_bytes=" << total_bytes;
+        if (explicit_iters.has_value()) {
+            std::cout << " iters=" << *explicit_iters;
+        }
+        std::cout << "\n";
+        std::cout << detail::render_publish_rows(rows);
         node->stop();
         return 0;
     }

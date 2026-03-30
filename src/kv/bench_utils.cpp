@@ -92,4 +92,41 @@ std::string format_size(uint64_t size_bytes) {
     return std::to_string(size_bytes) + "B";
 }
 
+double throughput_mb_per_sec(uint64_t size_bytes, double avg_total_us) {
+    if (avg_total_us <= 0.0) {
+        return 0.0;
+    }
+    const double seconds = avg_total_us / 1'000'000.0;
+    return (static_cast<double>(size_bytes) / seconds) / (1024.0 * 1024.0);
+}
+
+std::string render_publish_rows(const std::vector<PublishBenchRow>& rows) {
+    std::ostringstream out;
+    out << std::left
+        << std::setw(10) << "size"
+        << std::setw(10) << "iters"
+        << std::setw(14) << "bytes"
+        << std::setw(16) << "avg_total_us"
+        << std::setw(18) << "avg_prepare_us"
+        << std::setw(20) << "avg_pack_rkey_us"
+        << std::setw(22) << "avg_put_meta_rpc_us"
+        << std::setw(18) << "throughput_MBps"
+        << '\n';
+
+    out << std::fixed << std::setprecision(2);
+    for (const auto& row : rows) {
+        out << std::left
+            << std::setw(10) << format_size(row.size_bytes)
+            << std::setw(10) << row.iterations
+            << std::setw(14) << row.size_bytes
+            << std::setw(16) << row.avg_total_us
+            << std::setw(18) << row.avg_prepare_us
+            << std::setw(20) << row.avg_pack_rkey_us
+            << std::setw(22) << row.avg_put_meta_rpc_us
+            << std::setw(18) << row.throughput_MBps
+            << '\n';
+    }
+    return out.str();
+}
+
 }  // namespace axon::kv::detail
