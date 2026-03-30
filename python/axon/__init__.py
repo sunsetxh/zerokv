@@ -1,29 +1,43 @@
 """
-axon - High-performance AXON transport library with Python bindings.
+axon - High-performance AXON transport and RDMA KV library with Python bindings.
 
 Usage:
     import axon
 
     ctx = axon.Context(transport="ucx", num_workers=2)
     worker = ctx.create_worker()
-    ep = worker.connect("192.168.1.2:13337")
-    ep.tag_send(data, tag=42)
+    status = axon.KVServer().start("0.0.0.0:15000")
+    status.throw_if_error()
 """
 
 from axon._core import (
     # Core classes
     Config,
+    Status,
     Context,
     Worker,
     Endpoint,
     Listener,
     MemoryRegion,
+    KVServer,
+    KVNode,
+    KeyInfo,
+    FetchResult,
+    PublishMetrics,
+    FetchMetrics,
+    PushMetrics,
+    SubscriptionEvent,
     # Futures
     FutureVoid,
+    FutureSize,
     FutureRecv,
+    FutureU64,
+    FutureEndpoint,
+    FutureFetch,
     # Enums
     MemoryType,
     ErrorCode,
+    SubscriptionEventType,
     # Exceptions
     AXONError,
     # Constants
@@ -43,16 +57,30 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Config",
+    "Status",
     "Context",
     "Worker",
     "Endpoint",
     "Listener",
     "MemoryRegion",
+    "KVServer",
+    "KVNode",
+    "KeyInfo",
+    "FetchResult",
+    "PublishMetrics",
+    "FetchMetrics",
+    "PushMetrics",
+    "SubscriptionEvent",
     "FutureVoid",
+    "FutureSize",
     "FutureRecv",
+    "FutureU64",
+    "FutureEndpoint",
+    "FutureFetch",
     "Tag",
     "MemoryType",
     "ErrorCode",
+    "SubscriptionEventType",
     "AXONError",
     "TAG_ANY",
     "TAG_MASK_ALL",

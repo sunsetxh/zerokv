@@ -100,6 +100,23 @@ struct BufferHolder {
     }
 };
 
+static axon::RemoteKey extract_remote_key(nb::handle buf) {
+    auto holder = BufferHolder::extract(buf);
+    auto [ptr, len] = holder.get();
+    axon::RemoteKey rkey;
+    auto* bytes = static_cast<const uint8_t*>(ptr);
+    rkey.data.assign(bytes, bytes + len);
+    return rkey;
+}
+
+static nb::bytes to_bytes(const std::vector<uint8_t>& data) {
+    return nb::bytes(reinterpret_cast<const char*>(data.data()), data.size());
+}
+
+static nb::bytes to_bytes(const std::vector<std::byte>& data) {
+    return nb::bytes(reinterpret_cast<const char*>(data.data()), data.size());
+}
+
 // ---------------------------------------------------------------------------
 // Helper: create Config from Python arguments
 // ---------------------------------------------------------------------------
@@ -162,8 +179,27 @@ NB_MODULE(_core, m) {
         .value("INVALID_BUFFER", axon::ErrorCode::kInvalidBuffer)
         .value("REGISTRATION_FAILED", axon::ErrorCode::kRegistrationFailed)
         .value("PLUGIN_NOT_FOUND", axon::ErrorCode::kPluginNotFound)
+        .value("PLUGIN_INIT_FAILED", axon::ErrorCode::kPluginInitFailed)
+        .value("INVALID_ARGUMENT", axon::ErrorCode::kInvalidArgument)
+        .value("NOT_IMPLEMENTED", axon::ErrorCode::kNotImplemented)
         .value("INTERNAL_ERROR", axon::ErrorCode::kInternalError)
         .export_values();
+
+    nb::class_<axon::Status>(m, "Status")
+        .def(nb::init<>())
+        .def(nb::init<axon::ErrorCode>())
+        .def(nb::init<axon::ErrorCode, std::string>(), "code"_a, "message"_a)
+        .def("ok", &axon::Status::ok)
+        .def("in_progress", &axon::Status::in_progress)
+        .def("throw_if_error", &axon::Status::throw_if_error)
+        .def_prop_ro("code", &axon::Status::code)
+        .def_prop_ro("message", &axon::Status::message)
+        .def("__bool__", &axon::Status::ok)
+        .def("__repr__", [](const axon::Status& s) {
+            return "<axon.Status code=" + std::to_string(static_cast<int>(s.code())) +
+                   " ok=" + std::string(s.ok() ? "True" : "False") +
+                   " message='" + s.message() + "'>";
+        });
 
     // --- Exceptions ----------------------------------------------------------
 
@@ -267,6 +303,56 @@ NB_MODULE(_core, m) {
             nb::gil_scoped_release release;
             return self.tag_recv(ptr, len, tag, tag_mask);
         }, "buffer"_a, "tag"_a, "tag_mask"_a = axon::kTagMaskAll)
+        .def("put", [](axon::Endpoint& self,
+                       const std::shared_ptr<axon::MemoryRegion>& region,
+                       uint64_t remote_addr,
+                       nb::handle remote_key,
+                       std::optional<size_t> length,
+                       size_t local_offset) {
+            auto rkey = extract_remote_key(remote_key);
+            nb::gil_scoped_release release;
+            if (length.has_value()) {
+                return self.put(region, local_offset, remote_addr, rkey, *length);
+            }
+            return self.put(region, remote_addr, rkey);
+        }, "region"_a, "remote_addr"_a, "remote_key"_a,
+           "length"_a = nb::none(), "local_offset"_a = 0)
+        .def("get", [](axon::Endpoint& self,
+                       const std::shared_ptr<axon::MemoryRegion>& region,
+                       uint64_t remote_addr,
+                       nb::handle remote_key,
+                       std::optional<size_t> length,
+                       size_t local_offset) {
+            auto rkey = extract_remote_key(remote_key);
+            nb::gil_scoped_release release;
+            if (length.has_value()) {
+                return self.get(region, local_offset, remote_addr, rkey, *length);
+            }
+            return self.get(region, remote_addr, rkey);
+        }, "region"_a, "remote_addr"_a, "remote_key"_a,
+           "length"_a = nb::none(), "local_offset"_a = 0)
+        .def("stream_send", [](axon::Endpoint& self, nb::handle buf) {
+            auto holder = BufferHolder::extract(buf);
+            auto [ptr, len] = holder.get();
+            nb::gil_scoped_release release;
+            return self.stream_send(ptr, len);
+        }, "buffer"_a)
+        .def("stream_send_region", [](axon::Endpoint& self,
+                                      const std::shared_ptr<axon::MemoryRegion>& region) {
+            nb::gil_scoped_release release;
+            return self.stream_send(region);
+        }, "region"_a)
+        .def("stream_recv", [](axon::Endpoint& self, nb::handle buf) {
+            auto holder = BufferHolder::extract(buf);
+            auto [ptr, len] = holder.get();
+            nb::gil_scoped_release release;
+            return self.stream_recv(ptr, len);
+        }, "buffer"_a)
+        .def("stream_recv_region", [](axon::Endpoint& self,
+                                      const std::shared_ptr<axon::MemoryRegion>& region) {
+            nb::gil_scoped_release release;
+            return self.stream_recv(region);
+        }, "region"_a)
         .def("flush", [](axon::Endpoint& self) {
             nb::gil_scoped_release release;
             return self.flush();
@@ -327,6 +413,135 @@ NB_MODULE(_core, m) {
         .def("stop_progress_thread", &axon::Worker::stop_progress_thread)
         .def_prop_ro("progress_thread_running", &axon::Worker::is_progress_thread_running);
 
+    // --- KV -----------------------------------------------------------------
+
+    nb::class_<axon::kv::KeyInfo>(m, "KeyInfo")
+        .def_prop_ro("key", [](const axon::kv::KeyInfo& v) { return v.key; })
+        .def_prop_ro("size", [](const axon::kv::KeyInfo& v) { return v.size; })
+        .def_prop_ro("version", [](const axon::kv::KeyInfo& v) { return v.version; });
+
+    nb::class_<axon::kv::FetchResult>(m, "FetchResult")
+        .def_prop_ro("data", [](const axon::kv::FetchResult& v) { return to_bytes(v.data); })
+        .def_prop_ro("owner_node_id", [](const axon::kv::FetchResult& v) { return v.owner_node_id; })
+        .def_prop_ro("version", [](const axon::kv::FetchResult& v) { return v.version; });
+
+    nb::class_<axon::kv::PublishMetrics>(m, "PublishMetrics")
+        .def_prop_ro("total_us", [](const axon::kv::PublishMetrics& v) { return v.total_us; })
+        .def_prop_ro("prepare_region_us", [](const axon::kv::PublishMetrics& v) { return v.prepare_region_us; })
+        .def_prop_ro("pack_rkey_us", [](const axon::kv::PublishMetrics& v) { return v.pack_rkey_us; })
+        .def_prop_ro("put_meta_rpc_us", [](const axon::kv::PublishMetrics& v) { return v.put_meta_rpc_us; })
+        .def_prop_ro("ok", [](const axon::kv::PublishMetrics& v) { return v.ok; });
+
+    nb::class_<axon::kv::FetchMetrics>(m, "FetchMetrics")
+        .def_prop_ro("total_us", [](const axon::kv::FetchMetrics& v) { return v.total_us; })
+        .def_prop_ro("local_buffer_prepare_us", [](const axon::kv::FetchMetrics& v) { return v.local_buffer_prepare_us; })
+        .def_prop_ro("get_meta_rpc_us", [](const axon::kv::FetchMetrics& v) { return v.get_meta_rpc_us; })
+        .def_prop_ro("peer_connect_us", [](const axon::kv::FetchMetrics& v) { return v.peer_connect_us; })
+        .def_prop_ro("rdma_prepare_us", [](const axon::kv::FetchMetrics& v) { return v.rdma_prepare_us; })
+        .def_prop_ro("rdma_get_us", [](const axon::kv::FetchMetrics& v) { return v.rdma_get_us; })
+        .def_prop_ro("ok", [](const axon::kv::FetchMetrics& v) { return v.ok; });
+
+    nb::class_<axon::kv::PushMetrics>(m, "PushMetrics")
+        .def_prop_ro("total_us", [](const axon::kv::PushMetrics& v) { return v.total_us; })
+        .def_prop_ro("get_target_rpc_us", [](const axon::kv::PushMetrics& v) { return v.get_target_rpc_us; })
+        .def_prop_ro("prepare_frame_us", [](const axon::kv::PushMetrics& v) { return v.prepare_frame_us; })
+        .def_prop_ro("rdma_put_flush_us", [](const axon::kv::PushMetrics& v) { return v.rdma_put_flush_us; })
+        .def_prop_ro("commit_rpc_us", [](const axon::kv::PushMetrics& v) { return v.commit_rpc_us; })
+        .def_prop_ro("ok", [](const axon::kv::PushMetrics& v) { return v.ok; });
+
+    nb::enum_<axon::kv::SubscriptionEventType>(m, "SubscriptionEventType")
+        .value("PUBLISHED", axon::kv::SubscriptionEventType::kPublished)
+        .value("UPDATED", axon::kv::SubscriptionEventType::kUpdated)
+        .value("UNPUBLISHED", axon::kv::SubscriptionEventType::kUnpublished)
+        .value("OWNER_LOST", axon::kv::SubscriptionEventType::kOwnerLost)
+        .export_values();
+
+    nb::class_<axon::kv::SubscriptionEvent>(m, "SubscriptionEvent")
+        .def_prop_ro("type", [](const axon::kv::SubscriptionEvent& v) { return v.type; })
+        .def_prop_ro("key", [](const axon::kv::SubscriptionEvent& v) { return v.key; })
+        .def_prop_ro("owner_node_id", [](const axon::kv::SubscriptionEvent& v) { return v.owner_node_id; })
+        .def_prop_ro("version", [](const axon::kv::SubscriptionEvent& v) { return v.version; });
+
+    nb::class_<axon::kv::KVServer>(m, "KVServer")
+        .def(nb::new_([](std::optional<axon::Config> config) {
+            return axon::kv::KVServer::create(config.value_or(axon::Config{}));
+        }), "config"_a = nb::none())
+        .def("start", [](axon::kv::KVServer& self, const std::string& listen_addr) {
+            nb::gil_scoped_release release;
+            return self.start(axon::kv::ServerConfig{listen_addr});
+        }, "listen_addr"_a)
+        .def("stop", &axon::kv::KVServer::stop)
+        .def_prop_ro("is_running", &axon::kv::KVServer::is_running)
+        .def_prop_ro("address", &axon::kv::KVServer::address)
+        .def("lookup", &axon::kv::KVServer::lookup, "key"_a)
+        .def("list_keys", &axon::kv::KVServer::list_keys);
+
+    nb::class_<axon::kv::KVNode>(m, "KVNode")
+        .def(nb::new_([](std::optional<axon::Config> config) {
+            return axon::kv::KVNode::create(config.value_or(axon::Config{}));
+        }), "config"_a = nb::none())
+        .def("start", [](axon::kv::KVNode& self,
+                         const std::string& server_addr,
+                         const std::string& local_data_addr,
+                         const std::string& node_id) {
+            nb::gil_scoped_release release;
+            return self.start(axon::kv::NodeConfig{server_addr, local_data_addr, node_id});
+        }, "server_addr"_a, "local_data_addr"_a, "node_id"_a = "")
+        .def("stop", &axon::kv::KVNode::stop)
+        .def_prop_ro("is_running", &axon::kv::KVNode::is_running)
+        .def_prop_ro("node_id", &axon::kv::KVNode::node_id)
+        .def_prop_ro("published_count", &axon::kv::KVNode::published_count)
+        .def("last_publish_metrics", &axon::kv::KVNode::last_publish_metrics)
+        .def("last_fetch_metrics", &axon::kv::KVNode::last_fetch_metrics)
+        .def("last_push_metrics", &axon::kv::KVNode::last_push_metrics)
+        .def("drain_subscription_events", &axon::kv::KVNode::drain_subscription_events)
+        .def("publish", [](axon::kv::KVNode& self, const std::string& key, nb::handle buf) {
+            auto holder = BufferHolder::extract(buf);
+            auto [ptr, len] = holder.get();
+            nb::gil_scoped_release release;
+            return self.publish(key, ptr, len);
+        }, "key"_a, "buffer"_a)
+        .def("publish_region", [](axon::kv::KVNode& self,
+                                  const std::string& key,
+                                  const std::shared_ptr<axon::MemoryRegion>& region,
+                                  std::optional<size_t> size) {
+            nb::gil_scoped_release release;
+            return self.publish_region(key, region, size.value_or(region->length()));
+        }, "key"_a, "region"_a, "size"_a = nb::none())
+        .def("fetch", [](axon::kv::KVNode& self, const std::string& key) {
+            nb::gil_scoped_release release;
+            return self.fetch(key);
+        }, "key"_a)
+        .def("fetch_to", [](axon::kv::KVNode& self,
+                            const std::string& key,
+                            const std::shared_ptr<axon::MemoryRegion>& region,
+                            size_t length,
+                            size_t local_offset) {
+            nb::gil_scoped_release release;
+            return self.fetch_to(key, region, length, local_offset);
+        }, "key"_a, "region"_a, "length"_a, "local_offset"_a = 0)
+        .def("push", [](axon::kv::KVNode& self,
+                        const std::string& target_node_id,
+                        const std::string& key,
+                        nb::handle buf) {
+            auto holder = BufferHolder::extract(buf);
+            auto [ptr, len] = holder.get();
+            nb::gil_scoped_release release;
+            return self.push(target_node_id, key, ptr, len);
+        }, "target_node_id"_a, "key"_a, "buffer"_a)
+        .def("subscribe", [](axon::kv::KVNode& self, const std::string& key) {
+            nb::gil_scoped_release release;
+            return self.subscribe(key);
+        }, "key"_a)
+        .def("unsubscribe", [](axon::kv::KVNode& self, const std::string& key) {
+            nb::gil_scoped_release release;
+            return self.unsubscribe(key);
+        }, "key"_a)
+        .def("unpublish", [](axon::kv::KVNode& self, const std::string& key) {
+            nb::gil_scoped_release release;
+            return self.unpublish(key);
+        }, "key"_a);
+
     // --- Listener ------------------------------------------------------------
 
     nb::class_<axon::Listener>(m, "Listener")
@@ -344,6 +559,15 @@ NB_MODULE(_core, m) {
         .def("cancel", &axon::Future<void>::cancel)
         .def_prop_ro("status", &axon::Future<void>::status);
 
+    nb::class_<axon::Future<size_t>>(m, "FutureSize")
+        .def("ready", &axon::Future<size_t>::ready)
+        .def("get", [](axon::Future<size_t>& self) {
+            nb::gil_scoped_release release;
+            return self.get();
+        })
+        .def("cancel", &axon::Future<size_t>::cancel)
+        .def_prop_ro("status", &axon::Future<size_t>::status);
+
     nb::class_<axon::Future<std::pair<size_t, axon::Tag>>>(m, "FutureRecv")
         .def("ready", &axon::Future<std::pair<size_t, axon::Tag>>::ready)
         .def("get", [](axon::Future<std::pair<size_t, axon::Tag>>& self) {
@@ -352,6 +576,33 @@ NB_MODULE(_core, m) {
         })
         .def("cancel", &axon::Future<std::pair<size_t, axon::Tag>>::cancel)
         .def_prop_ro("status", &axon::Future<std::pair<size_t, axon::Tag>>::status);
+
+    nb::class_<axon::Future<uint64_t>>(m, "FutureU64")
+        .def("ready", &axon::Future<uint64_t>::ready)
+        .def("get", [](axon::Future<uint64_t>& self) {
+            nb::gil_scoped_release release;
+            return self.get();
+        })
+        .def("cancel", &axon::Future<uint64_t>::cancel)
+        .def_prop_ro("status", &axon::Future<uint64_t>::status);
+
+    nb::class_<axon::Future<std::shared_ptr<axon::Endpoint>>>(m, "FutureEndpoint")
+        .def("ready", &axon::Future<std::shared_ptr<axon::Endpoint>>::ready)
+        .def("get", [](axon::Future<std::shared_ptr<axon::Endpoint>>& self) {
+            nb::gil_scoped_release release;
+            return self.get();
+        })
+        .def("cancel", &axon::Future<std::shared_ptr<axon::Endpoint>>::cancel)
+        .def_prop_ro("status", &axon::Future<std::shared_ptr<axon::Endpoint>>::status);
+
+    nb::class_<axon::Future<axon::kv::FetchResult>>(m, "FutureFetch")
+        .def("ready", &axon::Future<axon::kv::FetchResult>::ready)
+        .def("get", [](axon::Future<axon::kv::FetchResult>& self) {
+            nb::gil_scoped_release release;
+            return self.get();
+        })
+        .def("cancel", &axon::Future<axon::kv::FetchResult>::cancel)
+        .def_prop_ro("status", &axon::Future<axon::kv::FetchResult>::status);
 
     // Note: MemoryPool, RegistrationCache, PluginRegistry bindings
     // will be added when the implementations are complete
