@@ -19,28 +19,71 @@ option(AXON_BUILD_EXAMPLES   "Build examples"                           ON)
 option(AXON_BUILD_TESTS      "Build tests (requires GTest)"             ON)
 option(AXON_BUILD_BENCHMARK  "Build benchmarks (requires GBenchmark)"   ON)
 option(AXON_BUILD_PYTHON     "Build Python bindings (requires nanobind)" ON)
+set(UCX_ROOT "" CACHE PATH "Root directory of a UCX installation")
+set(AXON_THIRD_PARTY_DIR "${CMAKE_SOURCE_DIR}/third_party" CACHE PATH "Root directory for vendored third-party dependencies")
 
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
+if(UCX_ROOT)
+    set(_ucx_pkgconfig_dirs "")
+    foreach(_dir IN ITEMS "${UCX_ROOT}/lib/pkgconfig" "${UCX_ROOT}/lib64/pkgconfig")
+        if(IS_DIRECTORY "${_dir}")
+            list(APPEND _ucx_pkgconfig_dirs "${_dir}")
+        endif()
+    endforeach()
+
+    if(_ucx_pkgconfig_dirs)
+        list(JOIN _ucx_pkgconfig_dirs ":" _ucx_pkgconfig_joined)
+        if(DEFINED ENV{PKG_CONFIG_PATH} AND NOT "$ENV{PKG_CONFIG_PATH}" STREQUAL "")
+            set(ENV{PKG_CONFIG_PATH} "$ENV{PKG_CONFIG_PATH}:${_ucx_pkgconfig_joined}")
+        else()
+            set(ENV{PKG_CONFIG_PATH} "${_ucx_pkgconfig_joined}")
+        endif()
+        message(STATUS "UCX_ROOT=${UCX_ROOT}")
+        message(STATUS "UCX pkg-config search dirs: ${_ucx_pkgconfig_dirs}")
+    else()
+        message(STATUS "UCX_ROOT=${UCX_ROOT}, but no pkg-config dirs found under lib/pkgconfig or lib64/pkgconfig")
+    endif()
+endif()
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(UCX REQUIRED IMPORTED_TARGET ucx)
 
 # Optional: Google Test
 if(AXON_BUILD_TESTS)
-    find_package(GTest QUIET)
-    if(NOT GTest_FOUND)
-        message(STATUS "GTest not found, tests will not be built")
-        set(AXON_BUILD_TESTS OFF)
+    if(EXISTS "${AXON_THIRD_PARTY_DIR}/googletest/CMakeLists.txt")
+        message(STATUS "GoogleTest: vendored (${AXON_THIRD_PARTY_DIR}/googletest)")
+        set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+        set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+        add_subdirectory("${AXON_THIRD_PARTY_DIR}/googletest" "${CMAKE_BINARY_DIR}/third_party/googletest" EXCLUDE_FROM_ALL)
+    else()
+        find_package(GTest QUIET)
+        if(NOT GTest_FOUND)
+            message(STATUS "GoogleTest not found, tests will not be built")
+            set(AXON_BUILD_TESTS OFF)
+        else()
+            message(STATUS "GoogleTest: system")
+        endif()
     endif()
 endif()
 
 # Optional: Google Benchmark
 if(AXON_BUILD_BENCHMARK)
-    find_package(GBenchmark QUIET)
-    if(NOT GBenchmark_FOUND)
-        message(STATUS "Google Benchmark not found, benchmarks will not be built")
-        set(AXON_BUILD_BENCHMARK OFF)
+    if(EXISTS "${AXON_THIRD_PARTY_DIR}/benchmark/CMakeLists.txt")
+        message(STATUS "Google Benchmark: vendored (${AXON_THIRD_PARTY_DIR}/benchmark)")
+        set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+        set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+        set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+        add_subdirectory("${AXON_THIRD_PARTY_DIR}/benchmark" "${CMAKE_BINARY_DIR}/third_party/benchmark" EXCLUDE_FROM_ALL)
+    else()
+        find_package(GBenchmark QUIET)
+        if(NOT GBenchmark_FOUND)
+            message(STATUS "Google Benchmark not found, benchmarks will not be built")
+            set(AXON_BUILD_BENCHMARK OFF)
+        else()
+            message(STATUS "Google Benchmark: system")
+        endif()
     endif()
 endif()
 
@@ -49,22 +92,27 @@ if(AXON_BUILD_PYTHON)
     # Find Python first
     find_package(Python REQUIRED COMPONENTS Interpreter Development)
 
-    # Get nanobind cmake dir from Python
-    execute_process(
-        COMMAND "${Python_EXECUTABLE}" "-c"
-                "import nanobind; print(nanobind.cmake_dir())"
-        OUTPUT_VARIABLE nanobind_ROOT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE nanobind_status
-    )
-
-    if(NOT nanobind_status EQUAL 0)
-        message(STATUS "nanobind not found, Python bindings will not be built")
-        set(AXON_BUILD_PYTHON OFF)
+    if(EXISTS "${AXON_THIRD_PARTY_DIR}/nanobind/CMakeLists.txt")
+        message(STATUS "nanobind: vendored (${AXON_THIRD_PARTY_DIR}/nanobind)")
+        add_subdirectory("${AXON_THIRD_PARTY_DIR}/nanobind" "${CMAKE_BINARY_DIR}/third_party/nanobind" EXCLUDE_FROM_ALL)
     else()
-        message(STATUS "Found nanobind at: ${nanobind_ROOT}")
-        list(APPEND CMAKE_PREFIX_PATH "${nanobind_ROOT}")
-        find_package(nanobind CONFIG REQUIRED)
+        # Get nanobind cmake dir from Python
+        execute_process(
+            COMMAND "${Python_EXECUTABLE}" "-c"
+                    "import nanobind; print(nanobind.cmake_dir())"
+            OUTPUT_VARIABLE nanobind_ROOT
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE nanobind_status
+        )
+
+        if(NOT nanobind_status EQUAL 0)
+            message(STATUS "nanobind not found, Python bindings will not be built")
+            set(AXON_BUILD_PYTHON OFF)
+        else()
+            message(STATUS "nanobind: system (${nanobind_ROOT})")
+            list(APPEND CMAKE_PREFIX_PATH "${nanobind_ROOT}")
+            find_package(nanobind CONFIG REQUIRED)
+        endif()
     endif()
 endif()
 
