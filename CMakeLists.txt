@@ -121,6 +121,13 @@ if(AXON_BUILD_EXAMPLES)
 
     add_executable(kv_demo examples/kv_demo.cpp)
     target_link_libraries(kv_demo PRIVATE axon)
+
+    add_executable(kv_bench
+        examples/kv_bench.cpp
+        src/kv/bench_utils.cpp
+    )
+    target_link_libraries(kv_bench PRIVATE axon)
+    target_include_directories(kv_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -193,6 +200,11 @@ if(AXON_BUILD_TESTS)
     target_link_libraries(test_kv_node PRIVATE axon GTest::gtest GTest::gtest_main)
     target_include_directories(test_kv_node PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME IntegrationKvNode COMMAND test_kv_node)
+
+    add_executable(test_kv_bench_integration tests/integration/test_kv_bench.cpp)
+    target_link_libraries(test_kv_bench_integration PRIVATE axon GTest::gtest GTest::gtest_main)
+    target_include_directories(test_kv_bench_integration PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME IntegrationKvBench COMMAND test_kv_bench_integration)
 endif()
 
 # ---------------------------------------------------------------------------
