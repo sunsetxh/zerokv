@@ -3,8 +3,10 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cstring>
+#include <fcntl.h>
 #include <limits>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -125,6 +127,10 @@ TcpTransport::Connection TcpTransport::accept(int listen_fd, std::string* error)
 }
 
 int TcpTransport::connect(const std::string& address, std::string* error) {
+    return connect(address, std::chrono::milliseconds(-1), error);
+}
+
+int TcpTransport::connect(const std::string& address, std::chrono::milliseconds timeout, std::string* error) {
     ParsedAddress parsed;
     if (!parse_address(address, &parsed, error)) {
         return -1;
@@ -149,7 +155,89 @@ int TcpTransport::connect(const std::string& address, std::string* error) {
         return -1;
     }
 
-    if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+    if (timeout.count() < 0) {
+        if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+            if (error) {
+                *error = std::strerror(errno);
+            }
+            ::close(fd);
+            return -1;
+        }
+
+        return fd;
+    }
+
+    const int flags = ::fcntl(fd, F_GETFL, 0);
+    if (flags < 0) {
+        if (error) {
+            *error = std::strerror(errno);
+        }
+        ::close(fd);
+        return -1;
+    }
+    if (::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+        if (error) {
+            *error = std::strerror(errno);
+        }
+        ::close(fd);
+        return -1;
+    }
+
+    if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
+        (void)::fcntl(fd, F_SETFL, flags);
+        return fd;
+    }
+
+    if (errno != EINPROGRESS) {
+        if (error) {
+            *error = std::strerror(errno);
+        }
+        ::close(fd);
+        return -1;
+    }
+
+    pollfd pfd{};
+    pfd.fd = fd;
+    pfd.events = POLLOUT;
+
+    int poll_rc = -1;
+    do {
+        poll_rc = ::poll(&pfd, 1, static_cast<int>(timeout.count()));
+    } while (poll_rc < 0 && errno == EINTR);
+
+    if (poll_rc == 0) {
+        if (error) {
+            *error = "timed out";
+        }
+        ::close(fd);
+        return -1;
+    }
+    if (poll_rc < 0) {
+        if (error) {
+            *error = std::strerror(errno);
+        }
+        ::close(fd);
+        return -1;
+    }
+
+    int so_error = 0;
+    socklen_t so_error_len = sizeof(so_error);
+    if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &so_error, &so_error_len) != 0) {
+        if (error) {
+            *error = std::strerror(errno);
+        }
+        ::close(fd);
+        return -1;
+    }
+    if (so_error != 0) {
+        if (error) {
+            *error = std::strerror(so_error);
+        }
+        ::close(fd);
+        return -1;
+    }
+
+    if (::fcntl(fd, F_SETFL, flags) != 0) {
         if (error) {
             *error = std::strerror(errno);
         }

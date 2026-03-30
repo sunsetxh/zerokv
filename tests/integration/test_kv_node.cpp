@@ -122,6 +122,32 @@ TEST(KvNodeIntegrationTest, StartRegistersNodeAndStopDropsLiveness) {
     server->stop();
 }
 
+TEST(KvNodeIntegrationTest, StartFailsWithinConnectTimeoutWhenServerIsUnavailable) {
+    auto cfg = axon::Config::builder()
+                   .set_transport("tcp")
+                   .set_connect_timeout(std::chrono::milliseconds(100))
+                   .build();
+
+    auto node = KVNode::create(cfg);
+    ASSERT_NE(node, nullptr);
+
+    const auto start_time = std::chrono::steady_clock::now();
+    auto status = node->start(NodeConfig{
+        .server_addr = "10.255.255.1:6553",
+        .local_data_addr = "127.0.0.1:0",
+        .node_id = "missing-server-timeout",
+    });
+    const auto elapsed = std::chrono::steady_clock::now() - start_time;
+
+    EXPECT_FALSE(status.ok());
+    EXPECT_TRUE(status.code() == axon::ErrorCode::kTimeout ||
+                status.code() == axon::ErrorCode::kConnectionRefused);
+    EXPECT_LT(elapsed, std::chrono::seconds(2));
+    EXPECT_FALSE(node->is_running());
+
+    node->stop();
+}
+
 TEST(KvNodeIntegrationTest, MetricsAreEmptyBeforeAnyOperation) {
     auto cfg = axon::Config::builder().set_transport("tcp").build();
 

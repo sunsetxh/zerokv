@@ -931,8 +931,9 @@ Status KVNode::start(const NodeConfig& cfg) {
         std::thread([impl = impl_.get()]() { impl->subscription_accept_loop(); });
     impl_->worker_->start_progress_thread();
 
-    impl_->control_fd_ = detail::TcpTransport::connect(impl_->server_addr_, &error);
+    impl_->control_fd_ = detail::TcpTransport::connect(impl_->server_addr_, impl_->cfg_.connect_timeout(), &error);
     if (impl_->control_fd_ < 0) {
+        impl_->running_.store(false);
         detail::TcpTransport::close_fd(&impl_->push_listen_fd_);
         detail::TcpTransport::close_fd(&impl_->subscription_listen_fd_);
         if (impl_->push_accept_thread_.joinable()) {
@@ -941,7 +942,6 @@ Status KVNode::start(const NodeConfig& cfg) {
         if (impl_->subscription_accept_thread_.joinable()) {
             impl_->subscription_accept_thread_.join();
         }
-        impl_->running_.store(false);
         impl_->listener_->close();
         impl_->listener_.reset();
         impl_->worker_->stop_progress_thread();
@@ -949,11 +949,13 @@ Status KVNode::start(const NodeConfig& cfg) {
         impl_->context_.reset();
         impl_->push_inbox_region_.reset();
         impl_->node_id_.clear();
-        return Status(ErrorCode::kConnectionRefused, error.empty() ? "failed to connect to KV server" : error);
+        const auto code = error == "timed out" ? ErrorCode::kTimeout : ErrorCode::kConnectionRefused;
+        return Status(code, error.empty() ? "failed to connect to KV server" : error);
     }
 
     auto status = impl_->register_with_server();
     if (!status.ok()) {
+        impl_->running_.store(false);
         detail::TcpTransport::close_fd(&impl_->control_fd_);
         detail::TcpTransport::close_fd(&impl_->push_listen_fd_);
         detail::TcpTransport::close_fd(&impl_->subscription_listen_fd_);
@@ -963,7 +965,6 @@ Status KVNode::start(const NodeConfig& cfg) {
         if (impl_->subscription_accept_thread_.joinable()) {
             impl_->subscription_accept_thread_.join();
         }
-        impl_->running_.store(false);
         impl_->listener_->close();
         impl_->listener_.reset();
         impl_->worker_->stop_progress_thread();
