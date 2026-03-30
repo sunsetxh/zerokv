@@ -476,3 +476,193 @@ UCX_PROTO_ENABLE=n UCX_NET_DEVICES=rxe0:1 \
 
 - Atomic operations remain out of scope for this environment because Soft-RoCE
   does not provide working hardware atomics here.
+
+## 16. Real RDMA Validation
+
+The current AXON KV stack is ready for functional validation on real RDMA
+hardware.
+
+Recommended validation order:
+
+1. `publish -> fetch`
+2. `push -> fetch`
+3. `unpublish`
+4. `subscription`
+
+Do not start with large benchmarks. First confirm correctness on real NICs,
+then use the built-in metrics to inspect latency.
+
+### Environment Checklist
+
+- two hosts with working RDMA NICs and reachable IP connectivity
+- `ibv_devinfo` succeeds on both hosts
+- `ucx_info -d` shows the expected RDMA transport on both hosts
+- `kv_demo` is built from the current tree
+- `UCX_NET_DEVICES` is set to the target RDMA device when needed
+
+Unlike the QEMU Soft-RoCE setup, real NIC validation should start without the
+`UCX_PROTO_ENABLE=n` workaround. Only add environment workarounds if the real
+environment demonstrates the same UCX issue.
+
+### Functional Smoke Test
+
+Start the server on the metadata host:
+
+```bash
+./kv_demo --mode server --listen <server_ip>:15000 --transport rdma
+```
+
+On node A, publish a key and keep the owner alive:
+
+```bash
+UCX_NET_DEVICES=<rdma_dev> ./kv_demo \
+  --mode publish \
+  --server-addr <server_ip>:15000 \
+  --data-addr <node_a_ip>:0 \
+  --node-id node-a \
+  --key k1 \
+  --value hello-rdma \
+  --transport rdma \
+  --hold
+```
+
+On node B, fetch the key:
+
+```bash
+UCX_NET_DEVICES=<rdma_dev> ./kv_demo \
+  --mode fetch \
+  --server-addr <server_ip>:15000 \
+  --data-addr <node_b_ip>:0 \
+  --node-id node-b \
+  --key k1 \
+  --transport rdma
+```
+
+Expected result:
+
+- fetch succeeds
+- fetched value matches `hello-rdma`
+- output includes `fetch_metrics`
+
+### Push Validation
+
+Start a target node on node B by launching any node mode first. The simplest
+way is to keep a published key alive:
+
+```bash
+UCX_NET_DEVICES=<rdma_dev> ./kv_demo \
+  --mode publish \
+  --server-addr <server_ip>:15000 \
+  --data-addr <node_b_ip>:0 \
+  --node-id node-b \
+  --key existing \
+  --value keepalive \
+  --transport rdma \
+  --hold
+```
+
+Then, on node A, push a new key to node B:
+
+```bash
+UCX_NET_DEVICES=<rdma_dev> ./kv_demo \
+  --mode push \
+  --server-addr <server_ip>:15000 \
+  --data-addr <node_a_ip>:0 \
+  --node-id node-a \
+  --target-node-id node-b \
+  --key pushed-key \
+  --value pushed-data \
+  --transport rdma
+```
+
+Finally, from a third node or from node A, fetch the pushed key:
+
+```bash
+UCX_NET_DEVICES=<rdma_dev> ./kv_demo \
+  --mode fetch \
+  --server-addr <server_ip>:15000 \
+  --data-addr <node_c_ip>:0 \
+  --node-id node-c \
+  --key pushed-key \
+  --transport rdma
+```
+
+Expected result:
+
+- fetch succeeds
+- fetched value matches `pushed-data`
+- fetch output reports `owner=node-b`
+- push output includes `push_metrics`
+
+### Unpublish Validation
+
+From the owner node, remove a key:
+
+```bash
+UCX_NET_DEVICES=<rdma_dev> ./kv_demo \
+  --mode unpublish \
+  --server-addr <server_ip>:15000 \
+  --data-addr <owner_ip>:0 \
+  --node-id node-a \
+  --key k1 \
+  --transport rdma
+```
+
+Then try to fetch it again from another node.
+
+Expected result:
+
+- unpublish succeeds
+- subsequent fetch fails with a not-found style error
+
+### Subscription Validation
+
+The current `kv_demo` does not yet expose a dedicated `subscribe` mode. Real
+RDMA subscription validation therefore requires either:
+
+- a small one-off validation binary using `KVNode::subscribe`,
+  `KVNode::unsubscribe`, and `KVNode::drain_subscription_events`, or
+- extending `kv_demo` with a subscription mode in a later phase
+
+The expected event flow to validate on real hardware is:
+
+- `kPublished`
+- `kUpdated`
+- `kUnpublished`
+- `kOwnerLost`
+
+### Metrics to Inspect
+
+The current implementation exposes three last-sample metrics snapshots:
+
+- `PublishMetrics`
+- `FetchMetrics`
+- `PushMetrics`
+
+For the first real RDMA pass, focus on:
+
+- `publish total_us`
+- `fetch total_us`
+- `fetch rdma_get_us`
+- `push total_us`
+- `push rdma_put_flush_us`
+
+These are enough to determine whether latency is dominated by control-plane
+lookup, peer connection setup, or RDMA transfer itself.
+
+### Acceptance Criteria
+
+Functional acceptance on real RDMA hardware:
+
+- `publish -> fetch` works
+- `push -> fetch` works
+- `unpublish` removes the key from future fetches
+- no UCX assertions
+- no verbs or connection-manager errors
+
+Initial performance acceptance:
+
+- `4 KiB`, `64 KiB`, and `1 MiB` payloads each complete successfully
+- metrics are produced for publish, fetch, and push
+- no environment-specific workaround is required unless the real environment
+  reproduces the known Soft-RoCE issue
