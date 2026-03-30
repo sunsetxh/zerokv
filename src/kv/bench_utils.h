@@ -35,7 +35,20 @@ struct PublishBenchRow {
     double throughput_MBps = 0.0;
 };
 
+struct FetchBenchRow {
+    uint64_t size_bytes = 0;
+    uint64_t iterations = 0;
+    double avg_total_us = 0.0;
+    double avg_prepare_us = 0.0;
+    double avg_get_meta_rpc_us = 0.0;
+    double avg_peer_connect_us = 0.0;
+    double avg_rdma_prepare_us = 0.0;
+    double avg_rdma_get_us = 0.0;
+    double throughput_MBps = 0.0;
+};
+
 double throughput_mb_per_sec(uint64_t size_bytes, double avg_total_us);
 std::string render_publish_rows(const std::vector<PublishBenchRow>& rows);
+std::string render_fetch_rows(const std::vector<FetchBenchRow>& rows);
 
 }  // namespace axon::kv::detail

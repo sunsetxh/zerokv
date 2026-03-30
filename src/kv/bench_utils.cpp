@@ -129,4 +129,37 @@ std::string render_publish_rows(const std::vector<PublishBenchRow>& rows) {
     return out.str();
 }
 
+std::string render_fetch_rows(const std::vector<FetchBenchRow>& rows) {
+    std::ostringstream out;
+    out << std::left
+        << std::setw(10) << "size"
+        << std::setw(10) << "iters"
+        << std::setw(14) << "bytes"
+        << std::setw(16) << "avg_total_us"
+        << std::setw(18) << "avg_prepare_us"
+        << std::setw(22) << "avg_get_meta_rpc_us"
+        << std::setw(20) << "avg_peer_connect_us"
+        << std::setw(22) << "avg_rdma_prepare_us"
+        << std::setw(18) << "avg_rdma_get_us"
+        << std::setw(18) << "throughput_MBps"
+        << '\n';
+
+    out << std::fixed << std::setprecision(2);
+    for (const auto& row : rows) {
+        out << std::left
+            << std::setw(10) << format_size(row.size_bytes)
+            << std::setw(10) << row.iterations
+            << std::setw(14) << row.size_bytes
+            << std::setw(16) << row.avg_total_us
+            << std::setw(18) << row.avg_prepare_us
+            << std::setw(22) << row.avg_get_meta_rpc_us
+            << std::setw(20) << row.avg_peer_connect_us
+            << std::setw(22) << row.avg_rdma_prepare_us
+            << std::setw(18) << row.avg_rdma_get_us
+            << std::setw(18) << row.throughput_MBps
+            << '\n';
+    }
+    return out.str();
+}
+
 }  // namespace axon::kv::detail

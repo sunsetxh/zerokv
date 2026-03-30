@@ -290,6 +290,120 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    if (mode == "bench-fetch") {
+        if (server_addr.empty() || data_addr.empty()) {
+            std::cerr << "--server-addr and --data-addr are required for bench-fetch mode\n";
+            return 1;
+        }
+
+        auto node = KVNode::create(cfg);
+        if (!node) {
+            std::cerr << "Failed to create KVNode\n";
+            return 1;
+        }
+        const auto status = node->start(NodeConfig{
+            .server_addr = server_addr,
+            .local_data_addr = data_addr,
+            .node_id = node_id,
+        });
+        if (!status.ok()) {
+            std::cerr << "Failed to start KVNode: " << status.message() << "\n";
+            return 1;
+        }
+
+        std::vector<uint64_t> sizes;
+        if (sizes_arg.empty()) {
+            sizes = default_sizes();
+        } else {
+            const auto parsed = detail::parse_size_list(sizes_arg);
+            if (!parsed.ok()) {
+                std::cerr << parsed.status.message() << "\n";
+                node->stop();
+                return 1;
+            }
+            sizes = parsed.value();
+        }
+
+        std::vector<detail::FetchBenchRow> rows;
+        for (const auto size_bytes : sizes) {
+            const auto iterations = detail::derive_iterations(size_bytes, explicit_iters, total_bytes);
+            const auto key = "bench-fetch-" + std::to_string(size_bytes);
+
+            uint64_t total_sum = 0;
+            uint64_t prepare_sum = 0;
+            uint64_t meta_sum = 0;
+            uint64_t connect_sum = 0;
+            uint64_t rdma_prepare_sum = 0;
+            uint64_t rdma_get_sum = 0;
+
+            for (uint64_t i = 0; i < iterations; ++i) {
+                auto fetch = node->fetch(key);
+                if (!fetch.status().ok()) {
+                    std::cerr << "fetch benchmark failed: size=" << size_bytes
+                              << " iter=" << i << " error=" << fetch.status().message() << "\n";
+                    node->stop();
+                    return 1;
+                }
+                const auto result = fetch.get();
+                if (result.data.size() != size_bytes) {
+                    std::cerr << "fetch benchmark size mismatch: expected=" << size_bytes
+                              << " actual=" << result.data.size() << "\n";
+                    node->stop();
+                    return 1;
+                }
+                if (!owner_node_id.empty() && result.owner_node_id != owner_node_id) {
+                    std::cerr << "fetch benchmark owner mismatch: expected=" << owner_node_id
+                              << " actual=" << result.owner_node_id << "\n";
+                    node->stop();
+                    return 1;
+                }
+
+                const auto metrics = node->last_fetch_metrics();
+                if (!metrics.has_value() || !metrics->ok) {
+                    std::cerr << "missing fetch metrics for size=" << size_bytes
+                              << " iter=" << i << "\n";
+                    node->stop();
+                    return 1;
+                }
+
+                total_sum += metrics->total_us;
+                prepare_sum += metrics->local_buffer_prepare_us;
+                meta_sum += metrics->get_meta_rpc_us;
+                connect_sum += metrics->peer_connect_us;
+                rdma_prepare_sum += metrics->rdma_prepare_us;
+                rdma_get_sum += metrics->rdma_get_us;
+            }
+
+            rows.push_back(detail::FetchBenchRow{
+                .size_bytes = size_bytes,
+                .iterations = iterations,
+                .avg_total_us = static_cast<double>(total_sum) / static_cast<double>(iterations),
+                .avg_prepare_us = static_cast<double>(prepare_sum) / static_cast<double>(iterations),
+                .avg_get_meta_rpc_us = static_cast<double>(meta_sum) / static_cast<double>(iterations),
+                .avg_peer_connect_us = static_cast<double>(connect_sum) / static_cast<double>(iterations),
+                .avg_rdma_prepare_us = static_cast<double>(rdma_prepare_sum) / static_cast<double>(iterations),
+                .avg_rdma_get_us = static_cast<double>(rdma_get_sum) / static_cast<double>(iterations),
+                .throughput_MBps = detail::throughput_mb_per_sec(
+                    size_bytes,
+                    static_cast<double>(total_sum) / static_cast<double>(iterations)),
+            });
+        }
+
+        std::cout << "op=fetch transport=" << transport
+                  << " node_id=" << node->node_id()
+                  << " total_bytes=" << total_bytes;
+        if (!owner_node_id.empty()) {
+            std::cout << " owner_node_id=" << owner_node_id;
+        }
+        if (explicit_iters.has_value()) {
+            std::cout << " iters=" << *explicit_iters;
+        }
+        std::cout << "\n";
+        std::cout << detail::render_fetch_rows(rows);
+        node->stop();
+        return 0;
+    }
+
     std::cerr << "Mode not implemented yet: " << mode << "\n";
     return 1;
 }
