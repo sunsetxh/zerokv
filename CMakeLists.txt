@@ -170,6 +170,9 @@ if(AXON_BUILD_EXAMPLES)
     add_executable(kv_demo examples/kv_demo.cpp)
     target_link_libraries(kv_demo PRIVATE axon)
 
+    add_executable(kv_wait_fetch examples/kv_wait_fetch.cpp)
+    target_link_libraries(kv_wait_fetch PRIVATE axon)
+
     add_executable(kv_bench
         examples/kv_bench.cpp
         src/kv/bench_utils.cpp

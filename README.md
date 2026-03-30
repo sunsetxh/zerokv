@@ -192,6 +192,42 @@ KVNode   (data owner, publish/fetch/push/subscribe)
   └── Push plane:    RDMA put + direct TCP commit to target
 ```
 
+### Wait-And-Fetch Example
+
+`kv_wait_fetch` demonstrates the "subscribe before key exists, then fetch when it
+appears" workflow.
+
+```bash
+# Terminal 1: server
+./kv_demo --mode server --listen 10.0.0.1:15150 --transport rdma
+
+# Terminal 2: waiter
+UCX_PROTO_ENABLE=n UCX_NET_DEVICES=rxe0:1 ./kv_wait_fetch \
+  --mode subscribe-fetch-once \
+  --server-addr 10.0.0.1:15150 \
+  --data-addr 10.0.0.1:0 \
+  --node-id waiter \
+  --key waitfetch-key \
+  --transport rdma
+
+# Terminal 3: publisher
+UCX_PROTO_ENABLE=n UCX_NET_DEVICES=rxe0:1 ./kv_demo \
+  --mode publish \
+  --server-addr 10.0.0.1:15150 \
+  --data-addr 10.0.0.2:0 \
+  --node-id publisher \
+  --key waitfetch-key \
+  --value hello-waitfetch \
+  --transport rdma \
+  --hold
+```
+
+Expected waiter output:
+
+```text
+FETCH_OK key=waitfetch-key owner=publisher version=1 value=hello-waitfetch
+```
+
 ## Soft-RoCE / QEMU Environment
 
 When using Soft-RoCE (`rxe0`) in VMs, you may need:

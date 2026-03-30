@@ -617,19 +617,48 @@ Expected result:
 
 ### Subscription Validation
 
-The current `kv_demo` does not yet expose a dedicated `subscribe` mode. Real
-RDMA subscription validation therefore requires either:
+Use the dedicated `kv_wait_fetch` example for the "subscribe before key exists,
+then fetch when it appears" scenario.
 
-- a small one-off validation binary using `KVNode::subscribe`,
-  `KVNode::unsubscribe`, and `KVNode::drain_subscription_events`, or
-- extending `kv_demo` with a subscription mode in a later phase
+Example cross-host flow:
 
-The expected event flow to validate on real hardware is:
+```bash
+# Host A: server
+./kv_demo --mode server --listen 10.0.0.1:15150 --transport rdma
 
-- `kPublished`
-- `kUpdated`
-- `kUnpublished`
-- `kOwnerLost`
+# Host A: waiter
+UCX_PROTO_ENABLE=n UCX_NET_DEVICES=rxe0:1 ./kv_wait_fetch \
+  --mode subscribe-fetch-once \
+  --server-addr 10.0.0.1:15150 \
+  --data-addr 10.0.0.1:0 \
+  --node-id waiter \
+  --key waitfetch-key \
+  --transport rdma
+
+# Host B: publisher
+UCX_PROTO_ENABLE=n UCX_NET_DEVICES=rxe0:1 ./kv_demo \
+  --mode publish \
+  --server-addr 10.0.0.1:15150 \
+  --data-addr 10.0.0.2:0 \
+  --node-id publisher \
+  --key waitfetch-key \
+  --value hello-waitfetch \
+  --transport rdma \
+  --hold
+```
+
+Observed result from the two-VM Soft-RoCE setup:
+
+```text
+FETCH_OK key=waitfetch-key owner=publisher-waitfetch version=1 value=hello-waitfetch
+```
+
+This validates:
+
+- subscribing to a non-existent key
+- later publish on a different node
+- event-driven fetch on the waiter
+- cross-node RDMA read from the eventual owner
 
 ### Metrics to Inspect
 
