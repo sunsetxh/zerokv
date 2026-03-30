@@ -180,6 +180,20 @@ bool decode_get_push_target_response_impl(Decoder& dec, GetPushTargetResponse& m
            (msg.status = static_cast<MsgStatus>(status), true);
 }
 
+bool decode_reserve_push_inbox_request_impl(Decoder& dec, ReservePushInboxRequest& msg) {
+    return dec.str(msg.target_node_id) &&
+           dec.str(msg.sender_node_id) &&
+           dec.str(msg.key) &&
+           dec.u64(msg.value_size);
+}
+
+bool decode_reserve_push_inbox_response_impl(Decoder& dec, ReservePushInboxResponse& msg) {
+    uint16_t status = 0;
+    return dec.u16(status) &&
+           dec.str(msg.message) &&
+           (msg.status = static_cast<MsgStatus>(status), true);
+}
+
 bool decode_push_commit_request_impl(Decoder& dec, PushCommitRequest& msg) {
     return dec.str(msg.target_node_id) &&
            dec.str(msg.sender_node_id) &&
@@ -404,6 +418,30 @@ std::vector<uint8_t> encode(const GetPushTargetResponse& msg) {
 
 std::optional<GetPushTargetResponse> decode_get_push_target_response(std::span<const uint8_t> data) {
     return decode_checked<GetPushTargetResponse>(data, decode_get_push_target_response_impl);
+}
+
+std::vector<uint8_t> encode(const ReservePushInboxRequest& msg) {
+    Encoder enc;
+    enc.str(msg.target_node_id);
+    enc.str(msg.sender_node_id);
+    enc.str(msg.key);
+    enc.u64(msg.value_size);
+    return std::move(enc).finish();
+}
+
+std::optional<ReservePushInboxRequest> decode_reserve_push_inbox_request(std::span<const uint8_t> data) {
+    return decode_checked<ReservePushInboxRequest>(data, decode_reserve_push_inbox_request_impl);
+}
+
+std::vector<uint8_t> encode(const ReservePushInboxResponse& msg) {
+    Encoder enc;
+    enc.u16(static_cast<uint16_t>(msg.status));
+    enc.str(msg.message);
+    return std::move(enc).finish();
+}
+
+std::optional<ReservePushInboxResponse> decode_reserve_push_inbox_response(std::span<const uint8_t> data) {
+    return decode_checked<ReservePushInboxResponse>(data, decode_reserve_push_inbox_response_impl);
 }
 
 std::vector<uint8_t> encode(const PushCommitRequest& msg) {

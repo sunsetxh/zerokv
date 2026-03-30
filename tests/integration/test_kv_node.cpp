@@ -49,6 +49,36 @@ std::optional<proto::GetMetaResponse> get_meta(const std::string& server_addr,
     return proto::decode_get_meta_response(payload);
 }
 
+std::optional<proto::GetPushTargetResponse> get_push_target(const std::string& server_addr,
+                                                            const std::string& target_node_id,
+                                                            uint64_t request_id = 200) {
+    std::string error;
+    int fd = proto::TcpTransport::connect(server_addr, &error);
+    if (fd < 0) {
+        return std::nullopt;
+    }
+
+    proto::GetPushTargetRequest get;
+    get.target_node_id = target_node_id;
+    if (!proto::send_frame(fd, proto::MsgType::kGetPushTarget, request_id, proto::encode(get))) {
+        proto::TcpTransport::close_fd(&fd);
+        return std::nullopt;
+    }
+
+    proto::MsgHeader header;
+    std::vector<uint8_t> payload;
+    if (!proto::recv_frame(fd, &header, &payload)) {
+        proto::TcpTransport::close_fd(&fd);
+        return std::nullopt;
+    }
+    proto::TcpTransport::close_fd(&fd);
+
+    if (static_cast<proto::MsgType>(header.type) != proto::MsgType::kGetPushTargetResp) {
+        return std::nullopt;
+    }
+    return proto::decode_get_push_target_response(payload);
+}
+
 std::vector<axon::kv::SubscriptionEvent> drain_until_count(const KVNode::Ptr& node,
                                                            size_t expected_count,
                                                            std::chrono::milliseconds timeout = std::chrono::milliseconds(1000)) {
@@ -119,6 +149,27 @@ TEST(KvNodeIntegrationTest, StartRegistersNodeAndStopDropsLiveness) {
     EXPECT_EQ(get_resp->status, proto::MsgStatus::kNotFound);
 
     proto::TcpTransport::close_fd(&fd);
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, DestructorStopsRunningNode) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    {
+        auto node = KVNode::create(cfg);
+        ASSERT_NE(node, nullptr);
+        ASSERT_TRUE(node->start(NodeConfig{
+            .server_addr = server->address(),
+            .local_data_addr = "127.0.0.1:0",
+            .node_id = "destructor-stop-node",
+        }).ok());
+        EXPECT_TRUE(node->is_running());
+    }
+
     server->stop();
 }
 
@@ -1257,6 +1308,81 @@ TEST(KvNodeIntegrationTest, PushCoexistsWithPublish) {
     reader->stop();
     target->stop();
     sender->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, PushFailsWhileTargetInboxReservationIsHeld) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto sender_a = KVNode::create(cfg);
+    auto target = KVNode::create(cfg);
+    auto reader = KVNode::create(cfg);
+    ASSERT_NE(sender_a, nullptr);
+    ASSERT_NE(target, nullptr);
+    ASSERT_NE(reader, nullptr);
+
+    ASSERT_TRUE(sender_a->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:0",
+        .node_id = "push-sender-a",
+    }).ok());
+    ASSERT_TRUE(target->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:0",
+        .node_id = "push-target-race",
+    }).ok());
+    ASSERT_TRUE(reader->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:0",
+        .node_id = "push-reader-race",
+    }).ok());
+
+    auto target_info = get_push_target(server->address(), "push-target-race");
+    ASSERT_TRUE(target_info.has_value());
+    ASSERT_EQ(target_info->status, proto::MsgStatus::kOk);
+
+    std::string error;
+    int reserve_fd = proto::TcpTransport::connect(target_info->push_control_addr, &error);
+    ASSERT_GE(reserve_fd, 0) << error;
+
+    proto::ReservePushInboxRequest reserve;
+    reserve.target_node_id = "push-target-race";
+    reserve.sender_node_id = "manual-reserver";
+    reserve.key = "held-key";
+    reserve.value_size = 4;
+    ASSERT_TRUE(proto::send_frame(reserve_fd, proto::MsgType::kReservePushInbox, 1, proto::encode(reserve)));
+
+    proto::MsgHeader reserve_header;
+    std::vector<uint8_t> reserve_payload;
+    ASSERT_TRUE(proto::recv_frame(reserve_fd, &reserve_header, &reserve_payload));
+    auto reserve_resp = proto::decode_reserve_push_inbox_response(reserve_payload);
+    ASSERT_TRUE(reserve_resp.has_value());
+    ASSERT_EQ(reserve_resp->status, proto::MsgStatus::kOk);
+
+    const std::string value = "value-from-a";
+    auto blocked = sender_a->push("push-target-race", "race-key-a", value.data(), value.size());
+    EXPECT_FALSE(blocked.status().ok());
+
+    proto::TcpTransport::close_fd(&reserve_fd);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    auto push = sender_a->push("push-target-race", "race-key-a", value.data(), value.size());
+    ASSERT_TRUE(push.status().ok()) << push.status().message();
+    push.get();
+
+    auto fetched = reader->fetch("race-key-a");
+    ASSERT_TRUE(fetched.status().ok());
+    auto result = fetched.get();
+    ASSERT_EQ(result.data.size(), value.size());
+    EXPECT_EQ(std::memcmp(result.data.data(), value.data(), value.size()), 0);
+
+    reader->stop();
+    target->stop();
+    sender_a->stop();
     server->stop();
 }
 

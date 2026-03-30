@@ -32,6 +32,8 @@ enum class MsgType : uint16_t {
     kUnsubscribe = 16,
     kUnsubscribeResp = 17,
     kSubscriptionEvent = 18,
+    kReservePushInbox = 19,
+    kReservePushInboxResp = 20,
     kError = 255,
 };
 
@@ -110,6 +112,18 @@ struct GetPushTargetResponse {
     uint64_t push_inbox_remote_addr = 0;
     std::vector<uint8_t> push_inbox_rkey;
     uint64_t push_inbox_capacity = 0;
+    std::string message;
+};
+
+struct ReservePushInboxRequest {
+    std::string target_node_id;
+    std::string sender_node_id;
+    std::string key;
+    uint64_t value_size = 0;
+};
+
+struct ReservePushInboxResponse {
+    MsgStatus status = MsgStatus::kOk;
     std::string message;
 };
 
@@ -208,6 +222,12 @@ decode_message(std::span<const uint8_t> data);
 
 [[nodiscard]] std::vector<uint8_t> encode(const GetPushTargetResponse& msg);
 [[nodiscard]] std::optional<GetPushTargetResponse> decode_get_push_target_response(std::span<const uint8_t> data);
+
+[[nodiscard]] std::vector<uint8_t> encode(const ReservePushInboxRequest& msg);
+[[nodiscard]] std::optional<ReservePushInboxRequest> decode_reserve_push_inbox_request(std::span<const uint8_t> data);
+
+[[nodiscard]] std::vector<uint8_t> encode(const ReservePushInboxResponse& msg);
+[[nodiscard]] std::optional<ReservePushInboxResponse> decode_reserve_push_inbox_response(std::span<const uint8_t> data);
 
 [[nodiscard]] std::vector<uint8_t> encode(const PushCommitRequest& msg);
 [[nodiscard]] std::optional<PushCommitRequest> decode_push_commit_request(std::span<const uint8_t> data);

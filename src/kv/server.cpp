@@ -419,6 +419,13 @@ struct KVServer::Impl {
                                                       meta.version));
             }
         }
+        {
+            std::lock_guard<std::mutex> lock(sessions_mu_);
+            auto it = sessions_.find(session_id);
+            if (it != sessions_.end()) {
+                it->second->fd = -1;
+            }
+        }
         detail::TcpTransport::close_fd(&fd);
     }
 
