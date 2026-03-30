@@ -116,20 +116,24 @@ creating the archive.
 # Server
 ./build/kv_bench --mode server --listen 0.0.0.0:15000 --transport rdma
 
-# Stable owner (for fetch benchmark)
+# Stable owner (only needed for fetch benchmark)
 ./build/kv_bench --mode hold-owner --server-addr <server_ip>:15000 \
   --data-addr 0.0.0.0:0 --node-id owner --transport rdma
 
 # Publish benchmark
+# The benchmark node itself is the owner for its temporary published keys.
 ./build/kv_bench --mode bench-publish --server-addr <server_ip>:15000 \
   --data-addr 0.0.0.0:0 --node-id bp1 --sizes 4K,64K,1M,16M,128M \
-  --total-bytes 1G --transport rdma
+  --iters 4 --transport rdma
 
 # Fetch benchmark
 ./build/kv_bench --mode bench-fetch --server-addr <server_ip>:15000 \
   --data-addr 0.0.0.0:0 --node-id bf1 --owner-node-id owner \
-  --sizes 4K,64K,1M,16M,128M --total-bytes 1G --transport rdma
+  --sizes 4K,64K,1M,16M,128M --iters 4 --transport rdma
 ```
+
+`--total-bytes` is still supported, but fixed `--iters` is the recommended
+first pass when validating across real machines.
 
 ### Python KV example
 

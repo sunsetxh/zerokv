@@ -660,7 +660,12 @@ Start the benchmark server:
 ./kv_bench --mode server --listen <server_ip>:15000 --transport rdma
 ```
 
-Start a stable owner for fetch benchmarking:
+`bench-publish` does not need a separate owner process. The benchmark node
+publishes data to its own local memory and is therefore the owner for those
+temporary keys.
+
+Only `bench-fetch` needs a separate stable owner process that keeps the
+benchmark keys published:
 
 ```bash
 UCX_NET_DEVICES=<rdma_dev> ./kv_bench \
@@ -680,7 +685,7 @@ UCX_NET_DEVICES=<rdma_dev> ./kv_bench \
   --data-addr <client_ip>:0 \
   --node-id bench-publish \
   --sizes 4K,64K,1M,4M,16M,32M,64M,128M \
-  --total-bytes 1G \
+  --iters 4 \
   --transport rdma
 ```
 
@@ -694,13 +699,15 @@ UCX_NET_DEVICES=<rdma_dev> ./kv_bench \
   --node-id bench-fetch \
   --owner-node-id owner \
   --sizes 4K,64K,1M,4M,16M,32M,64M,128M \
-  --total-bytes 1G \
+  --iters 4 \
   --transport rdma
 ```
 
 Notes:
 
-- `--iters N` can override the automatic `--total-bytes / size` iteration rule
+- `--iters N` is the recommended first-pass mode for cross-machine validation
+- `--total-bytes SIZE` is still supported when you want each size to transfer a
+  comparable total payload volume
 - `hold-owner` publishes stable keys named `bench-fetch-<size-bytes>`
 - `bench-publish` uses unique keys and unpublishes after each iteration to
   avoid metadata accumulation
