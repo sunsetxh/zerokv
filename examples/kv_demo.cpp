@@ -90,6 +90,23 @@ void print_fetch_metrics(const KVNode::Ptr& node) {
               << " ok=" << (metrics->ok ? 1 : 0) << "\n";
 }
 
+void print_push_metrics(const KVNode::Ptr& node) {
+    if (!node) {
+        return;
+    }
+    auto metrics = node->last_push_metrics();
+    if (!metrics.has_value()) {
+        return;
+    }
+    std::cout << "push_metrics"
+              << " total_us=" << metrics->total_us
+              << " get_target_rpc_us=" << metrics->get_target_rpc_us
+              << " prepare_frame_us=" << metrics->prepare_frame_us
+              << " rdma_put_flush_us=" << metrics->rdma_put_flush_us
+              << " commit_rpc_us=" << metrics->commit_rpc_us
+              << " ok=" << (metrics->ok ? 1 : 0) << "\n";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -230,6 +247,7 @@ int main(int argc, char** argv) {
         std::cout << "Pushed key=" << key
                   << " target=" << target_node_id
                   << " bytes=" << value.size() << "\n";
+        print_push_metrics(node);
         node->stop();
         return 0;
     }

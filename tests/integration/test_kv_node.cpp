@@ -139,10 +139,96 @@ TEST(KvNodeIntegrationTest, MetricsAreEmptyBeforeAnyOperation) {
 
     auto publish_metrics = node->last_publish_metrics();
     auto fetch_metrics = node->last_fetch_metrics();
+    auto push_metrics = node->last_push_metrics();
     EXPECT_FALSE(publish_metrics.has_value());
     EXPECT_FALSE(fetch_metrics.has_value());
+    EXPECT_FALSE(push_metrics.has_value());
 
     node->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, PushMetricsAreRecordedAndOverwritten) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto sender = KVNode::create(cfg);
+    auto target = KVNode::create(cfg);
+    ASSERT_TRUE(sender->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:0",
+        .node_id = "push-metrics-sender",
+    }).ok());
+    ASSERT_TRUE(target->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:0",
+        .node_id = "push-metrics-target",
+    }).ok());
+
+    const std::string first = "push-metrics-1";
+    auto first_push = sender->push("push-metrics-target", "push-metrics-key-1", first.data(), first.size());
+    ASSERT_TRUE(first_push.status().ok()) << first_push.status().message();
+    first_push.get();
+
+    auto first_metrics = sender->last_push_metrics();
+    ASSERT_TRUE(first_metrics.has_value());
+    EXPECT_TRUE(first_metrics->ok);
+    EXPECT_GT(first_metrics->total_us, 0u);
+    EXPECT_GT(first_metrics->get_target_rpc_us, 0u);
+    EXPECT_GT(first_metrics->prepare_frame_us, 0u);
+    EXPECT_GT(first_metrics->rdma_put_flush_us, 0u);
+    EXPECT_GT(first_metrics->commit_rpc_us, 0u);
+
+    const std::string second = "push-metrics-2";
+    auto second_push = sender->push("push-metrics-target", "push-metrics-key-2", second.data(), second.size());
+    ASSERT_TRUE(second_push.status().ok()) << second_push.status().message();
+    second_push.get();
+
+    auto second_metrics = sender->last_push_metrics();
+    ASSERT_TRUE(second_metrics.has_value());
+    EXPECT_TRUE(second_metrics->ok);
+    EXPECT_GT(second_metrics->total_us, 0u);
+    EXPECT_GT(second_metrics->get_target_rpc_us, 0u);
+    EXPECT_GT(second_metrics->prepare_frame_us, 0u);
+    EXPECT_GT(second_metrics->rdma_put_flush_us, 0u);
+    EXPECT_GT(second_metrics->commit_rpc_us, 0u);
+
+    target->stop();
+    sender->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, PushFailureRecordsPushMetrics) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto sender = KVNode::create(cfg);
+    ASSERT_TRUE(sender->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:0",
+        .node_id = "push-metrics-missing",
+    }).ok());
+
+    const std::string value = "push-missing-target";
+    auto push = sender->push("no-such-target-for-metrics", "push-metrics-key-missing", value.data(), value.size());
+    EXPECT_FALSE(push.status().ok());
+
+    auto metrics = sender->last_push_metrics();
+    ASSERT_TRUE(metrics.has_value());
+    EXPECT_FALSE(metrics->ok);
+    EXPECT_GT(metrics->total_us, 0u);
+    EXPECT_GT(metrics->get_target_rpc_us, 0u);
+    EXPECT_EQ(metrics->prepare_frame_us, 0u);
+    EXPECT_EQ(metrics->rdma_put_flush_us, 0u);
+    EXPECT_EQ(metrics->commit_rpc_us, 0u);
+
+    sender->stop();
     server->stop();
 }
 

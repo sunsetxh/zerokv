@@ -47,6 +47,15 @@ struct FetchMetrics {
     bool ok = false;
 };
 
+struct PushMetrics {
+    uint64_t total_us = 0;
+    uint64_t get_target_rpc_us = 0;
+    uint64_t prepare_frame_us = 0;
+    uint64_t rdma_put_flush_us = 0;
+    uint64_t commit_rpc_us = 0;
+    bool ok = false;
+};
+
 enum class SubscriptionEventType {
     kPublished,
     kUpdated,
@@ -113,6 +122,7 @@ public:
     [[nodiscard]] size_t published_count() const noexcept;
     [[nodiscard]] std::optional<PublishMetrics> last_publish_metrics() const;
     [[nodiscard]] std::optional<FetchMetrics> last_fetch_metrics() const;
+    [[nodiscard]] std::optional<PushMetrics> last_push_metrics() const;
     [[nodiscard]] std::vector<SubscriptionEvent> drain_subscription_events();
 
     /// Copy-publish semantics: the implementation owns the data after the

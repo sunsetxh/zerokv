@@ -119,6 +119,7 @@ struct KVNode::Impl {
     std::atomic<uint64_t> next_request_id_{1};
     std::optional<PublishMetrics> last_publish_metrics_;
     std::optional<FetchMetrics> last_fetch_metrics_;
+    std::optional<PushMetrics> last_push_metrics_;
 
     void record_publish_metrics(PublishMetrics metrics) {
         std::lock_guard<std::mutex> lock(metrics_mu_);
@@ -128,6 +129,11 @@ struct KVNode::Impl {
     void record_fetch_metrics(FetchMetrics metrics) {
         std::lock_guard<std::mutex> lock(metrics_mu_);
         last_fetch_metrics_ = metrics;
+    }
+
+    void record_push_metrics(PushMetrics metrics) {
+        std::lock_guard<std::mutex> lock(metrics_mu_);
+        last_push_metrics_ = metrics;
     }
 
     Status register_with_server() {
@@ -1039,6 +1045,14 @@ std::optional<FetchMetrics> KVNode::last_fetch_metrics() const {
     return impl_->last_fetch_metrics_;
 }
 
+std::optional<PushMetrics> KVNode::last_push_metrics() const {
+    if (!impl_) {
+        return std::nullopt;
+    }
+    std::lock_guard<std::mutex> lock(impl_->metrics_mu_);
+    return impl_->last_push_metrics_;
+}
+
 std::vector<SubscriptionEvent> KVNode::drain_subscription_events() {
     if (!impl_) {
         return {};
@@ -1185,26 +1199,47 @@ Future<void> KVNode::push(const std::string& target_node_id,
     if (!impl_) {
         return Future<void>::make_error(Status(ErrorCode::kInternalError, "KVNode not initialized"));
     }
+    PushMetrics metrics;
+    const auto total_start = SteadyClock::now();
     if (!impl_->running_.load()) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(Status(ErrorCode::kConnectionReset, "KVNode is not running"));
     }
     if (target_node_id.empty() || key.empty() || !data || size == 0) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(Status(ErrorCode::kInvalidArgument, "invalid push arguments"));
     }
 
     Status lookup_status;
+    const auto lookup_start = SteadyClock::now();
     auto target = impl_->get_push_target(target_node_id, &lookup_status);
+    metrics.get_target_rpc_us = elapsed_us(lookup_start, SteadyClock::now());
     if (!target.has_value()) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(lookup_status);
     }
 
     const size_t frame_size = sizeof(PushInboxHeader) + key.size() + size;
     if (frame_size > target->push_inbox_capacity) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(Status(ErrorCode::kInvalidArgument, "push payload exceeds target inbox capacity"));
     }
 
+    const auto prepare_start = SteadyClock::now();
     auto local_region = MemoryRegion::allocate(impl_->context_, frame_size);
     if (!local_region) {
+        metrics.prepare_frame_us = elapsed_us(prepare_start, SteadyClock::now());
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(Status(ErrorCode::kRegistrationFailed, "failed to allocate push frame region"));
     }
 
@@ -1215,29 +1250,48 @@ Future<void> KVNode::push(const std::string& target_node_id,
     std::memcpy(base, &header, sizeof(header));
     std::memcpy(base + sizeof(header), key.data(), key.size());
     std::memcpy(base + sizeof(header) + key.size(), data, size);
+    metrics.prepare_frame_us = elapsed_us(prepare_start, SteadyClock::now());
 
     Status peer_status;
     auto peer = impl_->get_or_connect_peer(target->target_node_id, target->target_data_addr, &peer_status);
     if (!peer) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(peer_status);
     }
 
     RemoteKey rkey;
     rkey.data = target->push_inbox_rkey;
+    const auto rdma_start = SteadyClock::now();
     auto put = peer->put(local_region, 0, target->push_inbox_remote_addr, rkey, frame_size);
     put.get();
     if (!put.status().ok()) {
+        metrics.rdma_put_flush_us = elapsed_us(rdma_start, SteadyClock::now());
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(put.status());
     }
+    // UCX put completion does not guarantee remote inbox visibility before commit handling.
     auto flush = peer->flush();
     flush.get();
+    metrics.rdma_put_flush_us = elapsed_us(rdma_start, SteadyClock::now());
     if (!flush.status().ok()) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(flush.status());
     }
 
     std::string error;
+    const auto commit_start = SteadyClock::now();
     int fd = detail::TcpTransport::connect(target->push_control_addr, &error);
     if (fd < 0) {
+        metrics.commit_rpc_us = elapsed_us(commit_start, SteadyClock::now());
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(Status(ErrorCode::kConnectionRefused, error.empty() ? "failed to connect to target push control" : error));
     }
 
@@ -1249,6 +1303,10 @@ Future<void> KVNode::push(const std::string& target_node_id,
     const uint64_t request_id = impl_->next_request_id_.fetch_add(1);
     if (!detail::send_frame(fd, detail::MsgType::kPushCommit, request_id, detail::encode(req))) {
         detail::TcpTransport::close_fd(&fd);
+        metrics.commit_rpc_us = elapsed_us(commit_start, SteadyClock::now());
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(Status(ErrorCode::kConnectionReset, "failed to send push commit"));
     }
 
@@ -1256,23 +1314,43 @@ Future<void> KVNode::push(const std::string& target_node_id,
     std::vector<uint8_t> resp_payload;
     if (!detail::recv_frame(fd, &resp_header, &resp_payload)) {
         detail::TcpTransport::close_fd(&fd);
+        metrics.commit_rpc_us = elapsed_us(commit_start, SteadyClock::now());
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(Status(ErrorCode::kConnectionReset, "failed to read push commit response"));
     }
     detail::TcpTransport::close_fd(&fd);
+    metrics.commit_rpc_us = elapsed_us(commit_start, SteadyClock::now());
     if (resp_header.request_id != request_id) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(Status(ErrorCode::kInternalError, "push commit response request_id mismatch"));
     }
     if (static_cast<detail::MsgType>(resp_header.type) != detail::MsgType::kPushCommitResp) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(Status(ErrorCode::kInternalError, "unexpected push commit response type"));
     }
     auto resp = detail::decode_push_commit_response(resp_payload);
     if (!resp.has_value()) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(Status(ErrorCode::kInternalError, "failed to decode push commit response"));
     }
     auto status = status_from_msg(resp->status, resp->message, ErrorCode::kInternalError);
     if (!status.ok()) {
+        metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+        metrics.ok = false;
+        impl_->record_push_metrics(metrics);
         return Future<void>::make_error(status);
     }
+    metrics.total_us = elapsed_us(total_start, SteadyClock::now());
+    metrics.ok = true;
+    impl_->record_push_metrics(metrics);
     return Future<void>::make_ready();
 }
 
