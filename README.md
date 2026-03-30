@@ -131,6 +131,41 @@ creating the archive.
   --sizes 4K,64K,1M,16M,128M --total-bytes 1G --transport rdma
 ```
 
+### Python KV example
+
+After building with `-DAXON_BUILD_PYTHON=ON`, you can smoke-test the modern
+Python API with the bundled example:
+
+```bash
+# Terminal 1: server
+python3 python/examples/kv_example.py \
+  --mode server \
+  --listen 0.0.0.0:15000 \
+  --transport rdma
+
+# Terminal 2: publisher
+python3 python/examples/kv_example.py \
+  --mode publish \
+  --server-addr <server_ip>:15000 \
+  --data-addr 0.0.0.0:0 \
+  --node-id py-publisher \
+  --key demo-key \
+  --value hello-from-python \
+  --transport rdma \
+  --hold
+
+# Terminal 3: fetcher
+python3 python/examples/kv_example.py \
+  --mode fetch \
+  --server-addr <server_ip>:15000 \
+  --data-addr 0.0.0.0:0 \
+  --node-id py-reader \
+  --key demo-key \
+  --transport rdma
+```
+
+The example prints the fetched payload and the latest publish/fetch metrics.
+
 ## Architecture
 
 ```
