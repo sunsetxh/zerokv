@@ -49,7 +49,7 @@ struct WaitKeysResult {
 
 struct BatchFetchResult {
     std::vector<std::pair<std::string, FetchResult>> fetched;
-    std::vector<std::string> missing;
+    std::vector<std::string> failed;
     std::vector<std::string> timed_out;
     bool completed = false;
 };
@@ -60,10 +60,10 @@ Status wait_for_key(const std::string& key,
 WaitKeysResult wait_for_keys(const std::vector<std::string>& keys,
                              std::chrono::milliseconds timeout);
 
-Future<FetchResult> subscribe_and_fetch_once(const std::string& key,
-                                             std::chrono::milliseconds timeout);
+FetchResult subscribe_and_fetch_once(const std::string& key,
+                                     std::chrono::milliseconds timeout);
 
-Future<BatchFetchResult> subscribe_and_fetch_once_many(
+BatchFetchResult subscribe_and_fetch_once_many(
     const std::vector<std::string>& keys,
     std::chrono::milliseconds timeout);
 ```
@@ -122,21 +122,20 @@ become ready.
 Batch timeout returns partial results.
 
 - `fetched`: keys that were fetched successfully before timeout
-- `missing`: keys that never became available or never fetched successfully
+- `failed`: keys that became candidates for fetch but did not produce a
+  successful fetch before the operation ended
 - `timed_out`: keys still pending when timeout fired
 - `completed`: true only if every key fetched successfully
-
-For Phase 1, `missing` and `timed_out` may overlap semantically, but they are
-kept separate because the caller often wants to distinguish:
-
-- keys that never appeared, vs.
-- keys that appeared but did not finish before timeout
 
 The implementation should classify as follows:
 
 - `timed_out`: keys still in the active pending set when timeout expires
-- `missing`: keys that never produced a successful fetch by the end of the
-  operation
+- `failed`: keys that left the pending set because the implementation reached a
+  terminal non-timeout failure state for that key
+
+For Phase 1, most unsuccessful keys are expected to end up in `timed_out`.
+`failed` is reserved for keys that the helper can classify as definitively
+failed without simply waiting longer.
 
 ## Event handling rules
 
@@ -159,6 +158,9 @@ To avoid missing keys because of event loss or timing gaps:
 
 This keeps the helpers robust even if an event is missed.
 
+The first implementation should use a fixed retry cadence of roughly 100 ms for
+lookup fallback on still-pending keys.
+
 ## Internal implementation
 
 All logic stays in `KVNode`. No server changes are needed.
@@ -176,6 +178,10 @@ Suggested internal flow for batch fetch:
    - periodically re-check pending keys with lookup
 5. Unsubscribe from any keys that were subscribed by this operation
 6. Return aggregate result
+
+The implementation must track which subscriptions were created by the helper
+itself. Cleanup only unsubscribes keys from that set. Pre-existing user
+subscriptions must be preserved.
 
 ## First-success-wins rule
 
@@ -200,6 +206,8 @@ semantics.
   pending unless the operation times out
 - Unsubscribe failures during cleanup are best-effort and should not override a
   more important timeout or fetch error
+- The helper methods are synchronous helpers. They may block until success or
+  timeout and therefore do not return `Future<>`.
 
 ## Performance expectations
 
