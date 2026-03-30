@@ -98,6 +98,24 @@ else
         fi
     }
 
+    ensure_nanobind_deps() {
+        local nanobind_dir="${VENDOR_DIR}/nanobind"
+        local robin_dir="${nanobind_dir}/ext/robin_map"
+        if [[ -d "${robin_dir}/include" ]]; then
+            echo "[vendor] nanobind ext/robin_map already present"
+            return
+        fi
+
+        echo "[vendor] downloading nanobind dependency robin_map"
+        local tmp="$(mktemp -d)"
+        curl -sL https://github.com/Tessil/robin-map/archive/refs/tags/v1.3.0.tar.gz | tar xz -C "${tmp}"
+        local extracted="$(ls -1 "${tmp}")"
+        rm -rf "${robin_dir}"
+        mkdir -p "${nanobind_dir}/ext"
+        mv "${tmp}/${extracted}" "${robin_dir}"
+        rm -rf "${tmp}"
+    }
+
     # Vendor dependencies (release tarballs)
     fetch_vendor googletest \
         https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
@@ -105,6 +123,7 @@ else
         https://github.com/google/benchmark/archive/refs/tags/v1.8.3.tar.gz
     fetch_vendor nanobind \
         https://github.com/wjakob/nanobind/archive/refs/tags/v1.9.1.tar.gz
+    ensure_nanobind_deps
     fetch_vendor ucx \
         https://github.com/openucx/ucx/archive/refs/tags/v1.20.0.tar.gz
 fi
