@@ -5,8 +5,10 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstring>
 #include <cstdint>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -45,6 +47,22 @@ std::optional<proto::GetMetaResponse> get_meta(const std::string& server_addr,
         return std::nullopt;
     }
     return proto::decode_get_meta_response(payload);
+}
+
+std::vector<axon::kv::SubscriptionEvent> drain_until_count(const KVNode::Ptr& node,
+                                                           size_t expected_count,
+                                                           std::chrono::milliseconds timeout = std::chrono::milliseconds(1000)) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    std::vector<axon::kv::SubscriptionEvent> all;
+    while (std::chrono::steady_clock::now() < deadline) {
+        auto drained = node->drain_subscription_events();
+        all.insert(all.end(), drained.begin(), drained.end());
+        if (all.size() >= expected_count) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return all;
 }
 
 TEST(KvNodeIntegrationTest, StartRegistersNodeAndStopDropsLiveness) {
@@ -125,6 +143,217 @@ TEST(KvNodeIntegrationTest, MetricsAreEmptyBeforeAnyOperation) {
     EXPECT_FALSE(fetch_metrics.has_value());
 
     node->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscriptionQueueIsEmptyBeforeUse) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto node = KVNode::create(cfg);
+    ASSERT_NE(node, nullptr);
+    ASSERT_TRUE(node->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:20017",
+        .node_id = "subscription-empty-node",
+    }).ok());
+
+    auto subscribe = node->subscribe("alpha");
+    auto unsubscribe = node->unsubscribe("alpha");
+    auto events = node->drain_subscription_events();
+
+    EXPECT_TRUE(subscribe.status().ok());
+    EXPECT_TRUE(unsubscribe.status().ok());
+    EXPECT_TRUE(events.empty());
+
+    node->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscriptionReceivesPublishedAndUpdatedEvents) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto publisher = KVNode::create(cfg);
+    auto subscriber = KVNode::create(cfg);
+    ASSERT_TRUE(publisher->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:26001",
+        .node_id = "sub-publisher-a",
+    }).ok());
+    ASSERT_TRUE(subscriber->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:26002",
+        .node_id = "sub-subscriber-a",
+    }).ok());
+
+    auto subscribe = subscriber->subscribe("alpha");
+    ASSERT_TRUE(subscribe.status().ok());
+    subscribe.get();
+
+    const std::string first = "value-one";
+    auto publish = publisher->publish("alpha", first.data(), first.size());
+    ASSERT_TRUE(publish.status().ok());
+    publish.get();
+
+    const std::string second = "value-two";
+    auto update = publisher->publish("alpha", second.data(), second.size());
+    ASSERT_TRUE(update.status().ok());
+    update.get();
+
+    auto events = drain_until_count(subscriber, 2);
+    ASSERT_EQ(events.size(), 2u);
+    EXPECT_EQ(events[0].type, axon::kv::SubscriptionEventType::kPublished);
+    EXPECT_EQ(events[0].key, "alpha");
+    EXPECT_EQ(events[0].owner_node_id, "sub-publisher-a");
+    EXPECT_EQ(events[0].version, 1u);
+    EXPECT_EQ(events[1].type, axon::kv::SubscriptionEventType::kUpdated);
+    EXPECT_EQ(events[1].version, 2u);
+
+    subscriber->stop();
+    publisher->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscriptionReceivesUnpublishedEvent) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto publisher = KVNode::create(cfg);
+    auto subscriber = KVNode::create(cfg);
+    ASSERT_TRUE(publisher->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:26011",
+        .node_id = "sub-publisher-b",
+    }).ok());
+    ASSERT_TRUE(subscriber->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:26012",
+        .node_id = "sub-subscriber-b",
+    }).ok());
+
+    auto subscribe = subscriber->subscribe("beta");
+    ASSERT_TRUE(subscribe.status().ok());
+    subscribe.get();
+
+    const std::string value = "value-three";
+    auto publish = publisher->publish("beta", value.data(), value.size());
+    ASSERT_TRUE(publish.status().ok());
+    publish.get();
+    auto unpublish = publisher->unpublish("beta");
+    ASSERT_TRUE(unpublish.status().ok());
+    unpublish.get();
+
+    auto events = drain_until_count(subscriber, 2);
+    ASSERT_EQ(events.size(), 2u);
+    EXPECT_EQ(events[0].type, axon::kv::SubscriptionEventType::kPublished);
+    EXPECT_EQ(events[1].type, axon::kv::SubscriptionEventType::kUnpublished);
+    EXPECT_EQ(events[1].key, "beta");
+    EXPECT_EQ(events[1].owner_node_id, "sub-publisher-b");
+
+    subscriber->stop();
+    publisher->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscriptionReceivesOwnerLostEvent) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto publisher = KVNode::create(cfg);
+    auto subscriber = KVNode::create(cfg);
+    ASSERT_TRUE(publisher->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:26021",
+        .node_id = "sub-publisher-c",
+    }).ok());
+    ASSERT_TRUE(subscriber->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:26022",
+        .node_id = "sub-subscriber-c",
+    }).ok());
+
+    auto subscribe = subscriber->subscribe("gamma");
+    ASSERT_TRUE(subscribe.status().ok());
+    subscribe.get();
+
+    const std::string value = "value-four";
+    auto publish = publisher->publish("gamma", value.data(), value.size());
+    ASSERT_TRUE(publish.status().ok());
+    publish.get();
+
+    publisher->stop();
+
+    auto events = drain_until_count(subscriber, 2);
+    ASSERT_EQ(events.size(), 2u);
+    EXPECT_EQ(events[0].type, axon::kv::SubscriptionEventType::kPublished);
+    EXPECT_EQ(events[1].type, axon::kv::SubscriptionEventType::kOwnerLost);
+    EXPECT_EQ(events[1].key, "gamma");
+    EXPECT_EQ(events[1].owner_node_id, "sub-publisher-c");
+
+    subscriber->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, UnsubscribeStopsFutureSubscriptionEvents) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto publisher = KVNode::create(cfg);
+    auto subscriber = KVNode::create(cfg);
+    ASSERT_TRUE(publisher->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:26031",
+        .node_id = "sub-publisher-d",
+    }).ok());
+    ASSERT_TRUE(subscriber->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:26032",
+        .node_id = "sub-subscriber-d",
+    }).ok());
+
+    auto subscribe = subscriber->subscribe("delta");
+    ASSERT_TRUE(subscribe.status().ok());
+    subscribe.get();
+
+    const std::string first = "value-five";
+    auto publish = publisher->publish("delta", first.data(), first.size());
+    ASSERT_TRUE(publish.status().ok());
+    publish.get();
+
+    auto first_events = drain_until_count(subscriber, 1);
+    ASSERT_EQ(first_events.size(), 1u);
+    EXPECT_EQ(first_events[0].type, axon::kv::SubscriptionEventType::kPublished);
+
+    auto unsubscribe = subscriber->unsubscribe("delta");
+    ASSERT_TRUE(unsubscribe.status().ok());
+    unsubscribe.get();
+
+    const std::string second = "value-six";
+    auto update = publisher->publish("delta", second.data(), second.size());
+    ASSERT_TRUE(update.status().ok());
+    update.get();
+
+    auto events = drain_until_count(subscriber, 1, std::chrono::milliseconds(250));
+    EXPECT_TRUE(events.empty());
+
+    subscriber->stop();
+    publisher->stop();
     server->stop();
 }
 
@@ -502,23 +731,23 @@ TEST(KvNodeIntegrationTest, PushPublishesOnTarget) {
 
     ASSERT_TRUE(sender->start(NodeConfig{
         .server_addr = server->address(),
-        .local_data_addr = "127.0.0.1:25001",
+        .local_data_addr = "127.0.0.1:0",
         .node_id = "push-sender",
     }).ok());
     ASSERT_TRUE(target->start(NodeConfig{
         .server_addr = server->address(),
-        .local_data_addr = "127.0.0.1:25002",
+        .local_data_addr = "127.0.0.1:0",
         .node_id = "push-target",
     }).ok());
     ASSERT_TRUE(reader->start(NodeConfig{
         .server_addr = server->address(),
-        .local_data_addr = "127.0.0.1:25003",
+        .local_data_addr = "127.0.0.1:0",
         .node_id = "push-reader",
     }).ok());
 
     const std::string value = "rdma-pushed-value";
     auto push = sender->push("push-target", "pushed-key", value.data(), value.size());
-    ASSERT_TRUE(push.status().ok());
+    ASSERT_TRUE(push.status().ok()) << push.status().message();
     push.get();
 
     auto fetched = reader->fetch("pushed-key");
@@ -547,13 +776,13 @@ TEST(KvNodeIntegrationTest, PushFailsWhenTargetNodeIsUnknown) {
     ASSERT_NE(sender, nullptr);
     ASSERT_TRUE(sender->start(NodeConfig{
         .server_addr = server->address(),
-        .local_data_addr = "127.0.0.1:23011",
+        .local_data_addr = "127.0.0.1:0",
         .node_id = "push-sender-missing",
     }).ok());
 
     const std::string value = "missing-target";
     auto push = sender->push("no-such-node", "missing-key", value.data(), value.size());
-    EXPECT_FALSE(push.status().ok());
+    EXPECT_FALSE(push.status().ok()) << "push unexpectedly succeeded";
 
     sender->stop();
     server->stop();
@@ -573,18 +802,18 @@ TEST(KvNodeIntegrationTest, PushFailsWhenPayloadExceedsInboxCapacity) {
 
     ASSERT_TRUE(sender->start(NodeConfig{
         .server_addr = server->address(),
-        .local_data_addr = "127.0.0.1:23012",
+        .local_data_addr = "127.0.0.1:0",
         .node_id = "push-sender-big",
     }).ok());
     ASSERT_TRUE(target->start(NodeConfig{
         .server_addr = server->address(),
-        .local_data_addr = "127.0.0.1:23013",
+        .local_data_addr = "127.0.0.1:0",
         .node_id = "push-target-big",
     }).ok());
 
     std::string big_value(70 * 1024, 'x');
     auto push = sender->push("push-target-big", "too-big-key", big_value.data(), big_value.size());
-    EXPECT_FALSE(push.status().ok());
+    EXPECT_FALSE(push.status().ok()) << "push unexpectedly succeeded";
 
     target->stop();
     sender->stop();
@@ -607,23 +836,23 @@ TEST(KvNodeIntegrationTest, PushCoexistsWithPublish) {
 
     ASSERT_TRUE(sender->start(NodeConfig{
         .server_addr = server->address(),
-        .local_data_addr = "127.0.0.1:24021",
+        .local_data_addr = "127.0.0.1:0",
         .node_id = "push-sender-coexist",
     }).ok());
     ASSERT_TRUE(target->start(NodeConfig{
         .server_addr = server->address(),
-        .local_data_addr = "127.0.0.1:24022",
+        .local_data_addr = "127.0.0.1:0",
         .node_id = "push-target-coexist",
     }).ok());
     ASSERT_TRUE(reader->start(NodeConfig{
         .server_addr = server->address(),
-        .local_data_addr = "127.0.0.1:24023",
+        .local_data_addr = "127.0.0.1:0",
         .node_id = "push-reader-coexist",
     }).ok());
 
     const std::string pushed = "pushed-value";
     auto push = sender->push("push-target-coexist", "pushed-key-2", pushed.data(), pushed.size());
-    ASSERT_TRUE(push.status().ok());
+    ASSERT_TRUE(push.status().ok()) << push.status().message();
     push.get();
 
     const std::string local = "published-value";

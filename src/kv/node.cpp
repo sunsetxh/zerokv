@@ -94,6 +94,9 @@ struct KVNode::Impl {
     int push_listen_fd_ = -1;
     std::string push_control_addr_;
     std::thread push_accept_thread_;
+    int subscription_listen_fd_ = -1;
+    std::string subscription_control_addr_;
+    std::thread subscription_accept_thread_;
     MemoryRegion::Ptr push_inbox_region_;
     RemoteKey push_inbox_rkey_;
     size_t push_inbox_capacity_ = kDefaultPushInboxCapacity;
@@ -107,10 +110,12 @@ struct KVNode::Impl {
     std::mutex control_mu_;  // Serializes control-plane request/response operations.
     std::mutex published_mu_;
     std::mutex peer_mu_;
+    std::mutex subscription_mu_;
     std::mutex metrics_mu_;
     std::unordered_map<std::string, PublishedObject> published_;
     std::unordered_map<std::string, Endpoint::Ptr> peer_eps_;
     std::vector<Endpoint::Ptr> inbound_eps_;
+    std::vector<SubscriptionEvent> subscription_events_;
     std::atomic<uint64_t> next_request_id_{1};
     std::optional<PublishMetrics> last_publish_metrics_;
     std::optional<FetchMetrics> last_fetch_metrics_;
@@ -131,6 +136,7 @@ struct KVNode::Impl {
         req.control_addr.clear();
         req.data_addr = local_data_addr_;
         req.push_control_addr = push_control_addr_;
+        req.subscription_control_addr = subscription_control_addr_;
         req.push_inbox_remote_addr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(push_inbox_region_->address()));
         req.push_inbox_rkey = push_inbox_rkey_.data;
         req.push_inbox_capacity = static_cast<uint64_t>(push_inbox_capacity_);
@@ -338,6 +344,92 @@ struct KVNode::Impl {
         auto resp = detail::decode_unpublish_response(response_payload);
         if (!resp.has_value()) {
             return Status(ErrorCode::kInternalError, "failed to decode unpublish response");
+        }
+        return status_from_msg(resp->status, resp->message, ErrorCode::kInternalError);
+    }
+
+    Status subscribe_remote(const std::string& key) {
+        std::lock_guard<std::mutex> lock(control_mu_);
+        if (control_fd_ < 0) {
+            return Status(ErrorCode::kConnectionReset, "control connection is closed");
+        }
+
+        detail::SubscribeRequest req;
+        req.subscriber_node_id = node_id_;
+        req.key = key;
+
+        const uint64_t request_id = next_request_id_.fetch_add(1);
+        if (!detail::send_frame(control_fd_, detail::MsgType::kSubscribe, request_id, detail::encode(req))) {
+            return Status(ErrorCode::kConnectionReset, "failed to send subscribe request");
+        }
+
+        detail::MsgHeader header;
+        std::vector<uint8_t> response_payload;
+        if (!detail::recv_frame(control_fd_, &header, &response_payload)) {
+            return Status(ErrorCode::kConnectionReset, "failed to read subscribe response");
+        }
+        if (header.request_id != request_id) {
+            return Status(ErrorCode::kInternalError, "subscribe response request_id mismatch");
+        }
+
+        const auto type = static_cast<detail::MsgType>(header.type);
+        if (type == detail::MsgType::kError) {
+            auto err = detail::decode_error_response(response_payload);
+            if (!err.has_value()) {
+                return Status(ErrorCode::kInternalError, "failed to decode subscribe error response");
+            }
+            return status_from_msg(err->status, err->message, ErrorCode::kInternalError);
+        }
+        if (type != detail::MsgType::kSubscribeResp) {
+            return Status(ErrorCode::kInternalError, "unexpected subscribe response type");
+        }
+
+        auto resp = detail::decode_subscribe_response(response_payload);
+        if (!resp.has_value()) {
+            return Status(ErrorCode::kInternalError, "failed to decode subscribe response");
+        }
+        return status_from_msg(resp->status, resp->message, ErrorCode::kInternalError);
+    }
+
+    Status unsubscribe_remote(const std::string& key) {
+        std::lock_guard<std::mutex> lock(control_mu_);
+        if (control_fd_ < 0) {
+            return Status(ErrorCode::kConnectionReset, "control connection is closed");
+        }
+
+        detail::UnsubscribeRequest req;
+        req.subscriber_node_id = node_id_;
+        req.key = key;
+
+        const uint64_t request_id = next_request_id_.fetch_add(1);
+        if (!detail::send_frame(control_fd_, detail::MsgType::kUnsubscribe, request_id, detail::encode(req))) {
+            return Status(ErrorCode::kConnectionReset, "failed to send unsubscribe request");
+        }
+
+        detail::MsgHeader header;
+        std::vector<uint8_t> response_payload;
+        if (!detail::recv_frame(control_fd_, &header, &response_payload)) {
+            return Status(ErrorCode::kConnectionReset, "failed to read unsubscribe response");
+        }
+        if (header.request_id != request_id) {
+            return Status(ErrorCode::kInternalError, "unsubscribe response request_id mismatch");
+        }
+
+        const auto type = static_cast<detail::MsgType>(header.type);
+        if (type == detail::MsgType::kError) {
+            auto err = detail::decode_error_response(response_payload);
+            if (!err.has_value()) {
+                return Status(ErrorCode::kInternalError, "failed to decode unsubscribe error response");
+            }
+            return status_from_msg(err->status, err->message, ErrorCode::kInternalError);
+        }
+        if (type != detail::MsgType::kUnsubscribeResp) {
+            return Status(ErrorCode::kInternalError, "unexpected unsubscribe response type");
+        }
+
+        auto resp = detail::decode_unsubscribe_response(response_payload);
+        if (!resp.has_value()) {
+            return Status(ErrorCode::kInternalError, "failed to decode unsubscribe response");
         }
         return status_from_msg(resp->status, resp->message, ErrorCode::kInternalError);
     }
@@ -688,6 +780,61 @@ struct KVNode::Impl {
             serve_push_connection(conn.fd);
         }
     }
+
+    void serve_subscription_connection(int fd) {
+        detail::MsgHeader header;
+        std::vector<uint8_t> payload;
+        if (!detail::recv_frame(fd, &header, &payload)) {
+            detail::TcpTransport::close_fd(&fd);
+            return;
+        }
+
+        if (static_cast<detail::MsgType>(header.type) != detail::MsgType::kSubscriptionEvent) {
+            detail::TcpTransport::close_fd(&fd);
+            return;
+        }
+
+        auto event = detail::decode_subscription_event(payload);
+        if (event.has_value()) {
+            SubscriptionEvent local;
+            switch (event->type) {
+                case detail::SubscriptionEventType::kPublished:
+                    local.type = SubscriptionEventType::kPublished;
+                    break;
+                case detail::SubscriptionEventType::kUpdated:
+                    local.type = SubscriptionEventType::kUpdated;
+                    break;
+                case detail::SubscriptionEventType::kUnpublished:
+                    local.type = SubscriptionEventType::kUnpublished;
+                    break;
+                case detail::SubscriptionEventType::kOwnerLost:
+                    local.type = SubscriptionEventType::kOwnerLost;
+                    break;
+            }
+            local.key = std::move(event->key);
+            local.owner_node_id = std::move(event->owner_node_id);
+            local.version = event->version;
+
+            std::lock_guard<std::mutex> lock(subscription_mu_);
+            subscription_events_.push_back(std::move(local));
+        }
+
+        detail::TcpTransport::close_fd(&fd);
+    }
+
+    void subscription_accept_loop() {
+        while (running_.load()) {
+            std::string error;
+            auto conn = detail::TcpTransport::accept(subscription_listen_fd_, &error);
+            if (conn.fd < 0) {
+                if (!running_.load()) {
+                    break;
+                }
+                continue;
+            }
+            serve_subscription_connection(conn.fd);
+        }
+    }
 };
 
 KVNode::KVNode(const axon::Config& cfg) : impl_(std::make_unique<Impl>(cfg)) {}
@@ -759,15 +906,34 @@ Status KVNode::start(const NodeConfig& cfg) {
         impl_->node_id_.clear();
         return Status(ErrorCode::kConnectionRefused, error.empty() ? "failed to create push control listener" : error);
     }
+    impl_->subscription_listen_fd_ = detail::TcpTransport::listen(
+        make_ephemeral_bind_addr(impl_->local_data_addr_), &impl_->subscription_control_addr_, &error);
+    if (impl_->subscription_listen_fd_ < 0) {
+        detail::TcpTransport::close_fd(&impl_->push_listen_fd_);
+        impl_->listener_->close();
+        impl_->listener_.reset();
+        impl_->worker_.reset();
+        impl_->context_.reset();
+        impl_->push_inbox_region_.reset();
+        impl_->node_id_.clear();
+        return Status(ErrorCode::kConnectionRefused,
+                      error.empty() ? "failed to create subscription listener" : error);
+    }
     impl_->running_.store(true);
     impl_->push_accept_thread_ = std::thread([impl = impl_.get()]() { impl->push_accept_loop(); });
+    impl_->subscription_accept_thread_ =
+        std::thread([impl = impl_.get()]() { impl->subscription_accept_loop(); });
     impl_->worker_->start_progress_thread();
 
     impl_->control_fd_ = detail::TcpTransport::connect(impl_->server_addr_, &error);
     if (impl_->control_fd_ < 0) {
         detail::TcpTransport::close_fd(&impl_->push_listen_fd_);
+        detail::TcpTransport::close_fd(&impl_->subscription_listen_fd_);
         if (impl_->push_accept_thread_.joinable()) {
             impl_->push_accept_thread_.join();
+        }
+        if (impl_->subscription_accept_thread_.joinable()) {
+            impl_->subscription_accept_thread_.join();
         }
         impl_->running_.store(false);
         impl_->listener_->close();
@@ -784,8 +950,12 @@ Status KVNode::start(const NodeConfig& cfg) {
     if (!status.ok()) {
         detail::TcpTransport::close_fd(&impl_->control_fd_);
         detail::TcpTransport::close_fd(&impl_->push_listen_fd_);
+        detail::TcpTransport::close_fd(&impl_->subscription_listen_fd_);
         if (impl_->push_accept_thread_.joinable()) {
             impl_->push_accept_thread_.join();
+        }
+        if (impl_->subscription_accept_thread_.joinable()) {
+            impl_->subscription_accept_thread_.join();
         }
         impl_->running_.store(false);
         impl_->listener_->close();
@@ -809,8 +979,12 @@ void KVNode::stop() {
         detail::TcpTransport::close_fd(&impl_->control_fd_);
     }
     detail::TcpTransport::close_fd(&impl_->push_listen_fd_);
+    detail::TcpTransport::close_fd(&impl_->subscription_listen_fd_);
     if (impl_->push_accept_thread_.joinable()) {
         impl_->push_accept_thread_.join();
+    }
+    if (impl_->subscription_accept_thread_.joinable()) {
+        impl_->subscription_accept_thread_.join();
     }
     {
         std::lock_guard<std::mutex> lock(impl_->published_mu_);
@@ -863,6 +1037,16 @@ std::optional<FetchMetrics> KVNode::last_fetch_metrics() const {
     }
     std::lock_guard<std::mutex> lock(impl_->metrics_mu_);
     return impl_->last_fetch_metrics_;
+}
+
+std::vector<SubscriptionEvent> KVNode::drain_subscription_events() {
+    if (!impl_) {
+        return {};
+    }
+    std::lock_guard<std::mutex> lock(impl_->subscription_mu_);
+    std::vector<SubscriptionEvent> drained;
+    drained.swap(impl_->subscription_events_);
+    return drained;
 }
 
 Future<void> KVNode::publish(const std::string& key, const void* data, size_t size) {
@@ -1045,6 +1229,11 @@ Future<void> KVNode::push(const std::string& target_node_id,
     if (!put.status().ok()) {
         return Future<void>::make_error(put.status());
     }
+    auto flush = peer->flush();
+    flush.get();
+    if (!flush.status().ok()) {
+        return Future<void>::make_error(flush.status());
+    }
 
     std::string error;
     int fd = detail::TcpTransport::connect(target->push_control_addr, &error);
@@ -1081,6 +1270,38 @@ Future<void> KVNode::push(const std::string& target_node_id,
         return Future<void>::make_error(Status(ErrorCode::kInternalError, "failed to decode push commit response"));
     }
     auto status = status_from_msg(resp->status, resp->message, ErrorCode::kInternalError);
+    if (!status.ok()) {
+        return Future<void>::make_error(status);
+    }
+    return Future<void>::make_ready();
+}
+
+Future<void> KVNode::subscribe(const std::string& key) {
+    if (!impl_ || !impl_->running_.load()) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument, "KVNode is not running"));
+    }
+    if (key.empty()) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument, "subscribe key must not be empty"));
+    }
+    auto status = impl_->subscribe_remote(key);
+    if (!status.ok()) {
+        return Future<void>::make_error(status);
+    }
+    return Future<void>::make_ready();
+}
+
+Future<void> KVNode::unsubscribe(const std::string& key) {
+    if (!impl_ || !impl_->running_.load()) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument, "KVNode is not running"));
+    }
+    if (key.empty()) {
+        return Future<void>::make_error(
+            Status(ErrorCode::kInvalidArgument, "unsubscribe key must not be empty"));
+    }
+    auto status = impl_->unsubscribe_remote(key);
     if (!status.ok()) {
         return Future<void>::make_error(status);
     }

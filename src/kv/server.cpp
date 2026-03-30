@@ -72,6 +72,32 @@ detail::UnpublishResponse unpublish_response(detail::MsgStatus status, std::stri
     return resp;
 }
 
+detail::SubscribeResponse subscribe_response(detail::MsgStatus status, std::string message = {}) {
+    detail::SubscribeResponse resp;
+    resp.status = status;
+    resp.message = std::move(message);
+    return resp;
+}
+
+detail::UnsubscribeResponse unsubscribe_response(detail::MsgStatus status, std::string message = {}) {
+    detail::UnsubscribeResponse resp;
+    resp.status = status;
+    resp.message = std::move(message);
+    return resp;
+}
+
+detail::SubscriptionEvent make_subscription_event(detail::SubscriptionEventType type,
+                                                  std::string key,
+                                                  std::string owner_node_id,
+                                                  uint64_t version) {
+    detail::SubscriptionEvent event;
+    event.type = type;
+    event.key = std::move(key);
+    event.owner_node_id = std::move(owner_node_id);
+    event.version = version;
+    return event;
+}
+
 detail::ErrorResponse error_response(detail::MsgStatus status, std::string message) {
     detail::ErrorResponse resp;
     resp.status = status;
@@ -101,6 +127,29 @@ struct KVServer::Impl {
     std::unordered_map<uint64_t, std::unique_ptr<Session>> sessions_;
     std::atomic<uint64_t> next_session_id_{1};
 
+    void fan_out_event(const detail::SubscriptionEvent& event) {
+        const auto subscribers = store_.subscribers_for(event.key);
+        for (const auto& subscriber_node_id : subscribers) {
+            auto node = store_.get_node(subscriber_node_id);
+            if (!node.has_value() ||
+                node->state != detail::NodeInfo::State::kAlive ||
+                node->subscription_control_addr.empty()) {
+                continue;
+            }
+
+            std::string error;
+            int fd = detail::TcpTransport::connect(node->subscription_control_addr, &error);
+            if (fd < 0) {
+                continue;
+            }
+            (void)detail::send_frame(fd,
+                                     detail::MsgType::kSubscriptionEvent,
+                                     0,
+                                     detail::encode(event));
+            detail::TcpTransport::close_fd(&fd);
+        }
+    }
+
     Status handle_register_node(const detail::RegisterNodeRequest& req,
                                 detail::RegisterNodeResponse& resp) {
         detail::NodeInfo node;
@@ -108,6 +157,7 @@ struct KVServer::Impl {
         node.control_addr = req.control_addr;
         node.data_addr = req.data_addr;
         node.push_control_addr = req.push_control_addr;
+        node.subscription_control_addr = req.subscription_control_addr;
         node.push_inbox_remote_addr = req.push_inbox_remote_addr;
         node.push_inbox_rkey = req.push_inbox_rkey;
         node.push_inbox_capacity = req.push_inbox_capacity;
@@ -126,9 +176,25 @@ struct KVServer::Impl {
         if (meta.version == 0) {
             meta.version = 1;
         }
+        const auto existing = store_.get(meta.key);
         if (!store_.put(std::move(meta))) {
             resp = put_meta_response(detail::MsgStatus::kInvalidRequest, "metadata rejected");
             return Status(ErrorCode::kInvalidArgument, "metadata rejected");
+        }
+        auto updated = store_.get(req.metadata.key);
+        if (updated.has_value()) {
+            if (!existing.has_value()) {
+                fan_out_event(make_subscription_event(detail::SubscriptionEventType::kPublished,
+                                                      updated->key,
+                                                      updated->owner_node_id,
+                                                      updated->version));
+            } else if (existing->owner_node_id == updated->owner_node_id &&
+                       updated->version > existing->version) {
+                fan_out_event(make_subscription_event(detail::SubscriptionEventType::kUpdated,
+                                                      updated->key,
+                                                      updated->owner_node_id,
+                                                      updated->version));
+            }
         }
         resp = put_meta_response(detail::MsgStatus::kOk);
         return Status::OK();
@@ -173,11 +239,36 @@ struct KVServer::Impl {
     }
 
     Status handle_unpublish(const detail::UnpublishRequest& req, detail::UnpublishResponse& resp) {
+        auto existing = store_.get(req.key);
         if (!store_.erase(req.key, req.owner_node_id)) {
             resp = unpublish_response(detail::MsgStatus::kNotFound, "key not owned");
             return Status(ErrorCode::kInvalidArgument, "key not owned");
         }
+        if (existing.has_value()) {
+            fan_out_event(make_subscription_event(detail::SubscriptionEventType::kUnpublished,
+                                                  existing->key,
+                                                  existing->owner_node_id,
+                                                  existing->version));
+        }
         resp = unpublish_response(detail::MsgStatus::kOk);
+        return Status::OK();
+    }
+
+    Status handle_subscribe(const detail::SubscribeRequest& req, detail::SubscribeResponse& resp) {
+        if (!store_.subscribe(req.subscriber_node_id, req.key)) {
+            resp = subscribe_response(detail::MsgStatus::kInvalidRequest, "subscription rejected");
+            return Status(ErrorCode::kInvalidArgument, "subscription rejected");
+        }
+        resp = subscribe_response(detail::MsgStatus::kOk);
+        return Status::OK();
+    }
+
+    Status handle_unsubscribe(const detail::UnsubscribeRequest& req, detail::UnsubscribeResponse& resp) {
+        if (!store_.unsubscribe(req.subscriber_node_id, req.key)) {
+            resp = unsubscribe_response(detail::MsgStatus::kInvalidRequest, "subscription not found");
+            return Status(ErrorCode::kInvalidArgument, "subscription not found");
+        }
+        resp = unsubscribe_response(detail::MsgStatus::kOk);
         return Status::OK();
     }
 
@@ -269,6 +360,32 @@ struct KVServer::Impl {
                     (void)detail::send_frame(fd, detail::MsgType::kUnpublishResp, header.request_id, bytes);
                     break;
                 }
+                case detail::MsgType::kSubscribe: {
+                    auto req = detail::decode_subscribe_request(payload);
+                    if (!req.has_value()) {
+                        auto err = detail::encode(error_response(detail::MsgStatus::kInvalidRequest, "bad subscribe request"));
+                        (void)detail::send_frame(fd, detail::MsgType::kError, header.request_id, err);
+                        break;
+                    }
+                    detail::SubscribeResponse resp;
+                    (void)handle_subscribe(*req, resp);
+                    auto bytes = detail::encode(resp);
+                    (void)detail::send_frame(fd, detail::MsgType::kSubscribeResp, header.request_id, bytes);
+                    break;
+                }
+                case detail::MsgType::kUnsubscribe: {
+                    auto req = detail::decode_unsubscribe_request(payload);
+                    if (!req.has_value()) {
+                        auto err = detail::encode(error_response(detail::MsgStatus::kInvalidRequest, "bad unsubscribe request"));
+                        (void)detail::send_frame(fd, detail::MsgType::kError, header.request_id, err);
+                        break;
+                    }
+                    detail::UnsubscribeResponse resp;
+                    (void)handle_unsubscribe(*req, resp);
+                    auto bytes = detail::encode(resp);
+                    (void)detail::send_frame(fd, detail::MsgType::kUnsubscribeResp, header.request_id, bytes);
+                    break;
+                }
                 case detail::MsgType::kHeartbeat: {
                     auto req = detail::decode_heartbeat_request(payload);
                     if (req.has_value()) {
@@ -293,7 +410,14 @@ struct KVServer::Impl {
             }
         }
         if (!node_id.empty()) {
+            auto lost_keys = store_.list_by_owner(node_id);
             (void)store_.mark_node_dead(node_id);
+            for (const auto& meta : lost_keys) {
+                fan_out_event(make_subscription_event(detail::SubscriptionEventType::kOwnerLost,
+                                                      meta.key,
+                                                      meta.owner_node_id,
+                                                      meta.version));
+            }
         }
         detail::TcpTransport::close_fd(&fd);
     }

@@ -68,6 +68,12 @@ Behavior:
 
 This is deliberately a pull-from-local-queue API, not a callback API.
 
+Subscription validity rules:
+
+- empty key is rejected
+- subscribing to a key that does not currently exist is allowed
+- this allows a subscriber to observe the first future publish for that key
+
 ## Key Constraint
 
 Current `KVNode` uses a single synchronous `control_fd_` for request-response
@@ -232,6 +238,9 @@ Server remains the metadata authority and event source:
 - fan out lifecycle events to current subscribers via short-lived TCP sends
 
 Server does not persist events and does not queue undeliverable notifications.
+Phase 1 fan-out runs synchronously in the server session thread that processes
+the triggering metadata update. No background fan-out worker is introduced in
+this phase.
 
 ## Subscriber Responsibilities
 
@@ -290,6 +299,8 @@ can follow after local behavior is stable.
 - event queue is in-memory only
 - dedicated subscription listener adds another address to node registration
 - no wildcard subscriptions yet
+- fan-out uses one short-lived TCP connection per event per subscriber, so this
+  design is not intended for high-rate notification workloads yet
 
 These are acceptable trade-offs for the first subscription phase because the
 goal is to validate metadata-driven event fan-out, not to build a durable

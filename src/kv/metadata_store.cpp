@@ -42,6 +42,15 @@ bool MetadataStore::mark_node_dead(const std::string& node_id) {
             ++key_it;
         }
     }
+    for (auto sub_it = subscriptions_.begin(); sub_it != subscriptions_.end();) {
+        auto& subscribers = sub_it->second;
+        subscribers.erase(std::remove(subscribers.begin(), subscribers.end(), node_id), subscribers.end());
+        if (subscribers.empty()) {
+            sub_it = subscriptions_.erase(sub_it);
+        } else {
+            ++sub_it;
+        }
+    }
     return true;
 }
 
@@ -102,6 +111,55 @@ bool MetadataStore::erase(const std::string& key, const std::string& owner_node_
     }
     keys_.erase(it);
     return true;
+}
+
+bool MetadataStore::subscribe(const std::string& subscriber_node_id, const std::string& key) {
+    if (subscriber_node_id.empty() || key.empty()) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(mu_);
+    auto node_it = nodes_.find(subscriber_node_id);
+    if (node_it == nodes_.end() || node_it->second.state != NodeInfo::State::kAlive) {
+        return false;
+    }
+    auto& subscribers = subscriptions_[key];
+    if (std::find(subscribers.begin(), subscribers.end(), subscriber_node_id) == subscribers.end()) {
+        subscribers.push_back(subscriber_node_id);
+        std::sort(subscribers.begin(), subscribers.end());
+    }
+    return true;
+}
+
+bool MetadataStore::unsubscribe(const std::string& subscriber_node_id, const std::string& key) {
+    if (subscriber_node_id.empty() || key.empty()) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = subscriptions_.find(key);
+    if (it == subscriptions_.end()) {
+        return false;
+    }
+    auto& subscribers = it->second;
+    auto sub_it = std::find(subscribers.begin(), subscribers.end(), subscriber_node_id);
+    if (sub_it == subscribers.end()) {
+        return false;
+    }
+    subscribers.erase(sub_it);
+    if (subscribers.empty()) {
+        subscriptions_.erase(it);
+    }
+    return true;
+}
+
+std::vector<std::string> MetadataStore::subscribers_for(const std::string& key) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = subscriptions_.find(key);
+    if (it == subscriptions_.end()) {
+        return {};
+    }
+    return it->second;
 }
 
 std::vector<std::string> MetadataStore::list_keys() const {

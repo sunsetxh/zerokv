@@ -47,6 +47,20 @@ struct FetchMetrics {
     bool ok = false;
 };
 
+enum class SubscriptionEventType {
+    kPublished,
+    kUpdated,
+    kUnpublished,
+    kOwnerLost,
+};
+
+struct SubscriptionEvent {
+    SubscriptionEventType type = SubscriptionEventType::kPublished;
+    std::string key;
+    std::string owner_node_id;
+    uint64_t version = 0;
+};
+
 struct ServerConfig {
     std::string listen_addr;
 };
@@ -99,6 +113,7 @@ public:
     [[nodiscard]] size_t published_count() const noexcept;
     [[nodiscard]] std::optional<PublishMetrics> last_publish_metrics() const;
     [[nodiscard]] std::optional<FetchMetrics> last_fetch_metrics() const;
+    [[nodiscard]] std::vector<SubscriptionEvent> drain_subscription_events();
 
     /// Copy-publish semantics: the implementation owns the data after the
     /// returned future completes, so the caller may release the input buffer.
@@ -125,6 +140,9 @@ public:
                             const std::string& key,
                             const void* data,
                             size_t size);
+
+    axon::Future<void> subscribe(const std::string& key);
+    axon::Future<void> unsubscribe(const std::string& key);
 
     axon::Future<void> unpublish(const std::string& key);
 

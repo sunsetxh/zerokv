@@ -27,6 +27,11 @@ enum class MsgType : uint16_t {
     kGetPushTargetResp = 11,
     kPushCommit = 12,
     kPushCommitResp = 13,
+    kSubscribe = 14,
+    kSubscribeResp = 15,
+    kUnsubscribe = 16,
+    kUnsubscribeResp = 17,
+    kSubscriptionEvent = 18,
     kError = 255,
 };
 
@@ -62,6 +67,7 @@ struct RegisterNodeRequest {
     std::string control_addr;
     std::string data_addr;
     std::string push_control_addr;
+    std::string subscription_control_addr;
     uint64_t push_inbox_remote_addr = 0;
     std::vector<uint8_t> push_inbox_rkey;
     uint64_t push_inbox_capacity = 0;
@@ -119,6 +125,40 @@ struct PushCommitResponse {
     std::string message;
 };
 
+enum class SubscriptionEventType : uint16_t {
+    kPublished = 1,
+    kUpdated = 2,
+    kUnpublished = 3,
+    kOwnerLost = 4,
+};
+
+struct SubscribeRequest {
+    std::string subscriber_node_id;
+    std::string key;
+};
+
+struct SubscribeResponse {
+    MsgStatus status = MsgStatus::kOk;
+    std::string message;
+};
+
+struct UnsubscribeRequest {
+    std::string subscriber_node_id;
+    std::string key;
+};
+
+struct UnsubscribeResponse {
+    MsgStatus status = MsgStatus::kOk;
+    std::string message;
+};
+
+struct SubscriptionEvent {
+    SubscriptionEventType type = SubscriptionEventType::kPublished;
+    std::string key;
+    std::string owner_node_id;
+    uint64_t version = 0;
+};
+
 struct UnpublishRequest {
     std::string key;
     std::string owner_node_id;
@@ -174,6 +214,21 @@ decode_message(std::span<const uint8_t> data);
 
 [[nodiscard]] std::vector<uint8_t> encode(const PushCommitResponse& msg);
 [[nodiscard]] std::optional<PushCommitResponse> decode_push_commit_response(std::span<const uint8_t> data);
+
+[[nodiscard]] std::vector<uint8_t> encode(const SubscribeRequest& msg);
+[[nodiscard]] std::optional<SubscribeRequest> decode_subscribe_request(std::span<const uint8_t> data);
+
+[[nodiscard]] std::vector<uint8_t> encode(const SubscribeResponse& msg);
+[[nodiscard]] std::optional<SubscribeResponse> decode_subscribe_response(std::span<const uint8_t> data);
+
+[[nodiscard]] std::vector<uint8_t> encode(const UnsubscribeRequest& msg);
+[[nodiscard]] std::optional<UnsubscribeRequest> decode_unsubscribe_request(std::span<const uint8_t> data);
+
+[[nodiscard]] std::vector<uint8_t> encode(const UnsubscribeResponse& msg);
+[[nodiscard]] std::optional<UnsubscribeResponse> decode_unsubscribe_response(std::span<const uint8_t> data);
+
+[[nodiscard]] std::vector<uint8_t> encode(const SubscriptionEvent& msg);
+[[nodiscard]] std::optional<SubscriptionEvent> decode_subscription_event(std::span<const uint8_t> data);
 
 [[nodiscard]] std::vector<uint8_t> encode(const UnpublishRequest& msg);
 [[nodiscard]] std::optional<UnpublishRequest> decode_unpublish_request(std::span<const uint8_t> data);

@@ -55,6 +55,7 @@ TEST(KvServerIntegrationTest, HandlesRegisterPutLookupAndUnpublish) {
     reg.control_addr = "127.0.0.1:19000";
     reg.data_addr = "127.0.0.1:20000";
     reg.push_control_addr = "127.0.0.1:21000";
+    reg.subscription_control_addr = "127.0.0.1:22000";
     reg.push_inbox_remote_addr = 0x3000;
     reg.push_inbox_rkey = {9, 9, 9, 9};
     reg.push_inbox_capacity = 8192;
@@ -140,6 +141,7 @@ TEST(KvServerIntegrationTest, ReturnsPushTargetMetadata) {
     reg.control_addr = "127.0.0.1:19010";
     reg.data_addr = "127.0.0.1:20010";
     reg.push_control_addr = "127.0.0.1:21010";
+    reg.subscription_control_addr = "127.0.0.1:22010";
     reg.push_inbox_remote_addr = 0x4400;
     reg.push_inbox_rkey = {7, 7, 7};
     reg.push_inbox_capacity = 2048;
@@ -165,6 +167,99 @@ TEST(KvServerIntegrationTest, ReturnsPushTargetMetadata) {
     EXPECT_EQ(get_resp->push_inbox_remote_addr, 0x4400u);
     EXPECT_EQ(get_resp->push_inbox_rkey, (std::vector<uint8_t>{7, 7, 7}));
     EXPECT_EQ(get_resp->push_inbox_capacity, 2048u);
+
+    proto::TcpTransport::close_fd(&fd);
+    server->stop();
+}
+
+TEST(KvServerIntegrationTest, HandlesSubscribeAndUnsubscribe) {
+    auto cfg = axon::Config::builder()
+                   .set_transport("tcp")
+                   .build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    EXPECT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    std::string error;
+    int fd = proto::TcpTransport::connect(server->address(), &error);
+    ASSERT_GE(fd, 0) << error;
+
+    proto::RegisterNodeRequest reg;
+    reg.node_id = "subscriber-a";
+    reg.control_addr = "127.0.0.1:19020";
+    reg.data_addr = "127.0.0.1:20020";
+    reg.push_control_addr = "127.0.0.1:21020";
+    reg.subscription_control_addr = "127.0.0.1:22020";
+    reg.push_inbox_remote_addr = 0x5500;
+    reg.push_inbox_rkey = {5, 5, 5};
+    reg.push_inbox_capacity = 4096;
+    ASSERT_TRUE(proto::TcpTransport::send_all(fd, make_frame(proto::MsgType::kRegisterNode, 21, reg)));
+    auto [reg_header, reg_payload] = recv_frame(fd);
+    EXPECT_EQ(static_cast<proto::MsgType>(reg_header.type), proto::MsgType::kRegisterNodeResp);
+
+    proto::SubscribeRequest sub;
+    sub.subscriber_node_id = "subscriber-a";
+    sub.key = "alpha";
+    ASSERT_TRUE(proto::TcpTransport::send_all(fd, make_frame(proto::MsgType::kSubscribe, 22, sub)));
+
+    auto [sub_header, sub_payload] = recv_frame(fd);
+    EXPECT_EQ(static_cast<proto::MsgType>(sub_header.type), proto::MsgType::kSubscribeResp);
+    auto sub_resp = proto::decode_subscribe_response(sub_payload);
+    ASSERT_TRUE(sub_resp.has_value());
+    EXPECT_EQ(sub_resp->status, proto::MsgStatus::kOk);
+
+    proto::UnsubscribeRequest unsub;
+    unsub.subscriber_node_id = "subscriber-a";
+    unsub.key = "alpha";
+    ASSERT_TRUE(proto::TcpTransport::send_all(fd, make_frame(proto::MsgType::kUnsubscribe, 23, unsub)));
+
+    auto [unsub_header, unsub_payload] = recv_frame(fd);
+    EXPECT_EQ(static_cast<proto::MsgType>(unsub_header.type), proto::MsgType::kUnsubscribeResp);
+    auto unsub_resp = proto::decode_unsubscribe_response(unsub_payload);
+    ASSERT_TRUE(unsub_resp.has_value());
+    EXPECT_EQ(unsub_resp->status, proto::MsgStatus::kOk);
+
+    proto::TcpTransport::close_fd(&fd);
+    server->stop();
+}
+
+TEST(KvServerIntegrationTest, RejectsSubscribeWithEmptyKey) {
+    auto cfg = axon::Config::builder()
+                   .set_transport("tcp")
+                   .build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_NE(server, nullptr);
+    EXPECT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    std::string error;
+    int fd = proto::TcpTransport::connect(server->address(), &error);
+    ASSERT_GE(fd, 0) << error;
+
+    proto::RegisterNodeRequest reg;
+    reg.node_id = "subscriber-b";
+    reg.control_addr = "127.0.0.1:19021";
+    reg.data_addr = "127.0.0.1:20021";
+    reg.push_control_addr = "127.0.0.1:21021";
+    reg.subscription_control_addr = "127.0.0.1:22021";
+    reg.push_inbox_remote_addr = 0x5600;
+    reg.push_inbox_rkey = {6, 6, 6};
+    reg.push_inbox_capacity = 4096;
+    ASSERT_TRUE(proto::TcpTransport::send_all(fd, make_frame(proto::MsgType::kRegisterNode, 24, reg)));
+    auto [reg_header, reg_payload] = recv_frame(fd);
+    EXPECT_EQ(static_cast<proto::MsgType>(reg_header.type), proto::MsgType::kRegisterNodeResp);
+
+    proto::SubscribeRequest sub;
+    sub.subscriber_node_id = "subscriber-b";
+    sub.key.clear();
+    ASSERT_TRUE(proto::TcpTransport::send_all(fd, make_frame(proto::MsgType::kSubscribe, 25, sub)));
+
+    auto [sub_header, sub_payload] = recv_frame(fd);
+    EXPECT_EQ(static_cast<proto::MsgType>(sub_header.type), proto::MsgType::kSubscribeResp);
+    auto sub_resp = proto::decode_subscribe_response(sub_payload);
+    ASSERT_TRUE(sub_resp.has_value());
+    EXPECT_EQ(sub_resp->status, proto::MsgStatus::kInvalidRequest);
 
     proto::TcpTransport::close_fd(&fd);
     server->stop();

@@ -117,6 +117,7 @@ bool decode_register_node_request_impl(Decoder& dec, RegisterNodeRequest& msg) {
            dec.str(msg.control_addr) &&
            dec.str(msg.data_addr) &&
            dec.str(msg.push_control_addr) &&
+           dec.str(msg.subscription_control_addr) &&
            dec.u64(msg.push_inbox_remote_addr) &&
            dec.blob(msg.push_inbox_rkey) &&
            dec.u64(msg.push_inbox_capacity);
@@ -191,6 +192,39 @@ bool decode_push_commit_response_impl(Decoder& dec, PushCommitResponse& msg) {
     return dec.u16(status) &&
            dec.str(msg.message) &&
            (msg.status = static_cast<MsgStatus>(status), true);
+}
+
+bool decode_subscribe_request_impl(Decoder& dec, SubscribeRequest& msg) {
+    return dec.str(msg.subscriber_node_id) &&
+           dec.str(msg.key);
+}
+
+bool decode_subscribe_response_impl(Decoder& dec, SubscribeResponse& msg) {
+    uint16_t status = 0;
+    return dec.u16(status) &&
+           dec.str(msg.message) &&
+           (msg.status = static_cast<MsgStatus>(status), true);
+}
+
+bool decode_unsubscribe_request_impl(Decoder& dec, UnsubscribeRequest& msg) {
+    return dec.str(msg.subscriber_node_id) &&
+           dec.str(msg.key);
+}
+
+bool decode_unsubscribe_response_impl(Decoder& dec, UnsubscribeResponse& msg) {
+    uint16_t status = 0;
+    return dec.u16(status) &&
+           dec.str(msg.message) &&
+           (msg.status = static_cast<MsgStatus>(status), true);
+}
+
+bool decode_subscription_event_impl(Decoder& dec, SubscriptionEvent& msg) {
+    uint16_t type = 0;
+    return dec.u16(type) &&
+           dec.str(msg.key) &&
+           dec.str(msg.owner_node_id) &&
+           dec.u64(msg.version) &&
+           (msg.type = static_cast<SubscriptionEventType>(type), true);
 }
 
 bool decode_unpublish_request_impl(Decoder& dec, UnpublishRequest& msg) {
@@ -276,6 +310,7 @@ std::vector<uint8_t> encode(const RegisterNodeRequest& msg) {
     enc.str(msg.control_addr);
     enc.str(msg.data_addr);
     enc.str(msg.push_control_addr);
+    enc.str(msg.subscription_control_addr);
     enc.u64(msg.push_inbox_remote_addr);
     enc.blob(msg.push_inbox_rkey);
     enc.u64(msg.push_inbox_capacity);
@@ -393,6 +428,63 @@ std::vector<uint8_t> encode(const PushCommitResponse& msg) {
 
 std::optional<PushCommitResponse> decode_push_commit_response(std::span<const uint8_t> data) {
     return decode_checked<PushCommitResponse>(data, decode_push_commit_response_impl);
+}
+
+std::vector<uint8_t> encode(const SubscribeRequest& msg) {
+    Encoder enc;
+    enc.str(msg.subscriber_node_id);
+    enc.str(msg.key);
+    return std::move(enc).finish();
+}
+
+std::optional<SubscribeRequest> decode_subscribe_request(std::span<const uint8_t> data) {
+    return decode_checked<SubscribeRequest>(data, decode_subscribe_request_impl);
+}
+
+std::vector<uint8_t> encode(const SubscribeResponse& msg) {
+    Encoder enc;
+    enc.u16(static_cast<uint16_t>(msg.status));
+    enc.str(msg.message);
+    return std::move(enc).finish();
+}
+
+std::optional<SubscribeResponse> decode_subscribe_response(std::span<const uint8_t> data) {
+    return decode_checked<SubscribeResponse>(data, decode_subscribe_response_impl);
+}
+
+std::vector<uint8_t> encode(const UnsubscribeRequest& msg) {
+    Encoder enc;
+    enc.str(msg.subscriber_node_id);
+    enc.str(msg.key);
+    return std::move(enc).finish();
+}
+
+std::optional<UnsubscribeRequest> decode_unsubscribe_request(std::span<const uint8_t> data) {
+    return decode_checked<UnsubscribeRequest>(data, decode_unsubscribe_request_impl);
+}
+
+std::vector<uint8_t> encode(const UnsubscribeResponse& msg) {
+    Encoder enc;
+    enc.u16(static_cast<uint16_t>(msg.status));
+    enc.str(msg.message);
+    return std::move(enc).finish();
+}
+
+std::optional<UnsubscribeResponse> decode_unsubscribe_response(std::span<const uint8_t> data) {
+    return decode_checked<UnsubscribeResponse>(data, decode_unsubscribe_response_impl);
+}
+
+std::vector<uint8_t> encode(const SubscriptionEvent& msg) {
+    Encoder enc;
+    enc.u16(static_cast<uint16_t>(msg.type));
+    enc.str(msg.key);
+    enc.str(msg.owner_node_id);
+    enc.u64(msg.version);
+    return std::move(enc).finish();
+}
+
+std::optional<SubscriptionEvent> decode_subscription_event(std::span<const uint8_t> data) {
+    return decode_checked<SubscriptionEvent>(data, decode_subscription_event_impl);
 }
 
 std::vector<uint8_t> encode(const UnpublishRequest& msg) {
