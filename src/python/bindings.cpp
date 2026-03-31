@@ -19,7 +19,7 @@
 #include <nanobind/stl/optional.h>
 #include <nanobind/ndarray.h>
 
-#include "axon/axon.h"
+#include "zerokv/axon.h"
 
 namespace nb = nanobind;
 using namespace nb::literals;

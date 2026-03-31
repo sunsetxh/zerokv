@@ -13,8 +13,8 @@
 ///   auto pool   = axon::MemoryPool::create(ctx, 64 * 1024 * 1024);
 ///   auto buf    = pool->allocate(4096);
 
-#include "axon/common.h"
-#include "axon/config.h"
+#include "zerokv/common.h"
+#include "zerokv/config.h"
 
 #include <cstddef>
 #include <functional>

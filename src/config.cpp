@@ -1,6 +1,6 @@
-#include "axon/config.h"
+#include "zerokv/config.h"
 
-#include "axon/common.h"
+#include "zerokv/common.h"
 
 #include <ucp/api/ucp.h>
 

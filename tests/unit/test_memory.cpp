@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "axon/config.h"
-#include "axon/memory.h"
+#include "zerokv/config.h"
+#include "zerokv/memory.h"
 
 using namespace axon;
 

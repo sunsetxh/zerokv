@@ -6,7 +6,7 @@
 ///
 ///   g++ -shared -fPIC -o libaxon_plugin_nccl.so nccl_plugin.cpp -lnccl -lcudart
 
-#include "axon/plugin/plugin.h"
+#include "zerokv/plugin/plugin.h"
 
 #include <cassert>
 #include <mutex>

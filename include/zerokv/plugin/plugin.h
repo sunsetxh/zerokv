@@ -15,8 +15,8 @@
 ///   load .so  ->  axon_plugin_create()  ->  init(ctx)  ->  create_comm()
 ///   ->  allreduce / broadcast / ...  ->  destroy_comm()  ->  shutdown()
 
-#include "axon/common.h"
-#include "axon/memory.h"
+#include "zerokv/common.h"
+#include "zerokv/memory.h"
 
 #include <functional>
 #include <memory>

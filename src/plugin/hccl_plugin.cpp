@@ -12,7 +12,7 @@
 ///   g++ -shared -fPIC -o libaxon_plugin_hccl.so hccl_plugin.cpp \
 ///       -lhccl -lascendcl -I${ASCEND_HOME}/include
 
-#include "axon/plugin/plugin.h"
+#include "zerokv/plugin/plugin.h"
 
 #include <cassert>
 #include <cstring>

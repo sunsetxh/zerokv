@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "axon/config.h"
-#include "axon/worker.h"
-#include "axon/endpoint.h"
+#include "zerokv/config.h"
+#include "zerokv/worker.h"
+#include "zerokv/endpoint.h"
 
 #include <thread>
 #include <chrono>

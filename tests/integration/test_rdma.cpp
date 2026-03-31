@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include "axon/config.h"
-#include "axon/worker.h"
-#include "axon/endpoint.h"
-#include "axon/memory.h"
+#include "zerokv/config.h"
+#include "zerokv/worker.h"
+#include "zerokv/endpoint.h"
+#include "zerokv/memory.h"
 
 #include <vector>
 #include <cstring>

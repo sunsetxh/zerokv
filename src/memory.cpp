@@ -1,7 +1,7 @@
-#include "axon/memory.h"
+#include "zerokv/memory.h"
 
-#include "axon/config.h"
-#include "axon/common.h"
+#include "zerokv/config.h"
+#include "zerokv/common.h"
 
 #include <ucp/api/ucp.h>
 
