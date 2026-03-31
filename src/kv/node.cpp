@@ -1682,6 +1682,170 @@ FetchToManyResult KVNode::fetch_to_many(const std::vector<FetchToItem>& items,
     return result;
 }
 
+BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
+    const std::vector<FetchToItem>& items,
+    const axon::MemoryRegion::Ptr& local_region,
+    std::chrono::milliseconds timeout) {
+    BatchFetchToResult result;
+    auto layout_status = validate_fetch_to_many_layout(items, local_region);
+    layout_status.throw_if_error();
+    if (!impl_ || !impl_->running_.load()) {
+        Status(ErrorCode::kConnectionRefused, "KVNode is not running").throw_if_error();
+    }
+
+    std::vector<std::string> ordered_keys;
+    ordered_keys.reserve(items.size());
+    std::unordered_map<std::string, std::vector<const FetchToItem*>> placements_by_key;
+    for (const auto& item : items) {
+        auto& placements = placements_by_key[item.key];
+        if (placements.empty()) {
+            ordered_keys.push_back(item.key);
+        }
+        placements.push_back(&item);
+    }
+
+    enum class PlacementAttemptState {
+        kSuccess,
+        kPending,
+        kFailed,
+    };
+
+    auto append_placements = [](std::vector<std::string>* out,
+                                const std::vector<const FetchToItem*>& placements) {
+        for (const auto* placement : placements) {
+            out->push_back(placement->key);
+        }
+    };
+
+    auto try_fetch_key_placements =
+        [this, &placements_by_key, &local_region](const std::string& key) -> PlacementAttemptState {
+        Status status;
+        auto meta = impl_->get_meta(key, &status, nullptr);
+        if (!meta.has_value()) {
+            if (status.code() == ErrorCode::kInvalidArgument) {
+                return PlacementAttemptState::kPending;
+            }
+            return PlacementAttemptState::kFailed;
+        }
+
+        const auto& placements = placements_by_key.at(key);
+        for (const auto* placement : placements) {
+            auto fetch = impl_->fetch_to_impl(*meta, local_region, placement->length, placement->offset, nullptr);
+            if (!fetch.status().ok()) {
+                return PlacementAttemptState::kFailed;
+            }
+            fetch.get();
+            if (!fetch.status().ok()) {
+                return PlacementAttemptState::kFailed;
+            }
+        }
+        return PlacementAttemptState::kSuccess;
+    };
+
+    std::unordered_set<std::string> pending;
+    std::vector<std::string> subscribed_here;
+
+    for (const auto& key : ordered_keys) {
+        auto attempt = try_fetch_key_placements(key);
+        if (attempt == PlacementAttemptState::kSuccess) {
+            append_placements(&result.completed, placements_by_key.at(key));
+            continue;
+        }
+        if (attempt == PlacementAttemptState::kFailed) {
+            append_placements(&result.failed, placements_by_key.at(key));
+            continue;
+        }
+        pending.insert(key);
+        auto subscribe_future = subscribe(key);
+        if (!subscribe_future.status().ok()) {
+            for (const auto& subscribed_key : subscribed_here) {
+                auto unsubscribe_future = unsubscribe(subscribed_key);
+                if (unsubscribe_future.status().ok()) {
+                    unsubscribe_future.get();
+                }
+            }
+            subscribe_future.status().throw_if_error();
+        }
+        subscribe_future.get();
+        subscribed_here.push_back(key);
+    }
+
+    const auto deadline = SteadyClock::now() + timeout;
+    auto next_lookup = SteadyClock::now();
+    while (!pending.empty() && SteadyClock::now() < deadline) {
+        auto drained = drain_subscription_events();
+        std::vector<SubscriptionEvent> unmatched;
+        for (auto& event : drained) {
+            if (!pending.count(event.key)) {
+                unmatched.push_back(std::move(event));
+                continue;
+            }
+            if (event.type != SubscriptionEventType::kPublished &&
+                event.type != SubscriptionEventType::kUpdated) {
+                unmatched.push_back(std::move(event));
+                continue;
+            }
+            auto attempt = try_fetch_key_placements(event.key);
+            if (attempt == PlacementAttemptState::kSuccess) {
+                append_placements(&result.completed, placements_by_key.at(event.key));
+                pending.erase(event.key);
+            } else if (attempt == PlacementAttemptState::kFailed) {
+                append_placements(&result.failed, placements_by_key.at(event.key));
+                pending.erase(event.key);
+            }
+        }
+        if (!unmatched.empty()) {
+            std::lock_guard<std::mutex> lock(impl_->subscription_mu_);
+            impl_->subscription_events_.insert(
+                impl_->subscription_events_.end(),
+                std::make_move_iterator(unmatched.begin()),
+                std::make_move_iterator(unmatched.end()));
+        }
+
+        if (!pending.empty() && SteadyClock::now() >= next_lookup) {
+            std::vector<std::string> completed_keys;
+            std::vector<std::string> failed_keys;
+            for (const auto& key : pending) {
+                auto attempt = try_fetch_key_placements(key);
+                if (attempt == PlacementAttemptState::kSuccess) {
+                    completed_keys.push_back(key);
+                } else if (attempt == PlacementAttemptState::kFailed) {
+                    failed_keys.push_back(key);
+                }
+            }
+            for (const auto& key : completed_keys) {
+                append_placements(&result.completed, placements_by_key.at(key));
+                pending.erase(key);
+            }
+            for (const auto& key : failed_keys) {
+                append_placements(&result.failed, placements_by_key.at(key));
+                pending.erase(key);
+            }
+            next_lookup = SteadyClock::now() + kWaitLookupRetryInterval;
+        }
+
+        if (!pending.empty()) {
+            std::this_thread::sleep_for(kWaitPollSleep);
+        }
+    }
+
+    for (const auto& key : ordered_keys) {
+        if (pending.count(key)) {
+            result.timed_out.push_back(key);
+        }
+    }
+    result.completed_all = (result.completed.size() == items.size());
+
+    for (const auto& key : subscribed_here) {
+        auto unsubscribe_future = unsubscribe(key);
+        if (unsubscribe_future.status().ok()) {
+            unsubscribe_future.get();
+        }
+    }
+
+    return result;
+}
+
 Future<void> KVNode::push(const std::string& target_node_id,
                           const std::string& key,
                           const void* data,

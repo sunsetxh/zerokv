@@ -54,6 +54,13 @@ struct BatchFetchResult {
     bool completed = false;
 };
 
+struct BatchFetchToResult {
+    std::vector<std::string> completed;
+    std::vector<std::string> failed;
+    std::vector<std::string> timed_out;
+    bool completed_all = false;
+};
+
 struct PublishMetrics {
     uint64_t total_us = 0;
     uint64_t prepare_region_us = 0;
@@ -184,6 +191,11 @@ public:
 
     FetchToManyResult fetch_to_many(const std::vector<FetchToItem>& items,
                                     const axon::MemoryRegion::Ptr& local_region);
+
+    BatchFetchToResult subscribe_and_fetch_to_once_many(
+        const std::vector<FetchToItem>& items,
+        const axon::MemoryRegion::Ptr& local_region,
+        std::chrono::milliseconds timeout);
 
     axon::Future<void> push(const std::string& target_node_id,
                             const std::string& key,

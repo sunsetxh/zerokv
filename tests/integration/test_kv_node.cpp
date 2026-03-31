@@ -1286,6 +1286,275 @@ TEST(KvNodeIntegrationTest, FetchToManyRejectsEmptyItems) {
     EXPECT_THROW((void)node->fetch_to_many({}, region), std::system_error);
 }
 
+TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyReturnsImmediatelyForExistingKeys) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto publisher = KVNode::create(cfg);
+    auto reader = KVNode::create(cfg);
+    ASSERT_TRUE(publisher->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22041",
+        .node_id = "publisher-sub-fetchto",
+    }).ok());
+    ASSERT_TRUE(reader->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22042",
+        .node_id = "reader-sub-fetchto",
+    }).ok());
+
+    const std::string value_a = "sft-existing-a";
+    const std::string value_b = "sft-existing-b";
+    auto publish_a = publisher->publish("sft-existing-a", value_a.data(), value_a.size());
+    auto publish_b = publisher->publish("sft-existing-b", value_b.data(), value_b.size());
+    ASSERT_TRUE(publish_a.status().ok());
+    ASSERT_TRUE(publish_b.status().ok());
+    publish_a.get();
+    publish_b.get();
+
+    auto ctx = axon::Context::create(cfg);
+    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    ASSERT_NE(region, nullptr);
+
+    auto result = reader->subscribe_and_fetch_to_once_many({
+        {.key = "sft-existing-a", .length = value_a.size(), .offset = 0},
+        {.key = "sft-existing-b", .length = value_b.size(), .offset = 32},
+    }, region, std::chrono::milliseconds(500));
+
+    EXPECT_TRUE(result.completed_all);
+    EXPECT_EQ(result.completed.size(), 2u);
+    EXPECT_TRUE(result.failed.empty());
+    EXPECT_TRUE(result.timed_out.empty());
+    const auto* bytes = static_cast<const char*>(region->address());
+    EXPECT_EQ(std::memcmp(bytes, value_a.data(), value_a.size()), 0);
+    EXPECT_EQ(std::memcmp(bytes + 32, value_b.data(), value_b.size()), 0);
+
+    reader->stop();
+    publisher->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyWaitsForMissingKey) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto publisher = KVNode::create(cfg);
+    auto reader = KVNode::create(cfg);
+    ASSERT_TRUE(publisher->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22043",
+        .node_id = "publisher-sub-fetchto-wait",
+    }).ok());
+    ASSERT_TRUE(reader->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22044",
+        .node_id = "reader-sub-fetchto-wait",
+    }).ok());
+
+    auto ctx = axon::Context::create(cfg);
+    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    ASSERT_NE(region, nullptr);
+
+    const std::string value = "waited-zero-copy";
+    std::thread publish_thread([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        auto publish = publisher->publish("sft-wait-key", value.data(), value.size());
+        ASSERT_TRUE(publish.status().ok());
+        publish.get();
+    });
+
+    auto result = reader->subscribe_and_fetch_to_once_many({
+        {.key = "sft-wait-key", .length = value.size(), .offset = 8},
+    }, region, std::chrono::milliseconds(1000));
+
+    publish_thread.join();
+
+    EXPECT_TRUE(result.completed_all);
+    EXPECT_EQ(result.completed.size(), 1u);
+    EXPECT_TRUE(result.failed.empty());
+    EXPECT_TRUE(result.timed_out.empty());
+    EXPECT_EQ(std::memcmp(static_cast<const char*>(region->address()) + 8, value.data(), value.size()), 0);
+
+    reader->stop();
+    publisher->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyReturnsPartialTimeout) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto publisher = KVNode::create(cfg);
+    auto reader = KVNode::create(cfg);
+    ASSERT_TRUE(publisher->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22045",
+        .node_id = "publisher-sub-fetchto-timeout",
+    }).ok());
+    ASSERT_TRUE(reader->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22046",
+        .node_id = "reader-sub-fetchto-timeout",
+    }).ok());
+
+    const std::string value = "only-one-key";
+    auto publish = publisher->publish("sft-present", value.data(), value.size());
+    ASSERT_TRUE(publish.status().ok());
+    publish.get();
+
+    auto ctx = axon::Context::create(cfg);
+    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    ASSERT_NE(region, nullptr);
+
+    auto result = reader->subscribe_and_fetch_to_once_many({
+        {.key = "sft-present", .length = value.size(), .offset = 0},
+        {.key = "sft-missing", .length = 16, .offset = 32},
+    }, region, std::chrono::milliseconds(150));
+
+    EXPECT_FALSE(result.completed_all);
+    EXPECT_EQ(result.completed.size(), 1u);
+    EXPECT_TRUE(result.failed.empty());
+    EXPECT_EQ(result.timed_out.size(), 1u);
+    EXPECT_EQ(result.timed_out[0], "sft-missing");
+    EXPECT_EQ(std::memcmp(static_cast<const char*>(region->address()), value.data(), value.size()), 0);
+
+    reader->stop();
+    publisher->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyWritesDuplicateKeyToMultipleOffsets) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto publisher = KVNode::create(cfg);
+    auto reader = KVNode::create(cfg);
+    ASSERT_TRUE(publisher->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22047",
+        .node_id = "publisher-sub-fetchto-dup",
+    }).ok());
+    ASSERT_TRUE(reader->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22048",
+        .node_id = "reader-sub-fetchto-dup",
+    }).ok());
+
+    auto ctx = axon::Context::create(cfg);
+    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    ASSERT_NE(region, nullptr);
+
+    const std::string value = "dup-zero-copy";
+    std::thread publish_thread([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        auto publish = publisher->publish("sft-dup-key", value.data(), value.size());
+        ASSERT_TRUE(publish.status().ok());
+        publish.get();
+    });
+
+    auto result = reader->subscribe_and_fetch_to_once_many({
+        {.key = "sft-dup-key", .length = value.size(), .offset = 0},
+        {.key = "sft-dup-key", .length = value.size(), .offset = 32},
+    }, region, std::chrono::milliseconds(1000));
+
+    publish_thread.join();
+
+    EXPECT_TRUE(result.completed_all);
+    EXPECT_EQ(result.completed.size(), 2u);
+    EXPECT_TRUE(result.failed.empty());
+    EXPECT_TRUE(result.timed_out.empty());
+    const auto* bytes = static_cast<const char*>(region->address());
+    EXPECT_EQ(std::memcmp(bytes, value.data(), value.size()), 0);
+    EXPECT_EQ(std::memcmp(bytes + 32, value.data(), value.size()), 0);
+
+    reader->stop();
+    publisher->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyPreservesPreExistingSubscriptions) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto publisher = KVNode::create(cfg);
+    auto reader = KVNode::create(cfg);
+    ASSERT_TRUE(publisher->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22049",
+        .node_id = "publisher-sub-fetchto-preserve",
+    }).ok());
+    ASSERT_TRUE(reader->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22050",
+        .node_id = "reader-sub-fetchto-preserve",
+    }).ok());
+
+    auto subscribe_future = reader->subscribe("sft-preserve");
+    ASSERT_TRUE(subscribe_future.status().ok());
+    subscribe_future.get();
+
+    auto ctx = axon::Context::create(cfg);
+    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    ASSERT_NE(region, nullptr);
+
+    const std::string value = "preserve-subscription";
+    std::thread publish_thread([&]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        auto publish = publisher->publish("sft-preserve", value.data(), value.size());
+        ASSERT_TRUE(publish.status().ok());
+        publish.get();
+    });
+
+    auto result = reader->subscribe_and_fetch_to_once_many({
+        {.key = "sft-preserve", .length = value.size(), .offset = 0},
+    }, region, std::chrono::milliseconds(1000));
+
+    publish_thread.join();
+    ASSERT_TRUE(result.completed_all);
+
+    auto unpublish = publisher->unpublish("sft-preserve");
+    ASSERT_TRUE(unpublish.status().ok());
+    unpublish.get();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    auto events = drain_until_count(reader, 1, std::chrono::milliseconds(500));
+    ASSERT_FALSE(events.empty());
+    EXPECT_EQ(events.back().type, axon::kv::SubscriptionEventType::kUnpublished);
+    EXPECT_EQ(events.back().key, "sft-preserve");
+
+    auto unsubscribe_future = reader->unsubscribe("sft-preserve");
+    ASSERT_TRUE(unsubscribe_future.status().ok());
+    unsubscribe_future.get();
+
+    reader->stop();
+    publisher->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyRejectsInvalidLayoutBeforeWaiting) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto node = KVNode::create(cfg);
+    auto ctx = axon::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = axon::MemoryRegion::allocate(ctx, 64);
+    ASSERT_NE(region, nullptr);
+
+    EXPECT_THROW((void)node->subscribe_and_fetch_to_once_many({
+        {.key = "invalid-a", .length = 16, .offset = 0},
+        {.key = "invalid-b", .length = 16, .offset = 8},
+    }, region, std::chrono::milliseconds(100)), std::system_error);
+}
+
 TEST(KvNodeIntegrationTest, FetchFailsAfterUnpublish) {
     auto cfg = axon::Config::builder().set_transport("tcp").build();
 
