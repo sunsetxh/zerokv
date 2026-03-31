@@ -3,7 +3,7 @@
 ///
 /// Build:  g++ -std=c++20 -I../include cpp_usage.cpp -laxon -lpthread -o demo
 
-#include "zerokv/axon.h"
+#include "zerokv/zerokv.h"
 
 #include <iostream>
 #include <thread>

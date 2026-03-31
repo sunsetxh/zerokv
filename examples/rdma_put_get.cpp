@@ -8,10 +8,10 @@
 /// The server registers memory and sends its rkey to the client.
 /// The client performs RDMA put, then RDMA get to verify, then atomic ops.
 
-#include <axon/config.h>
-#include <axon/worker.h>
-#include <axon/endpoint.h>
-#include <axon/memory.h>
+#include <zerokv/config.h>
+#include <zerokv/worker.h>
+#include <zerokv/endpoint.h>
+#include <zerokv/memory.h>
 
 #include <iostream>
 #include <vector>

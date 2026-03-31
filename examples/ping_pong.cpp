@@ -8,9 +8,9 @@
 /// Transport is controlled via --transport flag (default: tcp).
 /// For RDMA: ./ping_pong --transport rdma --connect 10.0.0.1:13337
 
-#include <axon/config.h>
-#include <axon/worker.h>
-#include <axon/endpoint.h>
+#include <zerokv/config.h>
+#include <zerokv/worker.h>
+#include <zerokv/endpoint.h>
 
 #include <iostream>
 #include <vector>
