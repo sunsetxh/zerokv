@@ -6,6 +6,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstddef>
+#include <cstring>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -61,6 +62,7 @@ int main(int argc, char** argv) {
     std::string owner_node_id;
     std::string sizes_arg;
     std::string transport = "tcp";
+    std::string publish_api = "copy";
     std::optional<uint64_t> explicit_iters;
     uint64_t total_bytes = 1ull << 30;
     uint64_t warmup = 0;
@@ -83,6 +85,8 @@ int main(int argc, char** argv) {
             sizes_arg = argv[++i];
         } else if (arg == "--transport" && i + 1 < argc) {
             transport = argv[++i];
+        } else if (arg == "--publish-api" && i + 1 < argc) {
+            publish_api = argv[++i];
         } else if (arg == "--iters" && i + 1 < argc) {
             explicit_iters = std::stoull(argv[++i]);
         } else if (arg == "--total-bytes" && i + 1 < argc) {
@@ -104,6 +108,7 @@ int main(int argc, char** argv) {
                   << " --mode <server|hold-owner|bench-publish|bench-fetch|bench-fetch-to>"
                   << " [--listen addr] [--server-addr addr] [--data-addr addr]"
                   << " [--node-id id] [--owner-node-id id] [--sizes list]"
+                  << " [--publish-api copy|region]"
                   << " [--iters N] [--total-bytes SIZE] [--warmup N] [--transport tcp|rdma]\n";
         return 1;
     }
@@ -197,6 +202,10 @@ int main(int argc, char** argv) {
             std::cerr << "--server-addr and --data-addr are required for bench-publish mode\n";
             return 1;
         }
+        if (publish_api != "copy" && publish_api != "region") {
+            std::cerr << "--publish-api must be one of: copy, region\n";
+            return 1;
+        }
 
         auto node = KVNode::create(cfg);
         if (!node) {
@@ -230,6 +239,17 @@ int main(int argc, char** argv) {
         for (const auto size_bytes : sizes) {
             const auto iterations = detail::derive_iterations(size_bytes, explicit_iters, total_bytes);
             auto payload = make_payload(size_bytes);
+            axon::MemoryRegion::Ptr bench_region;
+            if (publish_api == "region") {
+                bench_region = axon::MemoryRegion::allocate(benchmark_ctx, payload.size());
+                if (!bench_region) {
+                    std::cerr << "publish-region benchmark failed to allocate region for size="
+                              << size_bytes << "\n";
+                    node->stop();
+                    return 1;
+                }
+                std::memcpy(bench_region->address(), payload.data(), payload.size());
+            }
 
             uint64_t total_sum = 0;
             uint64_t prepare_sum = 0;
@@ -238,7 +258,9 @@ int main(int argc, char** argv) {
 
             for (uint64_t i = 0; i < warmup; ++i) {
                 const auto key = "bench-publish-warmup-" + std::to_string(size_bytes) + "-" + std::to_string(i);
-                auto publish = node->publish(key, payload.data(), payload.size());
+                auto publish = (publish_api == "region")
+                    ? node->publish_region(key, bench_region, payload.size())
+                    : node->publish(key, payload.data(), payload.size());
                 if (!publish.status().ok()) {
                     std::cerr << "publish benchmark warmup failed: size=" << size_bytes
                               << " iter=" << i << " error=" << publish.status().message() << "\n";
@@ -258,7 +280,9 @@ int main(int argc, char** argv) {
 
             for (uint64_t i = 0; i < iterations; ++i) {
                 const auto key = "bench-publish-" + std::to_string(size_bytes) + "-" + std::to_string(i);
-                auto publish = node->publish(key, payload.data(), payload.size());
+                auto publish = (publish_api == "region")
+                    ? node->publish_region(key, bench_region, payload.size())
+                    : node->publish(key, payload.data(), payload.size());
                 if (!publish.status().ok()) {
                     std::cerr << "publish benchmark failed: size=" << size_bytes
                               << " iter=" << i << " error=" << publish.status().message() << "\n";
@@ -304,6 +328,7 @@ int main(int argc, char** argv) {
 
         std::cout << "op=publish transport=" << transport
                   << " node_id=" << node->node_id()
+                  << " publish_api=" << publish_api
                   << " total_bytes=" << total_bytes
                   << " warmup=" << warmup;
         if (explicit_iters.has_value()) {

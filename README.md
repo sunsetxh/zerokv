@@ -130,7 +130,13 @@ creating the archive.
 # Publish benchmark
 # The benchmark node itself is the owner for its temporary published keys.
 ./build/kv_bench --mode bench-publish --server-addr <server_ip>:15000 \
-  --data-addr 0.0.0.0:0 --node-id bp1 --sizes 4K,64K,1M,16M,128M \
+  --data-addr 0.0.0.0:0 --node-id bp1 --publish-api copy \
+  --sizes 4K,64K,1M,16M,128M \
+  --iters 4 --transport rdma
+
+# Zero-copy publish benchmark
+./build/kv_bench --mode bench-publish --server-addr <server_ip>:15000 \
+  --data-addr 0.0.0.0:0 --node-id bp1z --publish-api region \
   --iters 4 --transport rdma
 
 # Fetch benchmark
@@ -155,6 +161,9 @@ Accordingly:
 - `bench-fetch-to` measures the zero-copy path more directly
 - `--owner-node-id` is optional; when provided, it acts as a topology sanity
   check against the owner returned by metadata
+- `bench-publish` supports `--publish-api copy|region`
+  - `copy` uses `publish()`
+  - `region` uses `publish_region()` and is the zero-copy publish path
 
 ### Python KV example
 

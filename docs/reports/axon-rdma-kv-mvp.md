@@ -744,6 +744,17 @@ UCX_NET_DEVICES=<rdma_dev> ./kv_bench \
   --server-addr <server_ip>:15000 \
   --data-addr <client_ip>:0 \
   --node-id bench-publish \
+  --publish-api copy \
+  --sizes 4K,64K,1M,4M,16M,32M,64M,128M \
+  --iters 4 \
+  --transport rdma
+
+UCX_NET_DEVICES=<rdma_dev> ./kv_bench \
+  --mode bench-publish \
+  --server-addr <server_ip>:15000 \
+  --data-addr <client_ip>:0 \
+  --node-id bench-publish-region \
+  --publish-api region \
   --sizes 4K,64K,1M,4M,16M,32M,64M,128M \
   --iters 4 \
   --transport rdma
@@ -783,6 +794,9 @@ Notes:
 - `hold-owner` publishes stable keys named `bench-fetch-<size-bytes>`
 - `bench-publish` uses unique keys and unpublishes after each iteration to
   avoid metadata accumulation
+- `bench-publish --publish-api copy` uses `publish()`
+- `bench-publish --publish-api region` uses `publish_region()` and lets you
+  compare copy-publish vs zero-copy publish on the same size sweep
 - `--owner-node-id` is optional; if provided, the benchmark validates that the
   fetched owner matches the expected node id from metadata
 - `bench-fetch` is the application-level E2E fetch benchmark and includes the

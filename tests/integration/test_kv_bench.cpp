@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cstring>
+
 TEST(KvBenchIntegrationTest, HoldOwnerPublishesStableKeys) {
     const auto cfg = axon::Config::builder().set_transport("tcp").build();
 
@@ -50,6 +52,43 @@ TEST(KvBenchIntegrationTest, PublishBenchmarkCompletesSingleSizeSweep) {
     auto metrics = node->last_publish_metrics();
     ASSERT_TRUE(metrics.has_value());
     EXPECT_GT(metrics->total_us, 0u);
+
+    auto unpublish = node->unpublish(key);
+    ASSERT_TRUE(unpublish.status().ok());
+    unpublish.get();
+
+    node->stop();
+    server->stop();
+}
+
+TEST(KvBenchIntegrationTest, PublishRegionBenchmarkPathCompletesSingleSizeSweep) {
+    const auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = axon::kv::KVServer::create(cfg);
+    ASSERT_TRUE(server->start(axon::kv::ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto node = axon::kv::KVNode::create(cfg);
+    ASSERT_TRUE(node->start(axon::kv::NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:0",
+        .node_id = "bench-publish-region-node",
+    }).ok());
+
+    auto ctx = axon::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = axon::MemoryRegion::allocate(ctx, 4096);
+    ASSERT_NE(region, nullptr);
+    std::memset(region->address(), 0x5a, region->length());
+
+    const std::string key = "bench-publish-region-4096-0";
+    auto publish = node->publish_region(key, region, region->length());
+    ASSERT_TRUE(publish.status().ok());
+    publish.get();
+
+    auto metrics = node->last_publish_metrics();
+    ASSERT_TRUE(metrics.has_value());
+    EXPECT_GT(metrics->total_us, 0u);
+    EXPECT_TRUE(metrics->ok);
 
     auto unpublish = node->unpublish(key);
     ASSERT_TRUE(unpublish.status().ok());
