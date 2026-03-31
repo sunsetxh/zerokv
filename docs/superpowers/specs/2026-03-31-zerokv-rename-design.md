@@ -47,6 +47,7 @@ Out of scope:
 
 ### 2. C++ API Surface
 - Move public headers from `include/axon/*.h` to `include/zerokv/*.h`
+- Rename umbrella header file `include/axon/axon.h` to `include/zerokv/zerokv.h` and update all call sites accordingly
 - Replace all public/private includes:
   - `#include "axon/..."` -> `#include "zerokv/..."`
 - Rename top-level namespace:
@@ -55,6 +56,11 @@ Out of scope:
 - Plugin factory names/macros also rename consistently if they are repo-scoped identifiers:
   - `AXON_PLUGIN_EXPORT` -> `ZEROKV_PLUGIN_EXPORT`
   - `axon_plugin_create` -> `zerokv_plugin_create`
+  - any plugin shared-object discovery pattern such as `libaxon_plugin_*.so` -> `libzerokv_plugin_*.so`
+- Error category and library naming also rename consistently:
+  - `axon_category()` -> `zerokv_category()`
+  - error-category `name()` string payloads mentioning `axon` -> `zerokv`
+  - resulting shared/static library filenames `libaxon.*` -> `libzerokv.*`
 
 ### 3. Python
 - Rename package directory:
@@ -70,12 +76,15 @@ Out of scope:
 - CMake options:
   - `AXON_BUILD_STATIC` -> `ZEROKV_BUILD_STATIC`
   - `AXON_BUILD_EXAMPLES` -> `ZEROKV_BUILD_EXAMPLES`
-  - `ZEROKV_BUILD_TESTS`, `ZEROKV_BUILD_BENCHMARK`, `ZEROKV_BUILD_PYTHON`
+  - `AXON_BUILD_TESTS` -> `ZEROKV_BUILD_TESTS`
+  - `AXON_BUILD_BENCHMARK` -> `ZEROKV_BUILD_BENCHMARK`
+  - `AXON_BUILD_PYTHON` -> `ZEROKV_BUILD_PYTHON`
   - `AXON_THIRD_PARTY_DIR` -> `ZEROKV_THIRD_PARTY_DIR`
 - Runtime env vars:
   - `AXON_TRANSPORT` -> `ZEROKV_TRANSPORT`
   - `AXON_NUM_WORKERS` -> `ZEROKV_NUM_WORKERS`
   - `AXON_MEM_POOL_SIZE` -> `ZEROKV_MEM_POOL_SIZE`
+  - any other active `getenv("AXON_...")` site found by repo-wide grep must be renamed as part of the cut
 - No fallback support for old `AXON_*` names
 
 ### 5. Docs and Scripts
@@ -83,16 +92,16 @@ Out of scope:
 - Rename code references to `zerokv` where referring to package/namespace/paths
 - Update scripts and CI/build snippets to use new CMake options and package paths
 - Update README build instructions, Python examples, benchmark examples, source-package examples
+- Update active assistant/config docs such as `CLAUDE.md` and `GEMINI.md` if they contain current project-name references or build knobs
 
 ## Execution Strategy
 Perform the rename in this order to keep the tree buildable after each logical batch:
-1. CMake/project/package names
-2. Public include tree move and include updates
-3. Namespace rename across source/tests/examples
-4. Python package move and import updates
-5. Env vars / options / scripts
-6. Docs and packaging script updates
-7. Full repo grep to ensure no intentional `axon` references remain outside historical documents or vendored code
+1. CMake/project/package names plus public include tree move/include updates as one atomic batch
+2. Namespace rename across source/tests/examples
+3. Python package move and import updates
+4. Env vars / options / scripts
+5. Docs and packaging script updates
+6. Full repo grep to ensure no intentional `axon` references remain outside historical documents or vendored code
 
 ## Verification
 At minimum, after the rename:
@@ -102,11 +111,17 @@ At minimum, after the rename:
   - KV node/server integration tests
   - benchmark integration tests
   - Python syntax smoke if Python enabled
-- Grep checks:
+- Grep/content checks:
   - no `namespace axon`
   - no `#include "axon/`
   - no `import axon`
   - no `AXON_` in active code/docs/scripts except historical archived docs if intentionally preserved
+- File/path checks:
+  - `find . -path ./third_party -prune -o -path ./build -prune -o -name "*axon*" -print` should not return active source/build/runtime files
+- Install/import checks:
+  - installed package resolves with `find_package(zerokv)`
+  - Python smoke uses `import zerokv` and confirms `import axon` fails
+  - plugin loading smoke validates renamed plugin filename/factory conventions still work
 
 ## Risks
 - Large mechanical diff; easy to miss generated/package/script paths
