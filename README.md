@@ -135,12 +135,12 @@ creating the archive.
 
 # Fetch benchmark
 ./build/kv_bench --mode bench-fetch --server-addr <server_ip>:15000 \
-  --data-addr 0.0.0.0:0 --node-id bf1 --owner-node-id owner \
+  --data-addr 0.0.0.0:0 --node-id bf1 \
   --sizes 4K,64K,1M,16M,128M --iters 4 --transport rdma
 
 # Zero-copy fetch benchmark
 ./build/kv_bench --mode bench-fetch-to --server-addr <server_ip>:15000 \
-  --data-addr 0.0.0.0:0 --node-id bf1z --owner-node-id owner \
+  --data-addr 0.0.0.0:0 --node-id bf1z \
   --sizes 4K,64K,1M,16M,128M --iters 4 --transport rdma
 ```
 
@@ -153,6 +153,8 @@ Accordingly:
 
 - `bench-fetch` measures end-to-end fetch cost and includes the final result copy
 - `bench-fetch-to` measures the zero-copy path more directly
+- `--owner-node-id` is optional; when provided, it acts as a topology sanity
+  check against the owner returned by metadata
 
 ### Python KV example
 

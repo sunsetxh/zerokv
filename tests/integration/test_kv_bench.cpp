@@ -72,6 +72,8 @@ TEST(KvBenchIntegrationTest, RenderedTablesUseMiBpsHeader) {
 
     EXPECT_NE(publish_table.find("throughput_MiBps"), std::string::npos);
     EXPECT_NE(fetch_table.find("throughput_MiBps"), std::string::npos);
+    EXPECT_NE(fetch_table.find("avg_rkey_prepare_us"), std::string::npos);
+    EXPECT_NE(fetch_table.find("avg_get_submit_us"), std::string::npos);
 }
 
 TEST(KvBenchIntegrationTest, FetchToSmoke) {

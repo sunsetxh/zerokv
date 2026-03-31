@@ -437,6 +437,8 @@ NB_MODULE(_core, m) {
         .def_prop_ro("local_buffer_prepare_us", [](const axon::kv::FetchMetrics& v) { return v.local_buffer_prepare_us; })
         .def_prop_ro("get_meta_rpc_us", [](const axon::kv::FetchMetrics& v) { return v.get_meta_rpc_us; })
         .def_prop_ro("peer_connect_us", [](const axon::kv::FetchMetrics& v) { return v.peer_connect_us; })
+        .def_prop_ro("rkey_prepare_us", [](const axon::kv::FetchMetrics& v) { return v.rkey_prepare_us; })
+        .def_prop_ro("get_submit_us", [](const axon::kv::FetchMetrics& v) { return v.get_submit_us; })
         .def_prop_ro("rdma_prepare_us", [](const axon::kv::FetchMetrics& v) { return v.rdma_prepare_us; })
         .def_prop_ro("rdma_get_us", [](const axon::kv::FetchMetrics& v) { return v.rdma_get_us; })
         .def_prop_ro("result_copy_us", [](const axon::kv::FetchMetrics& v) { return v.result_copy_us; })

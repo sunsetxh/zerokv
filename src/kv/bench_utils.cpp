@@ -139,6 +139,8 @@ std::string render_fetch_rows(const std::vector<FetchBenchRow>& rows) {
         << std::setw(18) << "avg_prepare_us"
         << std::setw(22) << "avg_get_meta_rpc_us"
         << std::setw(20) << "avg_peer_connect_us"
+        << std::setw(22) << "avg_rkey_prepare_us"
+        << std::setw(20) << "avg_get_submit_us"
         << std::setw(22) << "avg_rdma_prepare_us"
         << std::setw(18) << "avg_rdma_get_us"
         << std::setw(18) << "throughput_MiBps"
@@ -154,6 +156,8 @@ std::string render_fetch_rows(const std::vector<FetchBenchRow>& rows) {
             << std::setw(18) << row.avg_prepare_us
             << std::setw(22) << row.avg_get_meta_rpc_us
             << std::setw(20) << row.avg_peer_connect_us
+            << std::setw(22) << row.avg_rkey_prepare_us
+            << std::setw(20) << row.avg_get_submit_us
             << std::setw(22) << row.avg_rdma_prepare_us
             << std::setw(18) << row.avg_rdma_get_us
             << std::setw(18) << row.throughput_MiBps

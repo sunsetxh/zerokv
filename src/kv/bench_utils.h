@@ -42,6 +42,8 @@ struct FetchBenchRow {
     double avg_prepare_us = 0.0;
     double avg_get_meta_rpc_us = 0.0;
     double avg_peer_connect_us = 0.0;
+    double avg_rkey_prepare_us = 0.0;
+    double avg_get_submit_us = 0.0;
     double avg_rdma_prepare_us = 0.0;
     double avg_rdma_get_us = 0.0;
     double throughput_MiBps = 0.0;

@@ -1040,6 +1040,9 @@ TEST(KvNodeIntegrationTest, FetchReturnsPublishedBytesAcrossNodes) {
     EXPECT_GT(metrics->get_meta_rpc_us, 0u);
     EXPECT_GT(metrics->peer_connect_us, 0u);
     EXPECT_GT(metrics->rdma_prepare_us, 0u);
+    EXPECT_GE(metrics->rkey_prepare_us, 0u);
+    EXPECT_GE(metrics->get_submit_us, 0u);
+    EXPECT_GE(metrics->rdma_prepare_us, metrics->rkey_prepare_us + metrics->get_submit_us);
     EXPECT_GT(metrics->rdma_get_us, 0u);
     EXPECT_GT(metrics->result_copy_us, 0u);
 
@@ -1091,6 +1094,9 @@ TEST(KvNodeIntegrationTest, FetchToWritesIntoCallerRegion) {
     auto metrics = reader->last_fetch_metrics();
     ASSERT_TRUE(metrics.has_value());
     EXPECT_TRUE(metrics->ok);
+    EXPECT_GE(metrics->rkey_prepare_us, 0u);
+    EXPECT_GE(metrics->get_submit_us, 0u);
+    EXPECT_GE(metrics->rdma_prepare_us, metrics->rkey_prepare_us + metrics->get_submit_us);
     EXPECT_GT(metrics->rdma_get_us, 0u);
     EXPECT_EQ(metrics->result_copy_us, 0u);
 

@@ -63,6 +63,7 @@ int main(int argc, char** argv) {
     std::string transport = "tcp";
     std::optional<uint64_t> explicit_iters;
     uint64_t total_bytes = 1ull << 30;
+    uint64_t warmup = 0;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -91,6 +92,8 @@ int main(int argc, char** argv) {
                 return 1;
             }
             total_bytes = parsed.value().front();
+        } else if (arg == "--warmup" && i + 1 < argc) {
+            warmup = std::stoull(argv[++i]);
         }
     }
 
@@ -101,7 +104,7 @@ int main(int argc, char** argv) {
                   << " --mode <server|hold-owner|bench-publish|bench-fetch|bench-fetch-to>"
                   << " [--listen addr] [--server-addr addr] [--data-addr addr]"
                   << " [--node-id id] [--owner-node-id id] [--sizes list]"
-                  << " [--iters N] [--total-bytes SIZE] [--transport tcp|rdma]\n";
+                  << " [--iters N] [--total-bytes SIZE] [--warmup N] [--transport tcp|rdma]\n";
         return 1;
     }
 
@@ -233,6 +236,26 @@ int main(int argc, char** argv) {
             uint64_t pack_sum = 0;
             uint64_t rpc_sum = 0;
 
+            for (uint64_t i = 0; i < warmup; ++i) {
+                const auto key = "bench-publish-warmup-" + std::to_string(size_bytes) + "-" + std::to_string(i);
+                auto publish = node->publish(key, payload.data(), payload.size());
+                if (!publish.status().ok()) {
+                    std::cerr << "publish benchmark warmup failed: size=" << size_bytes
+                              << " iter=" << i << " error=" << publish.status().message() << "\n";
+                    node->stop();
+                    return 1;
+                }
+                publish.get();
+
+                auto unpublish = node->unpublish(key);
+                if (!unpublish.status().ok()) {
+                    std::cerr << "unpublish warmup failed: " << unpublish.status().message() << "\n";
+                    node->stop();
+                    return 1;
+                }
+                unpublish.get();
+            }
+
             for (uint64_t i = 0; i < iterations; ++i) {
                 const auto key = "bench-publish-" + std::to_string(size_bytes) + "-" + std::to_string(i);
                 auto publish = node->publish(key, payload.data(), payload.size());
@@ -281,7 +304,8 @@ int main(int argc, char** argv) {
 
         std::cout << "op=publish transport=" << transport
                   << " node_id=" << node->node_id()
-                  << " total_bytes=" << total_bytes;
+                  << " total_bytes=" << total_bytes
+                  << " warmup=" << warmup;
         if (explicit_iters.has_value()) {
             std::cout << " iters=" << *explicit_iters;
         }
@@ -344,8 +368,44 @@ int main(int argc, char** argv) {
             uint64_t prepare_sum = 0;
             uint64_t meta_sum = 0;
             uint64_t connect_sum = 0;
+            uint64_t rkey_prepare_sum = 0;
+            uint64_t get_submit_sum = 0;
             uint64_t rdma_prepare_sum = 0;
             uint64_t rdma_get_sum = 0;
+
+            for (uint64_t i = 0; i < warmup; ++i) {
+                if (mode == "bench-fetch-to") {
+                    auto fetch = node->fetch_to(key, local_region, size_bytes, 0);
+                    if (!fetch.status().ok()) {
+                        std::cerr << "fetch-to benchmark warmup failed: size=" << size_bytes
+                                  << " iter=" << i << " error=" << fetch.status().message() << "\n";
+                        node->stop();
+                        return 1;
+                    }
+                    fetch.get();
+                } else {
+                    auto fetch = node->fetch(key);
+                    if (!fetch.status().ok()) {
+                        std::cerr << "fetch benchmark warmup failed: size=" << size_bytes
+                                  << " iter=" << i << " error=" << fetch.status().message() << "\n";
+                        node->stop();
+                        return 1;
+                    }
+                    const auto result = fetch.get();
+                    if (result.data.size() != size_bytes) {
+                        std::cerr << "fetch benchmark warmup size mismatch: expected=" << size_bytes
+                                  << " actual=" << result.data.size() << "\n";
+                        node->stop();
+                        return 1;
+                    }
+                    if (!owner_node_id.empty() && result.owner_node_id != owner_node_id) {
+                        std::cerr << "fetch benchmark warmup owner mismatch: expected=" << owner_node_id
+                                  << " actual=" << result.owner_node_id << "\n";
+                        node->stop();
+                        return 1;
+                    }
+                }
+            }
 
             for (uint64_t i = 0; i < iterations; ++i) {
                 if (mode == "bench-fetch-to") {
@@ -392,6 +452,8 @@ int main(int argc, char** argv) {
                 prepare_sum += metrics->local_buffer_prepare_us;
                 meta_sum += metrics->get_meta_rpc_us;
                 connect_sum += metrics->peer_connect_us;
+                rkey_prepare_sum += metrics->rkey_prepare_us;
+                get_submit_sum += metrics->get_submit_us;
                 rdma_prepare_sum += metrics->rdma_prepare_us;
                 rdma_get_sum += metrics->rdma_get_us;
             }
@@ -403,6 +465,8 @@ int main(int argc, char** argv) {
                 .avg_prepare_us = static_cast<double>(prepare_sum) / static_cast<double>(iterations),
                 .avg_get_meta_rpc_us = static_cast<double>(meta_sum) / static_cast<double>(iterations),
                 .avg_peer_connect_us = static_cast<double>(connect_sum) / static_cast<double>(iterations),
+                .avg_rkey_prepare_us = static_cast<double>(rkey_prepare_sum) / static_cast<double>(iterations),
+                .avg_get_submit_us = static_cast<double>(get_submit_sum) / static_cast<double>(iterations),
                 .avg_rdma_prepare_us = static_cast<double>(rdma_prepare_sum) / static_cast<double>(iterations),
                 .avg_rdma_get_us = static_cast<double>(rdma_get_sum) / static_cast<double>(iterations),
                 .throughput_MiBps = detail::throughput_mb_per_sec(
@@ -414,7 +478,8 @@ int main(int argc, char** argv) {
         std::cout << "op=" << (mode == "bench-fetch-to" ? "fetch_to" : "fetch")
                   << " transport=" << transport
                   << " node_id=" << node->node_id()
-                  << " total_bytes=" << total_bytes;
+                  << " total_bytes=" << total_bytes
+                  << " warmup=" << warmup;
         if (!owner_node_id.empty()) {
             std::cout << " owner_node_id=" << owner_node_id;
         }

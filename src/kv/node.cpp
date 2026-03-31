@@ -637,11 +637,16 @@ struct KVNode::Impl {
         }
 
         const auto prepare_start = SteadyClock::now();
+        const auto rkey_start = SteadyClock::now();
         RemoteKey rkey;
         rkey.data = meta.rkey;
+        const auto rkey_end = SteadyClock::now();
+        const auto submit_start = rkey_end;
         auto get = peer->get(local_region, local_offset, meta.remote_addr, rkey, meta.size);
         const auto prepare_end = SteadyClock::now();
         if (metrics) {
+            metrics->rkey_prepare_us = elapsed_us(rkey_start, rkey_end);
+            metrics->get_submit_us = elapsed_us(submit_start, prepare_end);
             metrics->rdma_prepare_us = elapsed_us(prepare_start, prepare_end);
         }
         const auto get_start = SteadyClock::now();

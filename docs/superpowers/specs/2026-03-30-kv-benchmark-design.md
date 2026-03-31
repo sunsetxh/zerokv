@@ -101,7 +101,6 @@ Fetch benchmark:
   --server-addr 10.0.0.1:15000 \
   --data-addr 10.0.0.3:0 \
   --node-id bench-fetch \
-  --owner-node-id owner \
   --sizes 4K,64K,1M,4M,16M,32M,64M,128M \
   --total-bytes 1G \
   --transport rdma
@@ -195,9 +194,9 @@ For each size:
 
 Owner keys are provided by the independent `hold-owner` process.
 
-`--owner-node-id` is required for operator clarity, but the benchmark itself
-still resolves the owner through normal server metadata lookup. The flag is
-used only to make the expected topology explicit in logs and usage.
+`--owner-node-id` is optional. The benchmark always resolves the owner through
+normal server metadata lookup. When `--owner-node-id` is provided, it is used
+only as a sanity check that the fetched owner matches the expected topology.
 
 ## Output
 
