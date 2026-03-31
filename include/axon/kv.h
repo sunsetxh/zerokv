@@ -29,6 +29,18 @@ struct FetchResult {
     uint64_t version = 0;
 };
 
+struct FetchToItem {
+    std::string key;
+    size_t length = 0;
+    size_t offset = 0;
+};
+
+struct FetchToManyResult {
+    std::vector<std::string> completed;
+    std::vector<std::string> failed;
+    bool all_succeeded = false;
+};
+
 struct WaitKeysResult {
     std::vector<std::string> ready;
     std::vector<std::string> timed_out;
@@ -169,6 +181,9 @@ public:
                                 const axon::MemoryRegion::Ptr& local_region,
                                 size_t length,
                                 size_t local_offset = 0);
+
+    FetchToManyResult fetch_to_many(const std::vector<FetchToItem>& items,
+                                    const axon::MemoryRegion::Ptr& local_region);
 
     axon::Future<void> push(const std::string& target_node_id,
                             const std::string& key,

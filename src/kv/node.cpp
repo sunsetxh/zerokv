@@ -74,6 +74,53 @@ std::vector<std::string> dedupe_keys(const std::vector<std::string>& keys) {
     return result;
 }
 
+struct FetchToRange {
+    size_t start = 0;
+    size_t end = 0;
+};
+
+Status validate_fetch_to_many_layout(const std::vector<FetchToItem>& items,
+                                     const axon::MemoryRegion::Ptr& region) {
+    if (!region) {
+        return Status(ErrorCode::kInvalidArgument, "local region is required");
+    }
+    if (items.empty()) {
+        return Status(ErrorCode::kInvalidArgument, "at least one fetch-to item is required");
+    }
+
+    std::vector<FetchToRange> ranges;
+    ranges.reserve(items.size());
+    for (const auto& item : items) {
+        if (item.key.empty()) {
+            return Status(ErrorCode::kInvalidArgument, "fetch-to-many key is required");
+        }
+        if (item.length == 0) {
+            return Status(ErrorCode::kInvalidArgument, "fetch-to-many length must be greater than zero");
+        }
+        if (item.offset > region->length() || item.length > region->length() - item.offset) {
+            return Status(ErrorCode::kInvalidArgument, "fetch-to-many range is out of bounds");
+        }
+        ranges.push_back(FetchToRange{
+            .start = item.offset,
+            .end = item.offset + item.length,
+        });
+    }
+
+    std::sort(ranges.begin(), ranges.end(), [](const FetchToRange& lhs, const FetchToRange& rhs) {
+        if (lhs.start != rhs.start) {
+            return lhs.start < rhs.start;
+        }
+        return lhs.end < rhs.end;
+    });
+    for (size_t i = 1; i < ranges.size(); ++i) {
+        if (ranges[i].start < ranges[i - 1].end) {
+            return Status(ErrorCode::kInvalidArgument, "fetch-to-many ranges must not overlap");
+        }
+    }
+
+    return Status::OK();
+}
+
 Status status_from_msg(detail::MsgStatus status, const std::string& message, ErrorCode fallback) {
     switch (status) {
         case detail::MsgStatus::kOk:
@@ -1605,6 +1652,34 @@ Future<void> KVNode::fetch_to(const std::string& key,
     metrics.ok = fetch.status().ok();
     impl_->record_fetch_metrics(metrics);
     return fetch;
+}
+
+FetchToManyResult KVNode::fetch_to_many(const std::vector<FetchToItem>& items,
+                                        const axon::MemoryRegion::Ptr& local_region) {
+    FetchToManyResult result;
+    auto status = validate_fetch_to_many_layout(items, local_region);
+    status.throw_if_error();
+    if (!impl_ || !impl_->running_.load()) {
+        Status(ErrorCode::kConnectionRefused, "KVNode is not running").throw_if_error();
+    }
+
+    result.completed.reserve(items.size());
+    result.failed.reserve(items.size());
+    for (const auto& item : items) {
+        auto fetch = fetch_to(item.key, local_region, item.length, item.offset);
+        if (!fetch.status().ok()) {
+            result.failed.push_back(item.key);
+            continue;
+        }
+        fetch.get();
+        if (!fetch.status().ok()) {
+            result.failed.push_back(item.key);
+            continue;
+        }
+        result.completed.push_back(item.key);
+    }
+    result.all_succeeded = result.failed.empty();
+    return result;
 }
 
 Future<void> KVNode::push(const std::string& target_node_id,

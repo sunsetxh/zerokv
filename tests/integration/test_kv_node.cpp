@@ -1105,6 +1105,187 @@ TEST(KvNodeIntegrationTest, FetchToWritesIntoCallerRegion) {
     server->stop();
 }
 
+TEST(KvNodeIntegrationTest, FetchToManyWritesMultipleKeysIntoSharedRegion) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto publisher = KVNode::create(cfg);
+    auto reader = KVNode::create(cfg);
+    ASSERT_TRUE(publisher->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22031",
+        .node_id = "publisher-fetch-to-many",
+    }).ok());
+    ASSERT_TRUE(reader->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22032",
+        .node_id = "reader-fetch-to-many",
+    }).ok());
+
+    const std::string value_a = "alpha-many";
+    const std::string value_b = "bravo-many";
+    auto publish_a = publisher->publish("many-a", value_a.data(), value_a.size());
+    auto publish_b = publisher->publish("many-b", value_b.data(), value_b.size());
+    ASSERT_TRUE(publish_a.status().ok());
+    ASSERT_TRUE(publish_b.status().ok());
+    publish_a.get();
+    publish_b.get();
+
+    auto ctx = axon::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    ASSERT_NE(region, nullptr);
+
+    auto result = reader->fetch_to_many({
+        {.key = "many-a", .length = value_a.size(), .offset = 0},
+        {.key = "many-b", .length = value_b.size(), .offset = 32},
+    }, region);
+
+    EXPECT_TRUE(result.all_succeeded);
+    EXPECT_EQ(result.completed.size(), 2u);
+    EXPECT_TRUE(result.failed.empty());
+
+    const auto* bytes = static_cast<const char*>(region->address());
+    EXPECT_EQ(std::memcmp(bytes, value_a.data(), value_a.size()), 0);
+    EXPECT_EQ(std::memcmp(bytes + 32, value_b.data(), value_b.size()), 0);
+
+    reader->stop();
+    publisher->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, FetchToManyReturnsPartialProgressOnPerKeyFailure) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto publisher = KVNode::create(cfg);
+    auto reader = KVNode::create(cfg);
+    ASSERT_TRUE(publisher->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22033",
+        .node_id = "publisher-fetch-to-many-fail",
+    }).ok());
+    ASSERT_TRUE(reader->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22034",
+        .node_id = "reader-fetch-to-many-fail",
+    }).ok());
+
+    const std::string value = "present-value";
+    auto publish = publisher->publish("present-key", value.data(), value.size());
+    ASSERT_TRUE(publish.status().ok());
+    publish.get();
+
+    auto ctx = axon::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    ASSERT_NE(region, nullptr);
+
+    auto result = reader->fetch_to_many({
+        {.key = "present-key", .length = value.size(), .offset = 0},
+        {.key = "missing-key", .length = 16, .offset = 32},
+    }, region);
+
+    EXPECT_FALSE(result.all_succeeded);
+    EXPECT_EQ(result.completed.size(), 1u);
+    EXPECT_EQ(result.failed.size(), 1u);
+    EXPECT_EQ(result.completed[0], "present-key");
+    EXPECT_EQ(result.failed[0], "missing-key");
+    EXPECT_EQ(std::memcmp(static_cast<const char*>(region->address()), value.data(), value.size()), 0);
+
+    reader->stop();
+    publisher->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, FetchToManyRejectsOverlappingRanges) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto node = KVNode::create(cfg);
+    auto ctx = axon::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = axon::MemoryRegion::allocate(ctx, 64);
+    ASSERT_NE(region, nullptr);
+
+    EXPECT_THROW((void)node->fetch_to_many({
+        {.key = "overlap-a", .length = 16, .offset = 0},
+        {.key = "overlap-b", .length = 16, .offset = 8},
+    }, region), std::system_error);
+}
+
+TEST(KvNodeIntegrationTest, FetchToManyRejectsOutOfBoundsRanges) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto node = KVNode::create(cfg);
+    auto ctx = axon::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = axon::MemoryRegion::allocate(ctx, 32);
+    ASSERT_NE(region, nullptr);
+
+    EXPECT_THROW((void)node->fetch_to_many({
+        {.key = "oob-key", .length = 16, .offset = 24},
+    }, region), std::system_error);
+}
+
+TEST(KvNodeIntegrationTest, FetchToManyAllowsDuplicateKeysAtDistinctOffsets) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto publisher = KVNode::create(cfg);
+    auto reader = KVNode::create(cfg);
+    ASSERT_TRUE(publisher->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22035",
+        .node_id = "publisher-fetch-to-many-dup",
+    }).ok());
+    ASSERT_TRUE(reader->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:22036",
+        .node_id = "reader-fetch-to-many-dup",
+    }).ok());
+
+    const std::string value = "dup-value";
+    auto publish = publisher->publish("dup-key", value.data(), value.size());
+    ASSERT_TRUE(publish.status().ok());
+    publish.get();
+
+    auto ctx = axon::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    ASSERT_NE(region, nullptr);
+
+    auto result = reader->fetch_to_many({
+        {.key = "dup-key", .length = value.size(), .offset = 0},
+        {.key = "dup-key", .length = value.size(), .offset = 32},
+    }, region);
+
+    EXPECT_TRUE(result.all_succeeded);
+    EXPECT_EQ(result.completed.size(), 2u);
+    EXPECT_TRUE(result.failed.empty());
+    const auto* bytes = static_cast<const char*>(region->address());
+    EXPECT_EQ(std::memcmp(bytes, value.data(), value.size()), 0);
+    EXPECT_EQ(std::memcmp(bytes + 32, value.data(), value.size()), 0);
+
+    reader->stop();
+    publisher->stop();
+    server->stop();
+}
+
+TEST(KvNodeIntegrationTest, FetchToManyRejectsEmptyItems) {
+    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto node = KVNode::create(cfg);
+    auto ctx = axon::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = axon::MemoryRegion::allocate(ctx, 32);
+    ASSERT_NE(region, nullptr);
+
+    EXPECT_THROW((void)node->fetch_to_many({}, region), std::system_error);
+}
+
 TEST(KvNodeIntegrationTest, FetchFailsAfterUnpublish) {
     auto cfg = axon::Config::builder().set_transport("tcp").build();
 

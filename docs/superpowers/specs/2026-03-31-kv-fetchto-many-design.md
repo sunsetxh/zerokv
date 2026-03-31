@@ -47,7 +47,7 @@ struct FetchToManyResult {
 };
 
 FetchToManyResult fetch_to_many(const std::vector<FetchToItem>& items,
-                                const MemoryRegion::Ptr& region);
+                                const axon::MemoryRegion::Ptr& region);
 ```
 
 ## Semantics
@@ -64,6 +64,11 @@ registered output region.
 Phase 1 requires the caller to provide a complete layout. AXON does not pack or
 reorder items.
 
+`length` is a caller-provided capacity bound, not the fetched object's true
+size. It must be large enough for the actual value size of the key. If the
+published value is larger than `length`, the per-key fetch fails in the normal
+`fetch_to()` path.
+
 ### `fetch_to_many`
 
 - The operation is synchronous from the caller's point of view.
@@ -71,6 +76,7 @@ reorder items.
 - Validation includes:
   - non-empty item list
   - non-empty keys
+  - non-zero lengths
   - non-null region
   - `offset + length` inside the region bounds
   - no overlapping output ranges across items
@@ -102,6 +108,9 @@ The output layout rules are strict:
 - Each item writes to `[offset, offset + length)`
 - The ranges must not overlap
 - The ranges must fit fully inside `region->length()`
+
+The first implementation should validate overlap by sorting the requested
+intervals by offset and performing a linear scan over adjacent ranges.
 
 If any rule is violated, the whole call fails before issuing any fetches.
 
@@ -159,6 +168,7 @@ Phase 1 should cover at least:
 3. overlapping layout rejection
 4. out-of-bounds layout rejection
 5. duplicate keys writing to distinct offsets
+6. empty item list rejection
 
 ## Notes
 
