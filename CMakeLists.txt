@@ -252,7 +252,10 @@ if(AXON_BUILD_TESTS)
     target_include_directories(test_kv_node PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME IntegrationKvNode COMMAND test_kv_node)
 
-    add_executable(test_kv_bench_integration tests/integration/test_kv_bench.cpp)
+    add_executable(test_kv_bench_integration
+        tests/integration/test_kv_bench.cpp
+        src/kv/bench_utils.cpp
+    )
     target_link_libraries(test_kv_bench_integration PRIVATE axon GTest::gtest GTest::gtest_main)
     target_include_directories(test_kv_bench_integration PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME IntegrationKvBench COMMAND test_kv_bench_integration)

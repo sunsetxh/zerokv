@@ -57,6 +57,7 @@ struct FetchMetrics {
     uint64_t peer_connect_us = 0;
     uint64_t rdma_prepare_us = 0;
     uint64_t rdma_get_us = 0;
+    uint64_t result_copy_us = 0;
     bool ok = false;
 };
 

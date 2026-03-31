@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
 
     if (mode.empty()) {
         std::cerr << "Usage: " << argv[0]
-                  << " --mode <server|hold-owner|bench-publish|bench-fetch>"
+                  << " --mode <server|hold-owner|bench-publish|bench-fetch|bench-fetch-to>"
                   << " [--listen addr] [--server-addr addr] [--data-addr addr]"
                   << " [--node-id id] [--owner-node-id id] [--sizes list]"
                   << " [--iters N] [--total-bytes SIZE] [--transport tcp|rdma]\n";
@@ -106,6 +106,7 @@ int main(int argc, char** argv) {
     }
 
     auto cfg = Config::builder().set_transport(transport).build();
+    auto benchmark_ctx = Context::create(cfg);
 
     if (mode == "server") {
         if (listen_addr.empty()) {
@@ -272,7 +273,7 @@ int main(int argc, char** argv) {
                 .avg_prepare_us = static_cast<double>(prepare_sum) / static_cast<double>(iterations),
                 .avg_pack_rkey_us = static_cast<double>(pack_sum) / static_cast<double>(iterations),
                 .avg_put_meta_rpc_us = static_cast<double>(rpc_sum) / static_cast<double>(iterations),
-                .throughput_MBps = detail::throughput_mb_per_sec(
+                .throughput_MiBps = detail::throughput_mb_per_sec(
                     size_bytes,
                     static_cast<double>(total_sum) / static_cast<double>(iterations)),
             });
@@ -290,9 +291,9 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    if (mode == "bench-fetch") {
+    if (mode == "bench-fetch" || mode == "bench-fetch-to") {
         if (server_addr.empty() || data_addr.empty()) {
-            std::cerr << "--server-addr and --data-addr are required for bench-fetch mode\n";
+            std::cerr << "--server-addr and --data-addr are required for fetch benchmark modes\n";
             return 1;
         }
 
@@ -328,6 +329,16 @@ int main(int argc, char** argv) {
         for (const auto size_bytes : sizes) {
             const auto iterations = detail::derive_iterations(size_bytes, explicit_iters, total_bytes);
             const auto key = "bench-fetch-" + std::to_string(size_bytes);
+            axon::MemoryRegion::Ptr local_region;
+            if (mode == "bench-fetch-to") {
+                local_region = axon::MemoryRegion::allocate(benchmark_ctx, size_bytes);
+                if (!local_region) {
+                    std::cerr << "fetch-to benchmark failed to allocate local region for size="
+                              << size_bytes << "\n";
+                    node->stop();
+                    return 1;
+                }
+            }
 
             uint64_t total_sum = 0;
             uint64_t prepare_sum = 0;
@@ -337,25 +348,36 @@ int main(int argc, char** argv) {
             uint64_t rdma_get_sum = 0;
 
             for (uint64_t i = 0; i < iterations; ++i) {
-                auto fetch = node->fetch(key);
-                if (!fetch.status().ok()) {
-                    std::cerr << "fetch benchmark failed: size=" << size_bytes
-                              << " iter=" << i << " error=" << fetch.status().message() << "\n";
-                    node->stop();
-                    return 1;
-                }
-                const auto result = fetch.get();
-                if (result.data.size() != size_bytes) {
-                    std::cerr << "fetch benchmark size mismatch: expected=" << size_bytes
-                              << " actual=" << result.data.size() << "\n";
-                    node->stop();
-                    return 1;
-                }
-                if (!owner_node_id.empty() && result.owner_node_id != owner_node_id) {
-                    std::cerr << "fetch benchmark owner mismatch: expected=" << owner_node_id
-                              << " actual=" << result.owner_node_id << "\n";
-                    node->stop();
-                    return 1;
+                if (mode == "bench-fetch-to") {
+                    auto fetch = node->fetch_to(key, local_region, size_bytes, 0);
+                    if (!fetch.status().ok()) {
+                        std::cerr << "fetch-to benchmark failed: size=" << size_bytes
+                                  << " iter=" << i << " error=" << fetch.status().message() << "\n";
+                        node->stop();
+                        return 1;
+                    }
+                    fetch.get();
+                } else {
+                    auto fetch = node->fetch(key);
+                    if (!fetch.status().ok()) {
+                        std::cerr << "fetch benchmark failed: size=" << size_bytes
+                                  << " iter=" << i << " error=" << fetch.status().message() << "\n";
+                        node->stop();
+                        return 1;
+                    }
+                    const auto result = fetch.get();
+                    if (result.data.size() != size_bytes) {
+                        std::cerr << "fetch benchmark size mismatch: expected=" << size_bytes
+                                  << " actual=" << result.data.size() << "\n";
+                        node->stop();
+                        return 1;
+                    }
+                    if (!owner_node_id.empty() && result.owner_node_id != owner_node_id) {
+                        std::cerr << "fetch benchmark owner mismatch: expected=" << owner_node_id
+                                  << " actual=" << result.owner_node_id << "\n";
+                        node->stop();
+                        return 1;
+                    }
                 }
 
                 const auto metrics = node->last_fetch_metrics();
@@ -383,13 +405,14 @@ int main(int argc, char** argv) {
                 .avg_peer_connect_us = static_cast<double>(connect_sum) / static_cast<double>(iterations),
                 .avg_rdma_prepare_us = static_cast<double>(rdma_prepare_sum) / static_cast<double>(iterations),
                 .avg_rdma_get_us = static_cast<double>(rdma_get_sum) / static_cast<double>(iterations),
-                .throughput_MBps = detail::throughput_mb_per_sec(
+                .throughput_MiBps = detail::throughput_mb_per_sec(
                     size_bytes,
                     static_cast<double>(total_sum) / static_cast<double>(iterations)),
             });
         }
 
-        std::cout << "op=fetch transport=" << transport
+        std::cout << "op=" << (mode == "bench-fetch-to" ? "fetch_to" : "fetch")
+                  << " transport=" << transport
                   << " node_id=" << node->node_id()
                   << " total_bytes=" << total_bytes;
         if (!owner_node_id.empty()) {

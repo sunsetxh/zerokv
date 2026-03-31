@@ -1564,8 +1564,10 @@ Future<FetchResult> KVNode::fetch(const std::string& key) {
     FetchResult result;
     result.owner_node_id = meta->owner_node_id;
     result.version = meta->version;
+    const auto copy_start = SteadyClock::now();
     result.data.resize(meta->size);
     std::memcpy(result.data.data(), local_region->address(), meta->size);
+    metrics.result_copy_us = elapsed_us(copy_start, SteadyClock::now());
     metrics.total_us = elapsed_us(total_start, SteadyClock::now());
     metrics.ok = true;
     impl_->record_fetch_metrics(metrics);

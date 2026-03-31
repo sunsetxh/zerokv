@@ -110,7 +110,7 @@ std::string render_publish_rows(const std::vector<PublishBenchRow>& rows) {
         << std::setw(18) << "avg_prepare_us"
         << std::setw(20) << "avg_pack_rkey_us"
         << std::setw(22) << "avg_put_meta_rpc_us"
-        << std::setw(18) << "throughput_MBps"
+        << std::setw(18) << "throughput_MiBps"
         << '\n';
 
     out << std::fixed << std::setprecision(2);
@@ -123,7 +123,7 @@ std::string render_publish_rows(const std::vector<PublishBenchRow>& rows) {
             << std::setw(18) << row.avg_prepare_us
             << std::setw(20) << row.avg_pack_rkey_us
             << std::setw(22) << row.avg_put_meta_rpc_us
-            << std::setw(18) << row.throughput_MBps
+            << std::setw(18) << row.throughput_MiBps
             << '\n';
     }
     return out.str();
@@ -141,7 +141,7 @@ std::string render_fetch_rows(const std::vector<FetchBenchRow>& rows) {
         << std::setw(20) << "avg_peer_connect_us"
         << std::setw(22) << "avg_rdma_prepare_us"
         << std::setw(18) << "avg_rdma_get_us"
-        << std::setw(18) << "throughput_MBps"
+        << std::setw(18) << "throughput_MiBps"
         << '\n';
 
     out << std::fixed << std::setprecision(2);
@@ -156,7 +156,7 @@ std::string render_fetch_rows(const std::vector<FetchBenchRow>& rows) {
             << std::setw(20) << row.avg_peer_connect_us
             << std::setw(22) << row.avg_rdma_prepare_us
             << std::setw(18) << row.avg_rdma_get_us
-            << std::setw(18) << row.throughput_MBps
+            << std::setw(18) << row.throughput_MiBps
             << '\n';
     }
     return out.str();

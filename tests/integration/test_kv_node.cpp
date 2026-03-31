@@ -1041,6 +1041,7 @@ TEST(KvNodeIntegrationTest, FetchReturnsPublishedBytesAcrossNodes) {
     EXPECT_GT(metrics->peer_connect_us, 0u);
     EXPECT_GT(metrics->rdma_prepare_us, 0u);
     EXPECT_GT(metrics->rdma_get_us, 0u);
+    EXPECT_GT(metrics->result_copy_us, 0u);
 
     reader->stop();
     publisher->stop();
@@ -1091,6 +1092,7 @@ TEST(KvNodeIntegrationTest, FetchToWritesIntoCallerRegion) {
     ASSERT_TRUE(metrics.has_value());
     EXPECT_TRUE(metrics->ok);
     EXPECT_GT(metrics->rdma_get_us, 0u);
+    EXPECT_EQ(metrics->result_copy_us, 0u);
 
     reader->stop();
     publisher->stop();

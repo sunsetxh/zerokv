@@ -137,10 +137,22 @@ creating the archive.
 ./build/kv_bench --mode bench-fetch --server-addr <server_ip>:15000 \
   --data-addr 0.0.0.0:0 --node-id bf1 --owner-node-id owner \
   --sizes 4K,64K,1M,16M,128M --iters 4 --transport rdma
+
+# Zero-copy fetch benchmark
+./build/kv_bench --mode bench-fetch-to --server-addr <server_ip>:15000 \
+  --data-addr 0.0.0.0:0 --node-id bf1z --owner-node-id owner \
+  --sizes 4K,64K,1M,16M,128M --iters 4 --transport rdma
 ```
 
 `--total-bytes` is still supported, but fixed `--iters` is the recommended
 first pass when validating across real machines.
+
+`fetch()` is the convenience end-to-end API that returns owned bytes.
+`fetch_to()` is the zero-copy public API for performance-sensitive paths.
+Accordingly:
+
+- `bench-fetch` measures end-to-end fetch cost and includes the final result copy
+- `bench-fetch-to` measures the zero-copy path more directly
 
 ### Python KV example
 

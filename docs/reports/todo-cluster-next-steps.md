@@ -60,3 +60,11 @@
 10. 进一步收敛 `wait_ready()` 语义
    - 文件：`include/axon/cluster.h`、`src/cluster.cpp`
    - 目标：把“控制面 ready”和“数据面 route ready”的边界定义得更清楚。
+
+11. 记录 KV 多网卡演进路径
+   - 背景：UCX 本身支持 multi-rail，但当前 AXON KV 只注册一个 `data_addr`
+   - 现状：当前只能通过单 `data_addr` + 单 endpoint 间接受益于 UCX 底层自动能力，AXON 本身并不显式建模多 NIC
+   - 建议顺序：
+     1. 节点注册多个 `data_addr`
+     2. 每个 key 选择单个 NIC
+     3. 再考虑单对象跨 NIC striping

@@ -439,6 +439,7 @@ NB_MODULE(_core, m) {
         .def_prop_ro("peer_connect_us", [](const axon::kv::FetchMetrics& v) { return v.peer_connect_us; })
         .def_prop_ro("rdma_prepare_us", [](const axon::kv::FetchMetrics& v) { return v.rdma_prepare_us; })
         .def_prop_ro("rdma_get_us", [](const axon::kv::FetchMetrics& v) { return v.rdma_get_us; })
+        .def_prop_ro("result_copy_us", [](const axon::kv::FetchMetrics& v) { return v.result_copy_us; })
         .def_prop_ro("ok", [](const axon::kv::FetchMetrics& v) { return v.ok; });
 
     nb::class_<axon::kv::PushMetrics>(m, "PushMetrics")

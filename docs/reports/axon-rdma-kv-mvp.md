@@ -296,6 +296,8 @@ Public API note:
 - RDMA routing details such as owner address, remote address, and rkey stay internal
 - `publish(key, data, size)` should copy data into implementation-managed memory
 - `publish_region(key, region, size)` is the zero-copy path and requires the caller to keep the region alive
+- `fetch(key)` is the convenience API and includes a final copy into `FetchResult::data`
+- `fetch_to(key, local_region, length, local_offset)` is the primary zero-copy public fetch API
 
 ## 10. Control Protocol
 
@@ -761,6 +763,20 @@ UCX_NET_DEVICES=<rdma_dev> ./kv_bench \
   --transport rdma
 ```
 
+Run zero-copy fetch benchmark:
+
+```bash
+UCX_NET_DEVICES=<rdma_dev> ./kv_bench \
+  --mode bench-fetch-to \
+  --server-addr <server_ip>:15000 \
+  --data-addr <client_ip>:0 \
+  --node-id bench-fetch-to \
+  --owner-node-id owner \
+  --sizes 4K,64K,1M,4M,16M,32M,64M,128M \
+  --iters 4 \
+  --transport rdma
+```
+
 Notes:
 
 - `--iters N` is the recommended first-pass mode for cross-machine validation
@@ -769,6 +785,11 @@ Notes:
 - `hold-owner` publishes stable keys named `bench-fetch-<size-bytes>`
 - `bench-publish` uses unique keys and unpublishes after each iteration to
   avoid metadata accumulation
+- `bench-fetch` is the application-level E2E fetch benchmark and includes the
+  final result copy
+- `bench-fetch-to` is the zero-copy benchmark and is the better first choice
+  when you want to reason about data-plane fetch cost
+- benchmark throughput columns are reported in `MiB/s` (`throughput_MiBps`)
 
 ### Two-VM Soft-RoCE Benchmark Snapshot
 
