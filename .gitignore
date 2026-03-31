@@ -59,6 +59,7 @@ Thumbs.db
 .ccb/
 .claude/
 .specify/
+.worktrees/
 
 # Python cache
 __pycache__/
