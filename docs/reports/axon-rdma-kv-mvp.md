@@ -274,12 +274,21 @@ Responsibilities:
 - `start(NodeConfig)`
 - `stop()`
 - `publish(key, buffer, size)`
-- `fetch(key)`
+- `publish_region(key, region, size)`
+- `fetch(key)` -> `Future<FetchResult>`
 - `fetch_to(key, local_region, length, local_offset=0)`
+- `push(target_node_id, key, data, size)`
 - `unpublish(key)`
+- `subscribe(key)` / `unsubscribe(key)`
+- `drain_subscription_events()` -> `vector<SubscriptionEvent>`
+- `wait_for_key(key, timeout)` -> `Status`
+- `wait_for_keys(keys, timeout)` -> `WaitKeysResult`
+- `subscribe_and_fetch_once(key, timeout)` -> `FetchResult`
+- `subscribe_and_fetch_once_many(keys, timeout)` -> `BatchFetchResult`
 - `is_running()`
 - `node_id()`
 - `published_count()`
+- `last_publish_metrics()` / `last_fetch_metrics()` / `last_push_metrics()`
 
 Public API note:
 
@@ -396,32 +405,52 @@ Recommended implementation order:
 8. heartbeat / stale cleanup
 9. benchmark and fault-path validation
 
-## 13. TODO Extensions
+## 13. Completed Extensions
 
-The following items are explicitly recorded for follow-up after the first MVP
-closure:
+The following extensions have been implemented since the initial MVP closure.
 
-1. support direct `put` to a specified client
+### 13.1 Direct put / push (completed)
 
-- allow a caller to target a known destination node directly
-- bypass server lookup when the destination is already known
-- useful for push-style workflows in addition to current fetch/get flow
+- `KVNode::push(target_node_id, key, data, size)` — RDMA write to a target node
+- Target node becomes the new owner
+- Sender queries server for target's push inbox address, performs RDMA put,
+  then sends a direct TCP PUSH_COMMIT to the target for finalization
+- PushMetrics exposed: get_target_rpc_us, prepare_frame_us, rdma_put_flush_us,
+  commit_rpc_us
 
-2. support end-to-end performance instrumentation
+### 13.2 Performance instrumentation (completed)
 
-- add full-path timing for control-plane and data-plane stages
-- measure publish, lookup, connect, rkey handling, RDMA transfer, and total fetch latency
-- expose metrics suitable for both debugging and benchmark reports
+- `PublishMetrics`: total_us, prepare_region_us, pack_rkey_us, put_meta_rpc_us
+- `FetchMetrics`: total_us, local_buffer_prepare_us, get_meta_rpc_us,
+  peer_connect_us, rdma_prepare_us, rdma_get_us
+- `PushMetrics`: total_us, get_target_rpc_us, prepare_frame_us,
+  rdma_put_flush_us, commit_rpc_us
+- Last-sample accessor on KVNode: `last_publish_metrics()`,
+  `last_fetch_metrics()`, `last_push_metrics()`
 
-3. support subscription
+### 13.3 Subscription (completed)
 
-- allow clients to subscribe to key lifecycle changes such as publish, update,
-  unpublish, and owner loss
-- server should act as the metadata event source and fan out notifications to
-  interested subscribers
-- define delivery semantics explicitly in a later phase:
-  best-effort vs acknowledged delivery, replay behavior for late subscribers,
-  and ordering guarantees relative to publish/unpublish
+- `KVNode::subscribe(key)` / `KVNode::unsubscribe(key)` — synchronous RPCs
+- `KVNode::drain_subscription_events()` — polling API, swap-and-return
+- Server fan-out: TCP connect → send event → close (best-effort, short-lived)
+- Event types: kPublished, kUpdated, kUnpublished, kOwnerLost
+- Ref-counted local subscriptions to protect pre-existing manual subscriptions
+
+### 13.4 Wait-and-fetch (completed)
+
+- `KVNode::wait_for_key(key, timeout)` — synchronous, returns Status
+- `KVNode::wait_for_keys(keys, timeout)` — batch wait, partial results
+- `KVNode::subscribe_and_fetch_once(key, timeout)` — wait + fetch single key
+- `KVNode::subscribe_and_fetch_once_many(keys, timeout)` — batch, per-key as ready
+- First-success-wins semantics, 100ms lookup fallback, deduplication
+
+### 13.5 Build system improvements (completed)
+
+- `UCX_ROOT` CMake option for non-system UCX installations
+- Vendored dependency support under `third_party/` (googletest, benchmark,
+  nanobind, ucx)
+- Source packaging script (`scripts/package_source.sh`) with automatic vendor
+  download from release tarballs
 
 ## 14. Practical Conclusion
 

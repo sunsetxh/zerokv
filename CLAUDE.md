@@ -42,6 +42,21 @@ cd build && ctest -R UnitConfig --output-on-failure
 - `AXON_BUILD_EXAMPLES` - Build examples (default: ON)
 - `AXON_BUILD_TESTS` - Build tests (default: ON)
 - `AXON_BUILD_BENCHMARK` - Build benchmarks (default: ON)
+- `AXON_BUILD_PYTHON` - Build Python bindings (default: ON)
+- `UCX_ROOT` - Path to custom UCX installation (default: "")
+
+## Vendored Dependencies
+
+If `third_party/{googletest,benchmark,nanobind}` directories exist, the build
+uses them via `add_subdirectory` instead of `find_package`. `third_party/ucx`
+is also supported but only extends `PKG_CONFIG_PATH` (no manual find_library).
+
+## Packaging
+
+```bash
+./scripts/package_source.sh              # with vendored deps (downloads if missing)
+./scripts/package_source.sh --exclude-third-party
+```
 
 ## Architecture
 
@@ -91,8 +106,48 @@ Configured in `.clang-format`:
 
 ## Test Structure
 
-- `tests/unit/` - Unit tests for individual components (Config, Status, Future, Memory)
-- `tests/integration/` - Integration tests requiring UCX runtime (Connection, TagMessaging, RDMA)
+- `tests/unit/` - Unit tests for individual components (Config, Status, Future, Memory, Cluster, KvMetadataStore, KvBench)
+- `tests/integration/` - Integration tests requiring UCX runtime (Connection, TagMessaging, RDMA, KVServer, KVNode, Loopback, ClusterDiscovery)
 - `tests/benchmark/` - Performance benchmarks (ping-pong latency, throughput)
 
-Integration tests may require RDMA hardware or TCP configuration.
+Integration tests may require RDMA hardware or TCP configuration. KV
+integration tests use TCP transport by default and do not require RDMA hardware.
+
+## KV Layer
+
+The KV module (`src/kv/`, `include/axon/kv.h`) provides an RDMA KV store on top
+of the transport core.
+
+### Key files
+
+| File | Purpose |
+|------|---------|
+| `include/axon/kv.h` | Public API: KVServer, KVNode, all types |
+| `src/kv/node.cpp` | KVNode implementation |
+| `src/kv/server.cpp` | KVServer with subscription fan-out |
+| `src/kv/protocol.h` | Wire protocol types and encode/decode |
+| `src/kv/protocol.cpp` | Protocol serialization |
+| `src/kv/metadata_store.h/cpp` | In-memory metadata + subscription registry |
+| `src/kv/tcp_transport.h/cpp` | TCP framing utilities |
+| `src/kv/tcp_framing.h/cpp` | Frame encode/decode |
+| `src/kv/bench_utils.h/cpp` | Benchmark helpers |
+| `examples/kv_demo.cpp` | Interactive demo |
+| `examples/kv_bench.cpp` | Size-sweep benchmark |
+| `examples/kv_wait_fetch.cpp` | Wait-and-fetch demo |
+
+### KVNode operations
+
+| Operation | Async | Description |
+|-----------|-------|-------------|
+| `publish` | `Future<void>` | Store key-value, become owner |
+| `fetch` | `Future<FetchResult>` | RDMA get from owner |
+| `fetch_to` | `Future<void>` | Zero-copy fetch into region |
+| `push` | `Future<void>` | RDMA put to target node |
+| `unpublish` | `Future<void>` | Remove key |
+| `subscribe` | `Future<void>` | Register for key lifecycle events |
+| `unsubscribe` | `Future<void>` | Stop receiving events |
+| `drain_subscription_events` | sync | Poll for pending events |
+| `wait_for_key` | sync | Block until key exists or timeout |
+| `wait_for_keys` | sync | Batch wait, partial results on timeout |
+| `subscribe_and_fetch_once` | sync | Wait + fetch single key |
+| `subscribe_and_fetch_once_many` | sync | Batch wait + fetch, per-key as ready |

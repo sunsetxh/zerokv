@@ -10,8 +10,15 @@ KV cache inference transfer, and HPC scenarios.
 - **RDMA KV store** — server-mediated metadata with client-to-client zero-copy
   data transfer
 - **Operations** — publish, fetch, push, unpublish, subscribe
+- **Subscription** — best-effort key lifecycle events (published, updated,
+  unpublished, owner lost) with polling API
+- **Wait-and-fetch** — synchronous helpers to wait for keys then fetch them:
+  single-key and batch, partial results on timeout, first-success-wins
 - **Metrics** — per-operation latency breakdown (publish, fetch, push)
 - **Benchmark** — size-sweep publish/fetch benchmark (`kv_bench`)
+- **Python bindings** — nanobind-based Python API for KV operations
+- **Vendor build** — optional vendored dependencies under `third_party/`,
+  offline-capable source packaging
 
 ## Prerequisites
 
@@ -186,10 +193,36 @@ Context (UCP context, global resources)
 
 ```
 KVServer (metadata directory, subscription fan-out)
-KVNode   (data owner, publish/fetch/push/subscribe)
+KVNode   (data owner, publish/fetch/push/subscribe/wait-and-fetch)
   ├── Control plane: TCP to server (register, lookup, subscribe)
   ├── Data plane:    RDMA to peers (zero-copy get/put)
-  └── Push plane:    RDMA put + direct TCP commit to target
+  ├── Push plane:    RDMA put + direct TCP commit to target
+  └── Subscription:  dedicated TCP listener for event delivery
+```
+
+### KV API overview
+
+```cpp
+// Server
+server->start({"0.0.0.0:15000"});
+server->lookup("my-key");   // -> optional<KeyInfo>
+server->stop();
+
+// Node
+node->start({"server:15000", "0.0.0.0:0", "node-1"});
+node->publish("key", data, size);
+node->fetch("key");                      // -> Future<FetchResult>
+node->push("target-node", "key", data, size);
+node->unpublish("key");
+node->subscribe("key");
+node->unsubscribe("key");
+node->drain_subscription_events();       // -> vector<SubscriptionEvent>
+
+// Wait-and-fetch helpers (synchronous)
+node->wait_for_key("key", timeout);      // -> Status
+node->wait_for_keys({"a","b"}, timeout); // -> WaitKeysResult
+node->subscribe_and_fetch_once("key", timeout);       // -> FetchResult
+node->subscribe_and_fetch_once_many({"a","b"}, timeout); // -> BatchFetchResult
 ```
 
 ### Wait-And-Fetch Example
