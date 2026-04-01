@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file axon/axon.h
+/// @file zerokv/zerokv.h
 /// @brief Convenience header – includes the full public API.
 
 #include "zerokv/common.h"

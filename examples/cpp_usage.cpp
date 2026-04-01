@@ -1,7 +1,7 @@
 /// @file examples/cpp_usage.cpp
 /// @brief Demonstrates how to use the AXON library for point-to-point communication.
 ///
-/// Build:  g++ -std=c++20 -I../include cpp_usage.cpp -laxon -lpthread -o demo
+/// Build:  g++ -std=c++20 -I../include cpp_usage.cpp -lzerokv -lpthread -o demo
 
 #include "zerokv/zerokv.h"
 

@@ -18,7 +18,7 @@ option(ZEROKV_BUILD_STATIC     "Build static library"                      OFF)
 option(ZEROKV_BUILD_EXAMPLES   "Build examples"                           ON)
 option(ZEROKV_BUILD_TESTS      "Build tests (requires GTest)"             ON)
 option(ZEROKV_BUILD_BENCHMARK  "Build benchmarks (requires Google Benchmark)"   ON)
-option(ZEROKV_BUILD_PYTHON     "Build Python bindings (requires nanobind)" OFF)
+option(ZEROKV_BUILD_PYTHON     "Build Python bindings (requires nanobind)" ON)
 set(UCX_ROOT "" CACHE PATH "Root directory of a UCX installation")
 set(ZEROKV_THIRD_PARTY_DIR "${CMAKE_SOURCE_DIR}/third_party" CACHE PATH "Root directory for vendored third-party dependencies")
 
