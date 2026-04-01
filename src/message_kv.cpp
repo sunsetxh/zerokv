@@ -117,6 +117,13 @@ struct MessageKV::Impl {
         sweep_receiver_ack_cleanup_locked();
     }
 
+    void publish_ack_locked(const std::string& message_key) {
+        const auto ack_key = make_ack_key(message_key);
+        auto publish = node->publish(ack_key, &kAckMarker, sizeof(kAckMarker));
+        publish.get();
+        publish.status().throw_if_error();
+    }
+
     void record_owned_ack_keys_locked(std::vector<std::string> ack_keys) {
         owned_ack_keys.reserve(owned_ack_keys.size() + ack_keys.size());
         for (auto& ack_key : ack_keys) {
@@ -216,30 +223,10 @@ void MessageKV::recv(const std::string& key,
                      size_t length,
                      size_t offset,
                      std::chrono::milliseconds timeout) {
-    std::lock_guard<std::mutex> lock(impl_->mu);
-    auto guard = make_scope_exit([this] { impl_->sweep_cleanup_locked(); });
-    (void)guard;
-    impl_->sweep_cleanup_locked();
-    if (!impl_->node_ready_locked()) {
-        throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
+    auto result = recv_batch({BatchRecvItem{key, length, offset}}, region, timeout);
+    if (!result.completed_all || !result.failed.empty() || !result.timed_out.empty()) {
+        throw std::system_error(make_error_code(ErrorCode::kTimeout));
     }
-
-    auto status = impl_->node->wait_for_key(key, timeout);
-    status.throw_if_error();
-
-    auto fetch = impl_->node->fetch_to(key, region, length, offset);
-    fetch.get();
-    fetch.status().throw_if_error();
-
-    std::vector<std::string> new_ack_keys;
-    new_ack_keys.push_back(make_ack_key(key));
-    auto ack = impl_->node->publish(new_ack_keys.back(), &kAckMarker, sizeof(kAckMarker));
-    ack.get();
-    ack.status().throw_if_error();
-
-    impl_->sweep_cleanup_locked();
-    guard.release();
-    impl_->record_owned_ack_keys_locked(std::move(new_ack_keys));
 }
 
 MessageKV::BatchRecvResult MessageKV::recv_batch(const std::vector<BatchRecvItem>& items,
@@ -253,28 +240,33 @@ MessageKV::BatchRecvResult MessageKV::recv_batch(const std::vector<BatchRecvItem
         throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
     }
 
-    BatchRecvResult result;
-    std::vector<std::string> new_ack_keys;
-    new_ack_keys.reserve(items.size());
+    std::vector<zerokv::kv::FetchToItem> kv_items;
+    kv_items.reserve(items.size());
     for (const auto& item : items) {
-        auto status = impl_->node->wait_for_key(item.key, timeout);
-        status.throw_if_error();
-
-        auto fetch = impl_->node->fetch_to(item.key, region, item.length, item.offset);
-        fetch.get();
-        fetch.status().throw_if_error();
-
-        result.completed.push_back(item.key);
-        new_ack_keys.push_back(make_ack_key(item.key));
-
-        auto ack = impl_->node->publish(new_ack_keys.back(), &kAckMarker, sizeof(kAckMarker));
-        ack.get();
-        ack.status().throw_if_error();
+        kv_items.push_back(zerokv::kv::FetchToItem{
+            .key = item.key,
+            .length = item.length,
+            .offset = item.offset,
+        });
     }
-    result.completed_all = true;
+
+    auto batch = impl_->node->subscribe_and_fetch_to_once_many(kv_items, region, timeout);
+
+    std::vector<std::string> new_ack_keys;
+    new_ack_keys.reserve(batch.completed.size());
+    for (const auto& key : batch.completed) {
+        impl_->publish_ack_locked(key);
+        new_ack_keys.push_back(make_ack_key(key));
+    }
+
+    BatchRecvResult result;
+    result.completed = std::move(batch.completed);
+    result.failed = std::move(batch.failed);
+    result.timed_out = std::move(batch.timed_out);
+    result.completed_all = batch.completed_all;
     impl_->sweep_cleanup_locked();
-    guard.release();
     impl_->record_owned_ack_keys_locked(std::move(new_ack_keys));
+    guard.release();
     return result;
 }
 

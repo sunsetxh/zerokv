@@ -81,6 +81,61 @@ TEST_F(MessageKvIntegrationTest, SenderCleanupRunsOnSubsequentSend) {
     server->stop();
 }
 
+TEST_F(MessageKvIntegrationTest, RecvCopiesSingleMessageIntoRegion) {
+    auto server = zerokv::kv::KVServer::create(cfg);
+    ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
+
+    auto sender = zerokv::MessageKV::create(cfg);
+    auto receiver = zerokv::MessageKV::create(cfg);
+    sender->start({server->address(), "127.0.0.1:0", "sender"});
+    receiver->start({server->address(), "127.0.0.1:0", "receiver"});
+
+    auto ctx = zerokv::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 8);
+    ASSERT_NE(region, nullptr);
+
+    sender->send("rx-key", "payload", 7);
+    receiver->recv("rx-key", region, 7, 0, std::chrono::milliseconds(1000));
+
+    EXPECT_EQ(std::memcmp(region->address(), "payload", 7), 0);
+
+    sender->stop();
+    receiver->stop();
+    server->stop();
+}
+
+TEST_F(MessageKvIntegrationTest, RecvBatchReturnsPartialTimeout) {
+    auto server = zerokv::kv::KVServer::create(cfg);
+    ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
+
+    auto sender = zerokv::MessageKV::create(cfg);
+    auto receiver = zerokv::MessageKV::create(cfg);
+    sender->start({server->address(), "127.0.0.1:0", "sender"});
+    receiver->start({server->address(), "127.0.0.1:0", "receiver"});
+
+    auto ctx = zerokv::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 16);
+    ASSERT_NE(region, nullptr);
+
+    sender->send("batch-a", "aaaa", 4);
+    auto result = receiver->recv_batch({
+        {"batch-a", 4, 0},
+        {"batch-b", 4, 8},
+    }, region, std::chrono::milliseconds(100));
+
+    EXPECT_EQ(result.completed.size(), 1u);
+    EXPECT_EQ(result.completed[0], "batch-a");
+    EXPECT_EQ(result.timed_out.size(), 1u);
+    EXPECT_EQ(result.timed_out[0], "batch-b");
+    EXPECT_FALSE(result.completed_all);
+
+    sender->stop();
+    receiver->stop();
+    server->stop();
+}
+
 TEST_F(MessageKvIntegrationTest, SendPublishesMessageKey) {
     auto server = zerokv::kv::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
