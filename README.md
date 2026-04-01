@@ -178,13 +178,14 @@ the application already owns unique keys.
 
 ### MessageKV two-node demo
 
-`message_kv_demo` models a reduced version of the current target scenario:
+`message_kv_demo` sweeps message sizes with `--sizes` across the two-node
+scenario. The default sweep list is `1K,64K,1M,4M,16M,32M,64M,128M`.
 
-- `RANK0` runs one process that colocates `KVServer + MessageKV receiver`
-- `RANK1` runs the sender
-- the sender process starts 4 threads
-- each thread sends one unique key
-- the receiver fetches all 4 messages with a single `recv_batch()`
+- `RANK0` runs `KVServer + MessageKV receiver` in one process
+- `RANK1` sends 4 messages per round from 4 threads
+- the last round allocates about `4 * 128MiB = 512MiB` of receive region in total
+- the first round may include cold-start costs; if steady-state matters, start
+  with a small size or run a warmup pass first
 
 Build:
 
@@ -208,8 +209,8 @@ Run on two nodes:
   --data-addr 10.0.0.1:0 \
   --node-id rank0-receiver \
   --messages 4 \
-  --timeout-ms 5000 \
-  --post-recv-wait-ms 2000 \
+  --sizes 1K,64K,1M,4M,16M,32M,64M,128M \
+  --timeout-ms 30000 \
   --transport rdma
 
 # RANK1: sender with 4 worker threads
@@ -219,6 +220,7 @@ Run on two nodes:
   --data-addr 10.0.0.2:0 \
   --node-id rank1-sender \
   --threads 4 \
+  --sizes 1K,64K,1M,4M,16M,32M,64M,128M \
   --transport rdma
 ```
 
@@ -249,8 +251,6 @@ Implementation note:
 - `send()` is synchronous with receiver acknowledgement:
   the sender publishes the message key, waits for the receiver's internal ack
   key, then unpublishes the message key before returning.
-- `rank0` also keeps the server alive briefly after `recv_batch()` completes so
-  the sender can observe the ack marker before the receiver lazily cleans it up.
 
 ### Python KV example
 
