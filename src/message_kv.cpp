@@ -166,6 +166,12 @@ void MessageKV::send(const std::string& key, const void* data, size_t size) {
     if (!impl_->node_ready_locked()) {
         throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
     }
+    if (key.empty()) {
+        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
+    }
+    if (size > 0 && data == nullptr) {
+        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
+    }
 
     auto publish = impl_->node->publish(key, data, size);
     publish.get();
@@ -186,7 +192,13 @@ void MessageKV::send_region(const std::string& key,
     if (!impl_->node_ready_locked()) {
         throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
     }
+    if (key.empty()) {
+        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
+    }
     if (!region) {
+        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
+    }
+    if (size > region->length()) {
         throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
     }
 
