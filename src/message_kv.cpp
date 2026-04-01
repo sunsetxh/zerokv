@@ -1,6 +1,5 @@
 #include "zerokv/message_kv.h"
 
-#include <chrono>
 #include <mutex>
 #include <utility>
 
@@ -68,7 +67,25 @@ struct MessageKV::Impl {
 
     void wait_for_ack_and_cleanup_message_locked(const std::string& message_key) {
         const auto ack_key = make_ack_key(message_key);
-        const auto ack_status = node->wait_for_key(ack_key, cfg.connect_timeout());
+        auto subscribe_future = node->subscribe(ack_key);
+        subscribe_future.status().throw_if_error();
+        subscribe_future.get();
+        auto ack_status = node->wait_for_key(ack_key, std::chrono::milliseconds(1));
+        if (!ack_status.ok()) {
+            ack_status = node->wait_for_subscription_event(ack_key, cfg.connect_timeout());
+            if (!ack_status.ok()) {
+                auto fallback = node->wait_for_key(ack_key, std::chrono::milliseconds(1));
+                if (fallback.ok()) {
+                    ack_status = Status::OK();
+                }
+            }
+        }
+
+        auto unsubscribe_future = node->unsubscribe(ack_key);
+        if (unsubscribe_future.status().ok()) {
+            unsubscribe_future.get();
+        }
+
         if (!ack_status.ok()) {
             auto rollback = node->unpublish(message_key);
             rollback.get();
@@ -78,6 +95,58 @@ struct MessageKV::Impl {
         auto unpublish = node->unpublish(message_key);
         unpublish.get();
         unpublish.status().throw_if_error();
+    }
+
+    void recv_one_locked(const std::string& key,
+                         const zerokv::MemoryRegion::Ptr& region,
+                         size_t length,
+                         size_t offset,
+                         std::chrono::milliseconds timeout) {
+        auto subscribe_future = node->subscribe(key);
+        subscribe_future.status().throw_if_error();
+        subscribe_future.get();
+
+        auto unsubscribe_on_exit = [&]() {
+            auto unsubscribe_future = node->unsubscribe(key);
+            if (unsubscribe_future.status().ok()) {
+                unsubscribe_future.get();
+            }
+        };
+
+        auto try_fetch = [&]() {
+            auto fetch = node->fetch_to(key, region, length, offset);
+            if (!fetch.status().ok()) {
+                if (fetch.status().code() == ErrorCode::kInvalidArgument) {
+                    return false;
+                }
+                fetch.status().throw_if_error();
+            }
+            fetch.get();
+            if (!fetch.status().ok()) {
+                if (fetch.status().code() == ErrorCode::kInvalidArgument) {
+                    return false;
+                }
+                fetch.status().throw_if_error();
+            }
+            return true;
+        };
+
+        if (!try_fetch()) {
+            auto status = node->wait_for_subscription_event(key, timeout);
+            if (!status.ok()) {
+                unsubscribe_on_exit();
+                status.throw_if_error();
+            }
+            if (!try_fetch()) {
+                unsubscribe_on_exit();
+                Status(ErrorCode::kTimeout, "timed out fetching key after event: " + key)
+                    .throw_if_error();
+            }
+        }
+
+        unsubscribe_on_exit();
+        publish_ack_locked(key);
+        record_owned_ack_keys_locked({make_ack_key(key)});
     }
 };
 
@@ -161,13 +230,16 @@ void MessageKV::recv(const std::string& key,
                      size_t length,
                      size_t offset,
                      std::chrono::milliseconds timeout) {
+    std::lock_guard<std::mutex> lock(impl_->mu);
+    impl_->sweep_cleanup_locked();
     if (key.empty()) {
         throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
     }
-    auto result = recv_batch({BatchRecvItem{key, length, offset}}, region, timeout);
-    if (!result.completed_all || !result.failed.empty() || !result.timed_out.empty()) {
-        throw std::system_error(make_error_code(ErrorCode::kTimeout));
+    if (!impl_->node_ready_locked()) {
+        throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
     }
+    impl_->recv_one_locked(key, region, length, offset, timeout);
+    impl_->sweep_cleanup_locked();
 }
 
 MessageKV::BatchRecvResult MessageKV::recv_batch(const std::vector<BatchRecvItem>& items,
@@ -191,11 +263,8 @@ MessageKV::BatchRecvResult MessageKV::recv_batch(const std::vector<BatchRecvItem
 
     auto batch = impl_->node->subscribe_and_fetch_to_once_many(kv_items, region, timeout);
 
-    std::vector<std::string> new_ack_keys;
-    new_ack_keys.reserve(batch.completed.size());
     for (const auto& key : batch.completed) {
         impl_->publish_ack_locked(key);
-        new_ack_keys.push_back(make_ack_key(key));
     }
 
     BatchRecvResult result;
@@ -204,6 +273,11 @@ MessageKV::BatchRecvResult MessageKV::recv_batch(const std::vector<BatchRecvItem
     result.timed_out = std::move(batch.timed_out);
     result.completed_all = batch.completed_all;
     impl_->sweep_cleanup_locked();
+    std::vector<std::string> new_ack_keys;
+    new_ack_keys.reserve(result.completed.size());
+    for (const auto& key : result.completed) {
+        new_ack_keys.push_back(make_ack_key(key));
+    }
     impl_->record_owned_ack_keys_locked(std::move(new_ack_keys));
     return result;
 }

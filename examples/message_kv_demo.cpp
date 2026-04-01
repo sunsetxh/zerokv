@@ -184,7 +184,8 @@ void print_usage(const char* argv0) {
         << " [--sizes 1K,64K,...] [--transport tcp|rdma]\n"
         << "  " << argv0
         << " --role rank1 --server-addr <addr> --data-addr <addr> --node-id <id>\n"
-        << "           [--threads 4] [--sizes 1K,64K,...] [--transport tcp|rdma]\n";
+        << "           [--threads 4] [--sizes 1K,64K,...] [--timeout-ms 5000]"
+        << " [--transport tcp|rdma]\n";
 }
 
 bool parse_args(int argc, char** argv, Args* args) {
@@ -219,8 +220,11 @@ bool parse_args(int argc, char** argv, Args* args) {
     return true;
 }
 
-std::string make_sender_node_id(const std::string& base, int thread_index) {
-    return base + "-thread" + std::to_string(thread_index);
+std::string make_sender_node_id(const std::string& base,
+                                size_t round_index,
+                                int thread_index) {
+    return base + "-round" + std::to_string(round_index) +
+           "-thread" + std::to_string(thread_index);
 }
 
 uint64_t elapsed_us(SteadyClock::time_point start, SteadyClock::time_point end) {
@@ -261,28 +265,27 @@ int run_rank0(const Args& args, const Config& cfg) {
         return 1;
     }
 
-    auto mq = MessageKV::create(cfg);
-    try {
-        mq->start(NodeConfig{
-            .server_addr = server->address(),
-            .local_data_addr = args.data_addr,
-            .node_id = args.node_id,
-        });
-    } catch (const std::exception& ex) {
-        std::cerr << "failed to start rank0 receiver: " << ex.what() << "\n";
-        server->stop();
-        return 1;
-    }
-
     auto ctx = Context::create(cfg);
     if (!ctx) {
         std::cerr << "failed to create Context\n";
-        mq->stop();
         server->stop();
         return 1;
     }
 
     for (size_t round_index = 0; round_index < sizes.size(); ++round_index) {
+        auto mq = MessageKV::create(cfg);
+        try {
+            mq->start(NodeConfig{
+                .server_addr = server->address(),
+                .local_data_addr = args.data_addr,
+                .node_id = args.node_id + "-round" + std::to_string(round_index),
+            });
+        } catch (const std::exception& ex) {
+            std::cerr << "failed to start rank0 receiver: " << ex.what() << "\n";
+            server->stop();
+            return 1;
+        }
+
         const size_t size_bytes = sizes[round_index];
         const size_t total_bytes = size_bytes * static_cast<size_t>(args.messages);
 
@@ -361,9 +364,10 @@ int run_rank0(const Args& args, const Config& cfg) {
             server->stop();
             return 1;
         }
+
+        mq->stop();
     }
 
-    mq->stop();
     server->stop();
     return 0;
 }
@@ -402,7 +406,7 @@ int run_rank1(const Args& args, const Config& cfg) {
                     mq->start(NodeConfig{
                         .server_addr = args.server_addr,
                         .local_data_addr = args.data_addr,
-                        .node_id = make_sender_node_id(args.node_id, i),
+                        .node_id = make_sender_node_id(args.node_id, round_index, i),
                     });
 
                     const auto key = zerokv::examples::message_kv_demo::make_round_key(
@@ -470,7 +474,10 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const auto cfg = Config::builder().set_transport(args.transport).build();
+    const auto cfg = Config::builder()
+                         .set_transport(args.transport)
+                         .set_connect_timeout(std::chrono::milliseconds(args.timeout_ms))
+                         .build();
 
     if (args.role == "rank0") {
         return run_rank0(args, cfg);

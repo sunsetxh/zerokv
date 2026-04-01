@@ -10,6 +10,7 @@
 #include <atomic>
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <cstdint>
 #include <memory>
@@ -180,6 +181,7 @@ struct KVNode::Impl {
     std::mutex published_mu_;
     std::mutex peer_mu_;
     std::mutex subscription_mu_;
+    std::condition_variable subscription_cv_;
     std::mutex subscription_state_mu_;
     std::mutex metrics_mu_;
     std::unordered_map<std::string, PublishedObject> published_;
@@ -957,6 +959,7 @@ struct KVNode::Impl {
 
             std::lock_guard<std::mutex> lock(subscription_mu_);
             subscription_events_.push_back(std::move(local));
+            subscription_cv_.notify_all();
         }
 
         detail::TcpTransport::close_fd(&fd);
@@ -1143,6 +1146,7 @@ void KVNode::stop() {
     if (!impl_ || !impl_->running_.exchange(false)) {
         return;
     }
+    impl_->subscription_cv_.notify_all();
     {
         std::lock_guard<std::mutex> lock(impl_->control_mu_);
         detail::TcpTransport::close_fd(&impl_->control_fd_);
@@ -1237,6 +1241,53 @@ std::vector<SubscriptionEvent> KVNode::drain_subscription_events() {
     std::vector<SubscriptionEvent> drained;
     drained.swap(impl_->subscription_events_);
     return drained;
+}
+
+Status KVNode::wait_for_subscription_event(const std::string& key,
+                                           std::chrono::milliseconds timeout) {
+    if (!impl_ || !impl_->running_.load()) {
+        return Status(ErrorCode::kConnectionRefused, "KVNode is not running");
+    }
+    if (key.empty()) {
+        return Status(ErrorCode::kInvalidArgument, "key is required");
+    }
+
+    auto matches = [&](const SubscriptionEvent& event) {
+        return event.key == key &&
+               (event.type == SubscriptionEventType::kPublished ||
+                event.type == SubscriptionEventType::kUpdated);
+    };
+
+    auto consume_matching_event = [&]() {
+        auto it = std::find_if(impl_->subscription_events_.begin(),
+                               impl_->subscription_events_.end(),
+                               matches);
+        if (it == impl_->subscription_events_.end()) {
+            return false;
+        }
+        impl_->subscription_events_.erase(it);
+        return true;
+    };
+
+    std::unique_lock<std::mutex> lock(impl_->subscription_mu_);
+    if (consume_matching_event()) {
+        return Status::OK();
+    }
+
+    const auto deadline = SteadyClock::now() + timeout;
+    while (impl_->running_.load()) {
+        if (impl_->subscription_cv_.wait_until(lock, deadline, consume_matching_event)) {
+            return Status::OK();
+        }
+        if (SteadyClock::now() >= deadline) {
+            break;
+        }
+    }
+
+    if (!impl_->running_.load()) {
+        return Status(ErrorCode::kConnectionRefused, "KVNode is not running");
+    }
+    return Status(ErrorCode::kTimeout, "timed out waiting for subscription event");
 }
 
 Status KVNode::wait_for_key(const std::string& key, std::chrono::milliseconds timeout) {

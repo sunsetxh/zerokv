@@ -159,6 +159,8 @@ public:
     [[nodiscard]] std::optional<FetchMetrics> last_fetch_metrics() const;
     [[nodiscard]] std::optional<PushMetrics> last_push_metrics() const;
     [[nodiscard]] std::vector<SubscriptionEvent> drain_subscription_events();
+    zerokv::Status wait_for_subscription_event(const std::string& key,
+                                               std::chrono::milliseconds timeout);
     zerokv::Status wait_for_key(const std::string& key,
                               std::chrono::milliseconds timeout);
     WaitKeysResult wait_for_keys(const std::vector<std::string>& keys,
