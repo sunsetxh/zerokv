@@ -276,6 +276,12 @@ if(ZEROKV_BUILD_TESTS)
     add_executable(test_message_kv tests/integration/test_message_kv.cpp)
     target_link_libraries(test_message_kv PRIVATE zerokv GTest::gtest GTest::gtest_main)
     add_test(NAME IntegrationMessageKV COMMAND test_message_kv)
+
+    add_executable(test_message_kv_demo tests/integration/test_message_kv_demo.cpp)
+    target_sources(test_message_kv_demo PRIVATE examples/message_kv_demo.cpp)
+    target_compile_definitions(test_message_kv_demo PRIVATE MESSAGE_KV_DEMO_BUILD_TESTS)
+    target_link_libraries(test_message_kv_demo PRIVATE zerokv GTest::gtest GTest::gtest_main)
+    add_test(NAME IntegrationMessageKvDemo COMMAND test_message_kv_demo)
 endif()
 
 # ---------------------------------------------------------------------------

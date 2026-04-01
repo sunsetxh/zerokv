@@ -3,16 +3,95 @@
 #include <zerokv/message_kv.h>
 
 #include <chrono>
+#include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstring>
 #include <exception>
 #include <iostream>
+#include <sstream>
 #include <string>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
 using namespace zerokv;
 using namespace zerokv::kv;
+
+namespace zerokv::examples::message_kv_demo {
+
+namespace {
+
+std::vector<size_t> parse_sizes_impl(const std::string& csv) {
+    std::vector<size_t> sizes;
+    std::stringstream stream(csv);
+    std::string token;
+
+    while (std::getline(stream, token, ',')) {
+        token.erase(std::remove_if(token.begin(), token.end(), [](unsigned char ch) {
+            return std::isspace(ch) != 0;
+        }), token.end());
+        if (token.empty()) {
+            throw std::invalid_argument("empty benchmark size token");
+        }
+
+        size_t value_end = 0;
+        size_t value = 0;
+        try {
+            value = std::stoull(token, &value_end);
+        } catch (const std::exception&) {
+            throw std::invalid_argument("invalid benchmark size token: " + token);
+        }
+
+        std::string suffix = token.substr(value_end);
+        std::transform(suffix.begin(), suffix.end(), suffix.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::toupper(ch));
+        });
+
+        size_t scale = 1;
+        if (suffix.empty()) {
+            scale = 1;
+        } else if (suffix == "K" || suffix == "KB" || suffix == "KIB") {
+            scale = 1024u;
+        } else if (suffix == "M" || suffix == "MB" || suffix == "MIB") {
+            scale = 1024u * 1024u;
+        } else if (suffix == "G" || suffix == "GB" || suffix == "GIB") {
+            scale = 1024u * 1024u * 1024u;
+        } else {
+            throw std::invalid_argument("invalid benchmark size suffix: " + suffix);
+        }
+
+        sizes.push_back(value * scale);
+    }
+
+    if (sizes.empty()) {
+        throw std::invalid_argument("benchmark size list is empty");
+    }
+
+    return sizes;
+}
+
+}  // namespace
+
+std::vector<size_t> parse_sizes_csv(const std::string& csv) {
+    return parse_sizes_impl(csv);
+}
+
+std::string make_round_key(size_t round_index, size_t size_bytes, size_t thread_index) {
+    return "msg-round" + std::to_string(round_index) + "-size" +
+           std::to_string(size_bytes) + "-thread" + std::to_string(thread_index);
+}
+
+std::string make_payload(size_t round_index, size_t size_bytes, size_t thread_index) {
+    std::string payload(size_bytes, 'x');
+    const std::string prefix = "round" + std::to_string(round_index) + "-thread" +
+                               std::to_string(thread_index) + "-";
+    const auto copy_len = std::min(prefix.size(), payload.size());
+    std::memcpy(payload.data(), prefix.data(), copy_len);
+    return payload;
+}
+
+}  // namespace zerokv::examples::message_kv_demo
 
 namespace {
 
@@ -302,6 +381,7 @@ int run_rank1(const Args& args, const Config& cfg) {
 
 }  // namespace
 
+#ifndef MESSAGE_KV_DEMO_BUILD_TESTS
 int main(int argc, char** argv) {
     Args args;
     if (!parse_args(argc, argv, &args) || args.role.empty()) {
@@ -321,3 +401,4 @@ int main(int argc, char** argv) {
     print_usage(argv[0]);
     return 1;
 }
+#endif
