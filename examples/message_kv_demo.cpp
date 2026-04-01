@@ -187,7 +187,7 @@ std::string make_key(int sender_rank, int receiver_rank, int thread_index) {
            std::to_string(receiver_rank) + "-thread" + std::to_string(thread_index);
 }
 
-std::string make_payload(int sender_rank, int thread_index) {
+std::string make_rank_payload(int sender_rank, int thread_index) {
     return "payload-from-rank" + std::to_string(sender_rank) + "-thread" +
            std::to_string(thread_index);
 }
@@ -267,7 +267,7 @@ int run_rank0(const Args& args, const Config& cfg) {
 
     for (int i = 0; i < args.messages; ++i) {
         const auto key = make_key(1, 0, i);
-        const auto payload = make_payload(1, i);
+        const auto payload = make_rank_payload(1, i);
         keys.push_back(key);
         payloads.push_back(payload);
         offsets.push_back(total_bytes);
@@ -339,7 +339,7 @@ int run_rank1(const Args& args, const Config& cfg) {
     }
     std::vector<size_t> sizes;
     try {
-        sizes = parse_sizes_csv(args.sizes_csv);
+        sizes = zerokv::examples::message_kv_demo::parse_sizes_csv(args.sizes_csv);
     } catch (const std::exception& ex) {
         std::cerr << "--sizes: " << ex.what() << "\n";
         return 1;
@@ -365,8 +365,10 @@ int run_rank1(const Args& args, const Config& cfg) {
                         .node_id = make_sender_node_id(args.node_id, i),
                     });
 
-                    const auto key = make_round_key(round_index, size_bytes, static_cast<size_t>(i));
-                    const auto payload = make_payload(round_index, size_bytes, static_cast<size_t>(i));
+                    const auto key = zerokv::examples::message_kv_demo::make_round_key(
+                        round_index, size_bytes, static_cast<size_t>(i));
+                    const auto payload = zerokv::examples::message_kv_demo::make_payload(
+                        round_index, size_bytes, static_cast<size_t>(i));
                     const auto send_start = SteadyClock::now();
                     mq->send(key, payload.data(), payload.size());
                     const auto send_end = SteadyClock::now();
@@ -406,12 +408,13 @@ int run_rank1(const Args& args, const Config& cfg) {
             }
         }
         const auto total_us = elapsed_us(round_start, round_end);
-        std::cout << render_send_round_summary(round_index,
-                                               size_bytes,
-                                               static_cast<size_t>(args.threads),
-                                               total_us,
-                                               max_thread_send_us,
-                                               total_bytes)
+        std::cout << zerokv::examples::message_kv_demo::render_send_round_summary(
+                         round_index,
+                         size_bytes,
+                         static_cast<size_t>(args.threads),
+                         total_us,
+                         max_thread_send_us,
+                         total_bytes)
                   << "\n";
     }
 
