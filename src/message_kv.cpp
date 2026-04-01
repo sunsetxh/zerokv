@@ -15,45 +15,6 @@ std::string make_ack_key(const std::string& message_key) {
     return std::string(kAckPrefix) + message_key;
 }
 
-struct PendingMessage {
-    std::string message_key;
-    std::string ack_key;
-};
-
-template <typename Fn>
-class ScopeExit {
-public:
-    explicit ScopeExit(Fn fn) : fn_(std::move(fn)) {}
-    ~ScopeExit() {
-        if (active_) {
-            fn_();
-        }
-    }
-
-    ScopeExit(const ScopeExit&) = delete;
-    ScopeExit& operator=(const ScopeExit&) = delete;
-
-    ScopeExit(ScopeExit&& other) noexcept
-        : fn_(std::move(other.fn_)), active_(other.active_) {
-        other.active_ = false;
-    }
-
-    ScopeExit& operator=(ScopeExit&&) = delete;
-
-    void release() noexcept {
-        active_ = false;
-    }
-
-private:
-    Fn fn_;
-    bool active_ = true;
-};
-
-template <typename Fn>
-ScopeExit<Fn> make_scope_exit(Fn fn) {
-    return ScopeExit<Fn>(std::move(fn));
-}
-
 }  // namespace
 
 struct MessageKV::Impl {
@@ -63,35 +24,10 @@ struct MessageKV::Impl {
     zerokv::kv::KVNode::Ptr node;
     std::mutex mu;
     bool running = false;
-    std::vector<PendingMessage> pending_messages;
     std::vector<std::string> owned_ack_keys;
 
     bool node_ready_locked() const noexcept {
         return running && static_cast<bool>(node);
-    }
-
-    void sweep_sender_cleanup_locked() {
-        if (!node_ready_locked() || pending_messages.empty()) {
-            return;
-        }
-
-        std::vector<PendingMessage> remaining;
-        remaining.reserve(pending_messages.size());
-        for (const auto& pending : pending_messages) {
-            auto ack_status = node->wait_for_key(pending.ack_key, std::chrono::milliseconds{0});
-            if (!ack_status.ok()) {
-                remaining.push_back(pending);
-                continue;
-            }
-
-            auto unpublish = node->unpublish(pending.message_key);
-            unpublish.get();
-            if (!unpublish.status().ok()) {
-                remaining.push_back(pending);
-            }
-        }
-
-        pending_messages.swap(remaining);
     }
 
     void sweep_receiver_ack_cleanup_locked() {
@@ -113,7 +49,6 @@ struct MessageKV::Impl {
     }
 
     void sweep_cleanup_locked() {
-        sweep_sender_cleanup_locked();
         sweep_receiver_ack_cleanup_locked();
     }
 
@@ -129,6 +64,20 @@ struct MessageKV::Impl {
         for (auto& ack_key : ack_keys) {
             owned_ack_keys.push_back(std::move(ack_key));
         }
+    }
+
+    void wait_for_ack_and_cleanup_message_locked(const std::string& message_key) {
+        const auto ack_key = make_ack_key(message_key);
+        const auto ack_status = node->wait_for_key(ack_key, cfg.connect_timeout());
+        if (!ack_status.ok()) {
+            auto rollback = node->unpublish(message_key);
+            rollback.get();
+            ack_status.throw_if_error();
+        }
+
+        auto unpublish = node->unpublish(message_key);
+        unpublish.get();
+        unpublish.status().throw_if_error();
     }
 };
 
@@ -161,14 +110,11 @@ void MessageKV::stop() {
     impl_->node->stop();
     impl_->node.reset();
     impl_->running = false;
-    impl_->pending_messages.clear();
     impl_->owned_ack_keys.clear();
 }
 
 void MessageKV::send(const std::string& key, const void* data, size_t size) {
     std::lock_guard<std::mutex> lock(impl_->mu);
-    auto guard = make_scope_exit([this] { impl_->sweep_cleanup_locked(); });
-    (void)guard;
     impl_->sweep_cleanup_locked();
     if (key.empty()) {
         throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
@@ -183,18 +129,13 @@ void MessageKV::send(const std::string& key, const void* data, size_t size) {
     auto publish = impl_->node->publish(key, data, size);
     publish.get();
     publish.status().throw_if_error();
-    impl_->pending_messages.push_back(PendingMessage{
-        .message_key = key,
-        .ack_key = make_ack_key(key),
-    });
+    impl_->wait_for_ack_and_cleanup_message_locked(key);
 }
 
 void MessageKV::send_region(const std::string& key,
                             const zerokv::MemoryRegion::Ptr& region,
                             size_t size) {
     std::lock_guard<std::mutex> lock(impl_->mu);
-    auto guard = make_scope_exit([this] { impl_->sweep_cleanup_locked(); });
-    (void)guard;
     impl_->sweep_cleanup_locked();
     if (key.empty()) {
         throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
@@ -212,10 +153,7 @@ void MessageKV::send_region(const std::string& key,
     auto publish = impl_->node->publish_region(key, region, size);
     publish.get();
     publish.status().throw_if_error();
-    impl_->pending_messages.push_back(PendingMessage{
-        .message_key = key,
-        .ack_key = make_ack_key(key),
-    });
+    impl_->wait_for_ack_and_cleanup_message_locked(key);
 }
 
 void MessageKV::recv(const std::string& key,
@@ -236,8 +174,6 @@ MessageKV::BatchRecvResult MessageKV::recv_batch(const std::vector<BatchRecvItem
                                                  const zerokv::MemoryRegion::Ptr& region,
                                                  std::chrono::milliseconds timeout) {
     std::lock_guard<std::mutex> lock(impl_->mu);
-    auto guard = make_scope_exit([this] { impl_->sweep_cleanup_locked(); });
-    (void)guard;
     impl_->sweep_cleanup_locked();
     if (!impl_->node_ready_locked()) {
         throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
@@ -269,7 +205,6 @@ MessageKV::BatchRecvResult MessageKV::recv_batch(const std::vector<BatchRecvItem
     result.completed_all = batch.completed_all;
     impl_->sweep_cleanup_locked();
     impl_->record_owned_ack_keys_locked(std::move(new_ack_keys));
-    guard.release();
     return result;
 }
 

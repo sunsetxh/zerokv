@@ -3,6 +3,8 @@
 #include "zerokv/worker.h"
 #include "zerokv/endpoint.h"
 
+#include <arpa/inet.h>
+#include <ifaddrs.h>
 #include <thread>
 #include <chrono>
 #include <vector>
@@ -10,6 +12,37 @@
 #include <atomic>
 
 using namespace zerokv;
+
+namespace {
+
+std::string find_non_loopback_ipv4() {
+    struct ifaddrs* ifaddr = nullptr;
+    if (getifaddrs(&ifaddr) != 0 || ifaddr == nullptr) {
+        return {};
+    }
+
+    std::string result;
+    for (auto* it = ifaddr; it != nullptr; it = it->ifa_next) {
+        if (it->ifa_addr == nullptr || it->ifa_addr->sa_family != AF_INET) {
+            continue;
+        }
+        const auto* addr = reinterpret_cast<const sockaddr_in*>(it->ifa_addr);
+        if (ntohl(addr->sin_addr.s_addr) == INADDR_LOOPBACK) {
+            continue;
+        }
+
+        char buf[INET_ADDRSTRLEN] = {};
+        if (inet_ntop(AF_INET, &addr->sin_addr, buf, sizeof(buf)) != nullptr) {
+            result = buf;
+            break;
+        }
+    }
+
+    freeifaddrs(ifaddr);
+    return result;
+}
+
+}  // namespace
 
 // =============================================================================
 // Loopback Communication Tests (single process, dual worker)
@@ -58,6 +91,23 @@ TEST_F(LoopbackTest, ListenerCreation) {
     EXPECT_FALSE(listener->address().empty());
     
     listener->close();
+}
+
+TEST_F(LoopbackTest, ListenerPreservesExplicitBindHostForEphemeralPort) {
+    const auto bind_ip = find_non_loopback_ipv4();
+    if (bind_ip.empty()) {
+        GTEST_SKIP() << "No non-loopback IPv4 address available";
+    }
+
+    auto worker = Worker::create(context_);
+    ASSERT_NE(worker, nullptr);
+
+    auto listener = worker->listen(bind_ip + ":0", [&](Endpoint::Ptr ep) {
+        (void)ep;
+    });
+
+    ASSERT_NE(listener, nullptr);
+    EXPECT_EQ(listener->address().rfind(bind_ip + ":", 0), 0u);
 }
 
 // Test that connect(address_blob) works

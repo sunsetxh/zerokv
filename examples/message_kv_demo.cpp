@@ -16,6 +16,8 @@ using namespace zerokv::kv;
 
 namespace {
 
+using SteadyClock = std::chrono::steady_clock;
+
 struct Args {
     std::string role;
     std::string listen_addr;
@@ -24,8 +26,8 @@ struct Args {
     std::string node_id = "rank0";
     std::string transport = "tcp";
     int threads = 4;
+    int messages = 4;
     int timeout_ms = 5000;
-    int cleanup_wait_ms = 1500;
     int post_recv_wait_ms = 2000;
 };
 
@@ -34,11 +36,11 @@ void print_usage(const char* argv0) {
         << "Usage:\n"
         << "  " << argv0
         << " --role rank0 --listen <addr> --data-addr <addr> --node-id <id>\n"
-        << "           [--threads 4] [--timeout-ms 5000] [--post-recv-wait-ms 2000]"
+        << "           [--messages 4] [--timeout-ms 5000] [--post-recv-wait-ms 2000]"
         << " [--transport tcp|rdma]\n"
         << "  " << argv0
         << " --role rank1 --server-addr <addr> --data-addr <addr> --node-id <id>\n"
-        << "           [--threads 4] [--cleanup-wait-ms 1500] [--transport tcp|rdma]\n";
+        << "           [--threads 4] [--transport tcp|rdma]\n";
 }
 
 bool parse_args(int argc, char** argv, Args* args) {
@@ -58,10 +60,10 @@ bool parse_args(int argc, char** argv, Args* args) {
             args->transport = argv[++i];
         } else if (arg == "--threads" && i + 1 < argc) {
             args->threads = std::stoi(argv[++i]);
+        } else if (arg == "--messages" && i + 1 < argc) {
+            args->messages = std::stoi(argv[++i]);
         } else if (arg == "--timeout-ms" && i + 1 < argc) {
             args->timeout_ms = std::stoi(argv[++i]);
-        } else if (arg == "--cleanup-wait-ms" && i + 1 < argc) {
-            args->cleanup_wait_ms = std::stoi(argv[++i]);
         } else if (arg == "--post-recv-wait-ms" && i + 1 < argc) {
             args->post_recv_wait_ms = std::stoi(argv[++i]);
         } else {
@@ -85,13 +87,26 @@ std::string make_sender_node_id(const std::string& base, int thread_index) {
     return base + "-thread" + std::to_string(thread_index);
 }
 
+uint64_t elapsed_us(SteadyClock::time_point start, SteadyClock::time_point end) {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+}
+
+double throughput_mib_per_sec(size_t bytes, uint64_t elapsed_us_value) {
+    if (elapsed_us_value == 0) {
+        return 0.0;
+    }
+    const double seconds = static_cast<double>(elapsed_us_value) / 1000000.0;
+    return static_cast<double>(bytes) / (1024.0 * 1024.0) / seconds;
+}
+
 int run_rank0(const Args& args, const Config& cfg) {
     if (args.listen_addr.empty() || args.data_addr.empty() || args.node_id.empty()) {
         std::cerr << "--listen, --data-addr, and --node-id are required for rank0\n";
         return 1;
     }
-    if (args.threads <= 0) {
-        std::cerr << "--threads must be > 0\n";
+    if (args.messages <= 0) {
+        std::cerr << "--messages must be > 0\n";
         return 1;
     }
     if (args.post_recv_wait_ms < 0) {
@@ -136,12 +151,12 @@ int run_rank0(const Args& args, const Config& cfg) {
     std::vector<std::string> payloads;
     std::vector<size_t> offsets;
     size_t total_bytes = 0;
-    items.reserve(static_cast<size_t>(args.threads));
-    keys.reserve(static_cast<size_t>(args.threads));
-    payloads.reserve(static_cast<size_t>(args.threads));
-    offsets.reserve(static_cast<size_t>(args.threads));
+    items.reserve(static_cast<size_t>(args.messages));
+    keys.reserve(static_cast<size_t>(args.messages));
+    payloads.reserve(static_cast<size_t>(args.messages));
+    offsets.reserve(static_cast<size_t>(args.messages));
 
-    for (int i = 0; i < args.threads; ++i) {
+    for (int i = 0; i < args.messages; ++i) {
         const auto key = make_key(1, 0, i);
         const auto payload = make_payload(1, i);
         keys.push_back(key);
@@ -163,13 +178,20 @@ int run_rank0(const Args& args, const Config& cfg) {
     }
 
     try {
+        const auto recv_start = SteadyClock::now();
         const auto result =
             mq->recv_batch(items, region, std::chrono::milliseconds(args.timeout_ms));
+        const auto recv_end = SteadyClock::now();
+        const auto recv_us = elapsed_us(recv_start, recv_end);
 
         std::cout << "RECV_BATCH completed=" << result.completed.size()
                   << " failed=" << result.failed.size()
                   << " timed_out=" << result.timed_out.size()
-                  << " completed_all=" << (result.completed_all ? 1 : 0) << "\n";
+                  << " completed_all=" << (result.completed_all ? 1 : 0)
+                  << " recv_batch_us=" << recv_us
+                  << " total_bytes=" << total_bytes
+                  << " throughput_MiBps=" << throughput_mib_per_sec(total_bytes, recv_us)
+                  << "\n";
 
         if (!result.completed_all || !result.failed.empty() || !result.timed_out.empty()) {
             mq->stop();
@@ -177,7 +199,7 @@ int run_rank0(const Args& args, const Config& cfg) {
             return 1;
         }
 
-        for (int i = 0; i < args.threads; ++i) {
+        for (int i = 0; i < args.messages; ++i) {
             const std::string value(
                 static_cast<const char*>(region->address()) + offsets[static_cast<size_t>(i)],
                 payloads[static_cast<size_t>(i)].size());
@@ -206,14 +228,17 @@ int run_rank1(const Args& args, const Config& cfg) {
         std::cerr << "--threads must be > 0\n";
         return 1;
     }
-    if (args.cleanup_wait_ms < 0) {
-        std::cerr << "--cleanup-wait-ms must be >= 0\n";
-        return 1;
-    }
-
     std::vector<std::thread> workers;
     workers.reserve(static_cast<size_t>(args.threads));
     std::vector<std::exception_ptr> errors(static_cast<size_t>(args.threads));
+    std::vector<uint64_t> send_us(static_cast<size_t>(args.threads), 0);
+    size_t total_bytes = 0;
+
+    for (int i = 0; i < args.threads; ++i) {
+        total_bytes += make_payload(1, i).size();
+    }
+
+    const auto total_start = SteadyClock::now();
 
     for (int i = 0; i < args.threads; ++i) {
         workers.emplace_back([&, i] {
@@ -227,9 +252,14 @@ int run_rank1(const Args& args, const Config& cfg) {
 
                 const auto key = make_key(1, 0, i);
                 const auto payload = make_payload(1, i);
+                const auto send_start = SteadyClock::now();
                 mq->send(key, payload.data(), payload.size());
-                std::cout << "SEND_OK key=" << key << " value=" << payload << "\n";
-                std::this_thread::sleep_for(std::chrono::milliseconds(args.cleanup_wait_ms));
+                const auto send_end = SteadyClock::now();
+                send_us[static_cast<size_t>(i)] = elapsed_us(send_start, send_end);
+                std::cout << "SEND_OK key=" << key
+                          << " value=" << payload
+                          << " send_us=" << send_us[static_cast<size_t>(i)]
+                          << "\n";
                 mq->stop();
             } catch (...) {
                 errors[static_cast<size_t>(i)] = std::current_exception();
@@ -241,6 +271,8 @@ int run_rank1(const Args& args, const Config& cfg) {
         worker.join();
     }
 
+    const auto total_end = SteadyClock::now();
+
     for (const auto& error : errors) {
         if (error) {
             try {
@@ -251,6 +283,19 @@ int run_rank1(const Args& args, const Config& cfg) {
             return 1;
         }
     }
+
+    uint64_t max_thread_send_us = 0;
+    for (uint64_t value : send_us) {
+        if (value > max_thread_send_us) {
+            max_thread_send_us = value;
+        }
+    }
+    const auto total_us = elapsed_us(total_start, total_end);
+    std::cout << "RANK1_SUMMARY total_us=" << total_us
+              << " max_thread_send_us=" << max_thread_send_us
+              << " total_bytes=" << total_bytes
+              << " throughput_MiBps=" << throughput_mib_per_sec(total_bytes, total_us)
+              << "\n";
 
     return 0;
 }

@@ -207,7 +207,7 @@ Run on two nodes:
   --listen 10.0.0.1:15000 \
   --data-addr 10.0.0.1:0 \
   --node-id rank0-receiver \
-  --threads 4 \
+  --messages 4 \
   --timeout-ms 5000 \
   --post-recv-wait-ms 2000 \
   --transport rdma
@@ -225,11 +225,20 @@ Run on two nodes:
 Expected receiver output:
 
 ```text
-RECV_BATCH completed=4 failed=0 timed_out=0 completed_all=1
+RECV_BATCH completed=4 failed=0 timed_out=0 completed_all=1 recv_batch_us=... total_bytes=... throughput_MiBps=...
 RECV_OK key=msg-rank1-to-rank0-thread0 value=payload-from-rank1-thread0
 RECV_OK key=msg-rank1-to-rank0-thread1 value=payload-from-rank1-thread1
 RECV_OK key=msg-rank1-to-rank0-thread2 value=payload-from-rank1-thread2
 RECV_OK key=msg-rank1-to-rank0-thread3 value=payload-from-rank1-thread3
+```
+
+Expected sender output now also includes per-thread send latency and one
+aggregate summary:
+
+```text
+SEND_OK key=msg-rank1-to-rank0-thread0 value=payload-from-rank1-thread0 send_us=...
+...
+RANK1_SUMMARY total_us=... max_thread_send_us=... total_bytes=... throughput_MiBps=...
 ```
 
 Implementation note:
@@ -237,10 +246,11 @@ Implementation note:
 - `MessageKV` Phase 1 serializes public calls inside one wrapper instance.
 - To stay close to the real multi-threaded sender pattern, the demo gives each
   sender thread its own `MessageKV` instance and node id.
-- Each sender thread keeps its instance alive briefly after `send()` so the
-  receiver can publish the internal ack marker before sender-side cleanup runs.
+- `send()` is synchronous with receiver acknowledgement:
+  the sender publishes the message key, waits for the receiver's internal ack
+  key, then unpublishes the message key before returning.
 - `rank0` also keeps the server alive briefly after `recv_batch()` completes so
-  sender-side cleanup can observe the ack markers before shutdown.
+  the sender can observe the ack marker before the receiver lazily cleans it up.
 
 ### Python KV example
 

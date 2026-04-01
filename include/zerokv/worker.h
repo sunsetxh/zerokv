@@ -102,6 +102,14 @@ public:
     /// @return A future that resolves to the connected Endpoint.
     Future<std::shared_ptr<Endpoint>> connect(const std::string& address);
 
+    /// Actively connect to a remote peer while binding the local socket to a
+    /// specific host/network interface.
+    /// @param address       Remote "host:port".
+    /// @param local_address Local "host:port" or "host:0"; port may be ignored.
+    /// @return A future that resolves to the connected Endpoint.
+    Future<std::shared_ptr<Endpoint>> connect(const std::string& address,
+                                              const std::string& local_address);
+
     /// Start listening for incoming connections.
     /// @param bind_address  "host:port" to bind (":0" for OS-assigned port).
     /// @param on_accept     Callback invoked for each new connection.

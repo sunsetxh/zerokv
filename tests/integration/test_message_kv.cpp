@@ -5,6 +5,7 @@
 #include <functional>
 #include <gtest/gtest.h>
 #include <system_error>
+#include <thread>
 
 class MessageKvIntegrationTest : public ::testing::Test {
 protected:
@@ -118,14 +119,22 @@ TEST_F(MessageKvIntegrationTest, SenderCleanupRunsOnSubsequentSend) {
     auto rx_region = zerokv::MemoryRegion::allocate(ctx, 16);
     ASSERT_NE(rx_region, nullptr);
 
+    std::thread recv_thread([&] {
+        receiver->recv("msg-1", rx_region, 5, 0, std::chrono::milliseconds(1000));
+    });
     sender->send("msg-1", "hello", 5);
-    receiver->recv("msg-1", rx_region, 5, 0, std::chrono::milliseconds(1000));
+    recv_thread.join();
     EXPECT_EQ(std::memcmp(rx_region->address(), "hello", 5), 0);
+
+    std::thread recv_thread2([&] {
+        receiver->recv("msg-2", rx_region, 5, 0, std::chrono::milliseconds(1000));
+    });
     sender->send("msg-2", "world", 5);
+    recv_thread2.join();
 
     auto keys = server->list_keys();
     EXPECT_EQ(std::find(keys.begin(), keys.end(), "msg-1"), keys.end());
-    EXPECT_NE(std::find(keys.begin(), keys.end(), "msg-2"), keys.end());
+    EXPECT_EQ(std::find(keys.begin(), keys.end(), "msg-2"), keys.end());
 
     sender->stop();
     receiver->stop();
@@ -146,8 +155,11 @@ TEST_F(MessageKvIntegrationTest, RecvCopiesSingleMessageIntoRegion) {
     auto region = zerokv::MemoryRegion::allocate(ctx, 8);
     ASSERT_NE(region, nullptr);
 
+    std::thread recv_thread([&] {
+        receiver->recv("rx-key", region, 7, 0, std::chrono::milliseconds(1000));
+    });
     sender->send("rx-key", "payload", 7);
-    receiver->recv("rx-key", region, 7, 0, std::chrono::milliseconds(1000));
+    recv_thread.join();
 
     EXPECT_EQ(std::memcmp(region->address(), "payload", 7), 0);
 
@@ -170,11 +182,14 @@ TEST_F(MessageKvIntegrationTest, RecvBatchReturnsPartialTimeout) {
     auto region = zerokv::MemoryRegion::allocate(ctx, 16);
     ASSERT_NE(region, nullptr);
 
-    sender->send("batch-a", "aaaa", 4);
+    std::thread sender_thread([&] {
+        sender->send("batch-a", "aaaa", 4);
+    });
     auto result = receiver->recv_batch({
         {"batch-a", 4, 0},
         {"batch-b", 4, 8},
     }, region, std::chrono::milliseconds(100));
+    sender_thread.join();
 
     EXPECT_EQ(result.completed.size(), 1u);
     EXPECT_EQ(result.completed[0], "batch-a");
@@ -187,29 +202,42 @@ TEST_F(MessageKvIntegrationTest, RecvBatchReturnsPartialTimeout) {
     server->stop();
 }
 
-TEST_F(MessageKvIntegrationTest, SendPublishesMessageKey) {
+TEST_F(MessageKvIntegrationTest, SendUnpublishesMessageKeyAfterAck) {
     auto server = zerokv::kv::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
     auto sender = zerokv::MessageKV::create(cfg);
+    auto receiver = zerokv::MessageKV::create(cfg);
     sender->start({server->address(), "127.0.0.1:0", "sender"});
+    receiver->start({server->address(), "127.0.0.1:0", "receiver"});
 
-    const char payload[] = "hello";
-    sender->send("send-key", payload, 5);
+    auto ctx = zerokv::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 8);
+    ASSERT_NE(region, nullptr);
+
+    std::thread recv_thread([&] {
+        receiver->recv("send-key", region, 5, 0, std::chrono::milliseconds(1000));
+    });
+    sender->send("send-key", "hello", 5);
+    recv_thread.join();
 
     auto keys = server->list_keys();
-    EXPECT_NE(std::find(keys.begin(), keys.end(), "send-key"), keys.end());
+    EXPECT_EQ(std::find(keys.begin(), keys.end(), "send-key"), keys.end());
 
     sender->stop();
+    receiver->stop();
     server->stop();
 }
 
-TEST_F(MessageKvIntegrationTest, SendRegionPublishesMessageKey) {
+TEST_F(MessageKvIntegrationTest, SendRegionUnpublishesMessageKeyAfterAck) {
     auto server = zerokv::kv::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
     auto sender = zerokv::MessageKV::create(cfg);
+    auto receiver = zerokv::MessageKV::create(cfg);
     sender->start({server->address(), "127.0.0.1:0", "sender"});
+    receiver->start({server->address(), "127.0.0.1:0", "receiver"});
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
@@ -217,12 +245,20 @@ TEST_F(MessageKvIntegrationTest, SendRegionPublishesMessageKey) {
     ASSERT_NE(region, nullptr);
     std::memcpy(region->address(), "region-payload", 15);
 
+    auto rx_region = zerokv::MemoryRegion::allocate(ctx, 16);
+    ASSERT_NE(rx_region, nullptr);
+
+    std::thread recv_thread([&] {
+        receiver->recv("send-region-key", rx_region, 15, 0, std::chrono::milliseconds(1000));
+    });
     sender->send_region("send-region-key", region, 15);
+    recv_thread.join();
 
     auto keys = server->list_keys();
-    EXPECT_NE(std::find(keys.begin(), keys.end(), "send-region-key"), keys.end());
+    EXPECT_EQ(std::find(keys.begin(), keys.end(), "send-region-key"), keys.end());
 
     sender->stop();
+    receiver->stop();
     server->stop();
 }
 
@@ -239,6 +275,27 @@ TEST_F(MessageKvIntegrationTest, SendRequiresRunningNodeAndValidatesInputs) {
     expect_system_error_code([&] { mq->send("key", nullptr, 1); }, zerokv::ErrorCode::kInvalidArgument);
 
     mq->stop();
+    server->stop();
+}
+
+TEST_F(MessageKvIntegrationTest, SendTimesOutWithoutAckAndCleansUpMessageKey) {
+    const auto timeout_cfg = zerokv::Config::builder()
+                                 .set_transport("tcp")
+                                 .set_connect_timeout(std::chrono::milliseconds(50))
+                                 .build();
+    auto server = zerokv::kv::KVServer::create(timeout_cfg);
+    ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
+
+    auto sender = zerokv::MessageKV::create(timeout_cfg);
+    sender->start({server->address(), "127.0.0.1:0", "sender"});
+
+    expect_system_error_code([&] { sender->send("timeout-key", "x", 1); },
+                             zerokv::ErrorCode::kTimeout);
+
+    auto keys = server->list_keys();
+    EXPECT_EQ(std::find(keys.begin(), keys.end(), "timeout-key"), keys.end());
+
+    sender->stop();
     server->stop();
 }
 

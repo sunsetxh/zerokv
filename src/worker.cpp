@@ -4,6 +4,8 @@
 #include "zerokv/endpoint.h"
 #include "zerokv/common.h"
 
+#include "internal/listener_addr.h"
+
 #include <ucp/api/ucp.h>
 
 #include <cstring>
@@ -319,6 +321,11 @@ Future<std::shared_ptr<Endpoint>> Worker::connect(const std::vector<uint8_t>& re
 }
 
 Future<std::shared_ptr<Endpoint>> Worker::connect(const std::string& address) {
+    return connect(address, {});
+}
+
+Future<std::shared_ptr<Endpoint>> Worker::connect(const std::string& address,
+                                                  const std::string& local_address) {
     if (!impl_ || !impl_->handle_) {
         return Future<std::shared_ptr<Endpoint>>::make_error(
             Status(ErrorCode::kInvalidArgument, "Worker not initialized"));
@@ -347,7 +354,7 @@ Future<std::shared_ptr<Endpoint>> Worker::connect(const std::string& address) {
             Status(ErrorCode::kInvalidArgument, "Address must be in host:port format"));
     }
 
-    // Build sockaddr_in
+    // Build remote sockaddr_in
     struct sockaddr_in addr;
     std::memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -366,6 +373,28 @@ Future<std::shared_ptr<Endpoint>> Worker::connect(const std::string& address) {
     ep_params.flags = UCP_EP_PARAMS_FLAGS_CLIENT_SERVER;
     ep_params.sockaddr.addr = reinterpret_cast<struct sockaddr*>(&addr);
     ep_params.sockaddr.addrlen = sizeof(addr);
+
+    std::string local_host;
+    if (!local_address.empty()) {
+        size_t local_colon_pos = local_address.rfind(':');
+        local_host = (local_colon_pos == std::string::npos) ? local_address
+                                                            : local_address.substr(0, local_colon_pos);
+    }
+    if (!local_host.empty() && local_host != "0.0.0.0" && local_host != "::") {
+        struct sockaddr_in local_addr;
+        std::memset(&local_addr, 0, sizeof(local_addr));
+        local_addr.sin_family = AF_INET;
+        local_addr.sin_port = htons(0);
+        if (inet_pton(AF_INET, local_host.c_str(), &local_addr.sin_addr) != 1) {
+            return Future<std::shared_ptr<Endpoint>>::make_error(
+                Status(ErrorCode::kInvalidArgument,
+                       std::string("Invalid local IP address: ") + local_host));
+        }
+
+        ep_params.field_mask |= UCP_EP_PARAM_FIELD_LOCAL_SOCK_ADDR;
+        ep_params.local_sockaddr.addr = reinterpret_cast<struct sockaddr*>(&local_addr);
+        ep_params.local_sockaddr.addrlen = sizeof(local_addr);
+    }
 
     ucp_ep_h ep_handle = nullptr;
     ucs_status_t status = ucp_ep_create(impl_->handle_, &ep_params, &ep_handle);
@@ -455,7 +484,8 @@ Listener::Ptr Worker::listen(const std::string& address,
         struct sockaddr_in* bound_addr = reinterpret_cast<struct sockaddr_in*>(&attr.sockaddr);
         char buf[32];
         inet_ntop(AF_INET, &bound_addr->sin_addr, buf, sizeof(buf));
-        listener_ptr->impl_->address_ = std::string(buf) + ":" + std::to_string(ntohs(bound_addr->sin_port));
+        const auto queried = std::string(buf) + ":" + std::to_string(ntohs(bound_addr->sin_port));
+        listener_ptr->impl_->address_ = internal::select_listener_address(address, queried);
     }
 
     return listener_ptr;

@@ -628,7 +628,7 @@ struct KVNode::Impl {
             return nullptr;
         }
 
-        auto connect = worker_->connect(data_addr);
+        auto connect = worker_->connect(data_addr, local_data_addr_);
         auto ep = connect.get();
         if (!ep) {
             if (status_out) {
