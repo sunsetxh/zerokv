@@ -1827,7 +1827,6 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
     const zerokv::MemoryRegion::Ptr& local_region,
     std::chrono::milliseconds timeout) {
     BatchFetchToResult result;
-    const auto op_start = SteadyClock::now();
     auto layout_status = validate_fetch_to_many_layout(items, local_region);
     layout_status.throw_if_error();
     if (!impl_ || !impl_->running_.load()) {
@@ -1859,7 +1858,7 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
     };
 
     auto try_fetch_key_placements =
-        [this, &placements_by_key, &local_region, &op_start](const std::string& key) -> PlacementAttemptState {
+        [this, &placements_by_key, &local_region](const std::string& key) -> PlacementAttemptState {
         Status status;
         auto meta = impl_->get_meta(key, &status, nullptr);
         if (!meta.has_value()) {
@@ -1871,31 +1870,14 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
 
         const auto& placements = placements_by_key.at(key);
         for (const auto* placement : placements) {
-            const auto fetch_start = SteadyClock::now();
-            trace_kv("KV_BATCH_FETCH fetch_begin key=" + key +
-                     " offset=" + std::to_string(placement->offset) +
-                     " length=" + std::to_string(placement->length) +
-                     " t_us=" + std::to_string(elapsed_us(op_start, fetch_start)));
             auto fetch = impl_->fetch_to_impl(*meta, local_region, placement->length, placement->offset, nullptr);
             if (!fetch.status().ok()) {
-                trace_kv("KV_BATCH_FETCH fetch_submit_failed key=" + key +
-                         " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())) +
-                         " status=" + std::to_string(static_cast<int>(fetch.status().code())));
                 return PlacementAttemptState::kFailed;
             }
             fetch.get();
             if (!fetch.status().ok()) {
-                trace_kv("KV_BATCH_FETCH fetch_complete_failed key=" + key +
-                         " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())) +
-                         " status=" + std::to_string(static_cast<int>(fetch.status().code())));
                 return PlacementAttemptState::kFailed;
             }
-            const auto fetch_end = SteadyClock::now();
-            trace_kv("KV_BATCH_FETCH fetch_done key=" + key +
-                     " offset=" + std::to_string(placement->offset) +
-                     " length=" + std::to_string(placement->length) +
-                     " fetch_us=" + std::to_string(elapsed_us(fetch_start, fetch_end)) +
-                     " t_us=" + std::to_string(elapsed_us(op_start, fetch_end)));
         }
         return PlacementAttemptState::kSuccess;
     };
@@ -1907,14 +1889,10 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
         auto attempt = try_fetch_key_placements(key);
         if (attempt == PlacementAttemptState::kSuccess) {
             append_placements(&result.completed, placements_by_key.at(key));
-            trace_kv("KV_BATCH_FETCH immediate_complete key=" + key +
-                     " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
             continue;
         }
         if (attempt == PlacementAttemptState::kFailed) {
             append_placements(&result.failed, placements_by_key.at(key));
-            trace_kv("KV_BATCH_FETCH immediate_failed key=" + key +
-                     " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
             continue;
         }
         pending.insert(key);
@@ -1931,10 +1909,6 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
         subscribe_future.get();
         subscribed_here.push_back(key);
     }
-
-    trace_kv("KV_BATCH_FETCH start total_keys=" + std::to_string(ordered_keys.size()) +
-             " pending=" + std::to_string(pending.size()) +
-             " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
 
     const auto deadline = SteadyClock::now() + timeout;
     auto next_lookup = SteadyClock::now();
@@ -1955,15 +1929,9 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
             if (attempt == PlacementAttemptState::kSuccess) {
                 append_placements(&result.completed, placements_by_key.at(event.key));
                 pending.erase(event.key);
-                trace_kv("KV_BATCH_FETCH event_complete key=" + event.key +
-                         " pending=" + std::to_string(pending.size()) +
-                         " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
             } else if (attempt == PlacementAttemptState::kFailed) {
                 append_placements(&result.failed, placements_by_key.at(event.key));
                 pending.erase(event.key);
-                trace_kv("KV_BATCH_FETCH event_failed key=" + event.key +
-                         " pending=" + std::to_string(pending.size()) +
-                         " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
             }
         }
         if (!unmatched.empty()) {
@@ -1988,16 +1956,10 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
             for (const auto& key : completed_keys) {
                 append_placements(&result.completed, placements_by_key.at(key));
                 pending.erase(key);
-                trace_kv("KV_BATCH_FETCH lookup_complete key=" + key +
-                         " pending=" + std::to_string(pending.size()) +
-                         " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
             }
             for (const auto& key : failed_keys) {
                 append_placements(&result.failed, placements_by_key.at(key));
                 pending.erase(key);
-                trace_kv("KV_BATCH_FETCH lookup_failed key=" + key +
-                         " pending=" + std::to_string(pending.size()) +
-                         " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
             }
             next_lookup = SteadyClock::now() + kWaitLookupRetryInterval;
         }
@@ -2020,11 +1982,6 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
             unsubscribe_future.get();
         }
     }
-
-    trace_kv("KV_BATCH_FETCH done completed=" + std::to_string(result.completed.size()) +
-             " failed=" + std::to_string(result.failed.size()) +
-             " timed_out=" + std::to_string(result.timed_out.size()) +
-             " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
 
     return result;
 }
