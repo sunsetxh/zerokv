@@ -1,16 +1,16 @@
 """
-axon - High-performance AXON transport and RDMA KV library with Python bindings.
+zerokv - High-performance AXON transport and RDMA KV library with Python bindings.
 
 Usage:
-    import axon
+    import zerokv
 
-    ctx = axon.Context(transport="ucx", num_workers=2)
+    ctx = zerokv.Context(transport="ucx", num_workers=2)
     worker = ctx.create_worker()
-    status = axon.KVServer().start("0.0.0.0:15000")
+    status = zerokv.KVServer().start("0.0.0.0:15000")
     status.throw_if_error()
 """
 
-from axon._core import (
+from zerokv._core import (
     # Core classes
     Config,
     Status,

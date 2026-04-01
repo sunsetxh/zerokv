@@ -7,14 +7,14 @@ Demonstrates the Python API for the AXON transport library.
 import asyncio
 import numpy as np
 
-import axon
+import zerokv
 
 # ============================================================================
 # Example 1: Basic asyncio send/recv
 # ============================================================================
 async def example_basic():
     """Tag-matched send/recv with asyncio."""
-    ctx = axon.Context(
+    ctx = zerokv.Context(
         transport="ucx",
         num_workers=2,
         memory_pool_size=128 * 1024 * 1024,
@@ -29,13 +29,13 @@ async def example_basic():
 
     # Send a numpy array (zero-copy via buffer protocol)
     data = np.ones((1024, 1024), dtype=np.float32)
-    await ep.tag_send(data, tag=axon.make_tag(0, 42))
+    await ep.tag_send(data, tag=zerokv.make_tag(0, 42))
 
     # Receive into a pre-allocated buffer
     recv_buf = np.empty((1024, 1024), dtype=np.float32)
     nbytes, matched_tag = await ep.tag_recv(recv_buf, tag=42)
 
-    print(f"Received {nbytes} bytes, tag={axon.tag_user(matched_tag)}")
+    print(f"Received {nbytes} bytes, tag={zerokv.tag_user(matched_tag)}")
     print(f"Data matches: {np.array_equal(data, recv_buf)}")
 
     await ep.close()
@@ -48,7 +48,7 @@ async def example_gpu():
     """Zero-copy GPU-to-GPU transfer using cupy arrays."""
     import cupy as cp
 
-    ctx = axon.Context(transport="ucx")
+    ctx = zerokv.Context(transport="ucx")
     worker = ctx.create_worker()
     worker.attach_to_event_loop()
 
@@ -71,7 +71,7 @@ async def example_gpu():
 # ============================================================================
 async def example_registered_memory():
     """Using MemoryRegion for pre-registered zero-copy transfers."""
-    ctx = axon.Context(transport="ucx")
+    ctx = zerokv.Context(transport="ucx")
     worker = ctx.create_worker()
     worker.attach_to_event_loop()
 
@@ -79,11 +79,11 @@ async def example_registered_memory():
 
     # Pre-register a large numpy array (avoids per-send registration overhead)
     big_array = np.zeros(1 << 30, dtype=np.uint8)  # 1 GiB
-    region = axon.MemoryRegion.register(ctx, big_array)
+    region = zerokv.MemoryRegion.register(ctx, big_array)
 
     # Hot loop: send from pre-registered memory (true zero-copy path)
     for i in range(100):
-        await ep.tag_send(region, tag=axon.make_tag(0, i))
+        await ep.tag_send(region, tag=zerokv.make_tag(0, i))
 
     await ep.close()
 
@@ -93,12 +93,12 @@ async def example_registered_memory():
 # ============================================================================
 async def example_memory_pool():
     """MemoryPool for efficient allocation of registered buffers."""
-    ctx = axon.Context(transport="ucx")
+    ctx = zerokv.Context(transport="ucx")
     worker = ctx.create_worker()
     worker.attach_to_event_loop()
 
     ep = await worker.connect("10.0.0.1:13337")
-    pool = axon.MemoryPool.create(ctx, pool_bytes=64 * 1024 * 1024)
+    pool = zerokv.MemoryPool.create(ctx, pool_bytes=64 * 1024 * 1024)
 
     # Concurrent sends using pool-allocated buffers
     tasks = []
@@ -108,7 +108,7 @@ async def example_memory_pool():
         arr = np.frombuffer(buf, dtype=np.float32)
         arr[:] = float(i)
 
-        task = asyncio.create_task(ep.tag_send(buf, tag=axon.make_tag(0, i)))
+        task = asyncio.create_task(ep.tag_send(buf, tag=zerokv.make_tag(0, i)))
         tasks.append((task, buf))
 
     # Wait for all sends, then return buffers to pool
@@ -125,14 +125,14 @@ async def example_memory_pool():
 # ============================================================================
 async def example_rdma():
     """One-sided RDMA operations."""
-    ctx = axon.Context(transport="ucx")
+    ctx = zerokv.Context(transport="ucx")
     worker = ctx.create_worker()
     worker.attach_to_event_loop()
 
     ep = await worker.connect("10.0.0.1:13337")
 
     # Allocate and register local memory
-    local = axon.MemoryRegion.allocate(ctx, 4096)
+    local = zerokv.MemoryRegion.allocate(ctx, 4096)
 
     # Exchange remote key out-of-band (e.g., via tag_send/tag_recv)
     remote_addr: int = 0  # received from peer
@@ -154,27 +154,27 @@ async def example_rdma():
 # ============================================================================
 async def example_server():
     """Server that accepts connections and echoes data."""
-    ctx = axon.Context(transport="ucx")
+    ctx = zerokv.Context(transport="ucx")
     worker = ctx.create_worker()
     worker.attach_to_event_loop()
 
-    async def handle_client(ep: axon.Endpoint):
+    async def handle_client(ep: zerokv.Endpoint):
         """Handle one client connection."""
         buf = np.empty(1024 * 1024, dtype=np.uint8)
         try:
             while ep.is_connected:
-                nbytes, tag = await ep.tag_recv(buf, tag=axon.TAG_ANY)
+                nbytes, tag = await ep.tag_recv(buf, tag=zerokv.TAG_ANY)
                 # Echo back
                 await ep.tag_send(
                     memoryview(buf)[:nbytes], tag=tag
                 )
-        except axon.AXONError as e:
-            if e.code != axon.ErrorCode.ENDPOINT_CLOSED:
+        except zerokv.AXONError as e:
+            if e.code != zerokv.ErrorCode.ENDPOINT_CLOSED:
                 raise
 
     clients: list[asyncio.Task] = []
 
-    def on_accept(ep: axon.Endpoint):
+    def on_accept(ep: zerokv.Endpoint):
         task = asyncio.create_task(handle_client(ep))
         clients.append(task)
 
@@ -190,12 +190,12 @@ async def example_server():
 # ============================================================================
 async def example_registration_cache():
     """RegistrationCache amortises registration for repeated buffers."""
-    ctx = axon.Context(transport="ucx")
+    ctx = zerokv.Context(transport="ucx")
     worker = ctx.create_worker()
     worker.attach_to_event_loop()
 
     ep = await worker.connect("10.0.0.1:13337")
-    cache = axon.RegistrationCache.create(ctx, max_entries=1024)
+    cache = zerokv.RegistrationCache.create(ctx, max_entries=1024)
 
     # Simulate dynamic buffer reuse
     buffers = [np.random.randn(4096).astype(np.float32) for _ in range(10)]
@@ -204,7 +204,7 @@ async def example_registration_cache():
         buf = buffers[i % len(buffers)]
         # Cache handles registration: first call registers, subsequent calls are cache hits
         region = cache.get_or_register(buf)
-        await ep.tag_send(region, tag=axon.make_tag(0, i))
+        await ep.tag_send(region, tag=zerokv.make_tag(0, i))
 
     print(f"Cache stats: hits={cache.hits}, misses={cache.misses}")
     await ep.close()
@@ -215,7 +215,7 @@ async def example_registration_cache():
 # ============================================================================
 async def example_concurrent():
     """Multiple concurrent send/recv using asyncio.gather."""
-    ctx = axon.Context(transport="ucx")
+    ctx = zerokv.Context(transport="ucx")
     worker = ctx.create_worker()
     worker.attach_to_event_loop()
 
@@ -224,17 +224,17 @@ async def example_concurrent():
     # Fire 10 sends concurrently
     arrays = [np.full(1024, i, dtype=np.float32) for i in range(10)]
     await asyncio.gather(
-        *(ep.tag_send(arr, tag=axon.make_tag(0, i)) for i, arr in enumerate(arrays))
+        *(ep.tag_send(arr, tag=zerokv.make_tag(0, i)) for i, arr in enumerate(arrays))
     )
 
     # Fire 10 receives concurrently
     recv_bufs = [np.empty(1024, dtype=np.float32) for _ in range(10)]
     results = await asyncio.gather(
-        *(ep.tag_recv(buf, tag=axon.make_tag(0, i)) for i, buf in enumerate(recv_bufs))
+        *(ep.tag_recv(buf, tag=zerokv.make_tag(0, i)) for i, buf in enumerate(recv_bufs))
     )
 
     for nbytes, matched_tag in results:
-        print(f"  tag={axon.tag_user(matched_tag)}, bytes={nbytes}")
+        print(f"  tag={zerokv.tag_user(matched_tag)}, bytes={nbytes}")
 
     await ep.close()
 

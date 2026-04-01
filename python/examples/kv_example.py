@@ -6,15 +6,15 @@ import argparse
 import sys
 import time
 
-import axon
+import zerokv
 
 
-def make_config(transport: str) -> axon.Config:
-    return axon.Config(transport=transport)
+def make_config(transport: str) -> zerokv.Config:
+    return zerokv.Config(transport=transport)
 
 
 def run_server(args: argparse.Namespace) -> int:
-    server = axon.KVServer(make_config(args.transport))
+    server = zerokv.KVServer(make_config(args.transport))
     status = server.start(args.listen)
     status.throw_if_error()
     print(f"kv server listening on {server.address}")
@@ -29,7 +29,7 @@ def run_server(args: argparse.Namespace) -> int:
 
 
 def run_publish(args: argparse.Namespace) -> int:
-    node = axon.KVNode(make_config(args.transport))
+    node = zerokv.KVNode(make_config(args.transport))
     status = node.start(args.server_addr, args.data_addr, args.node_id)
     status.throw_if_error()
     try:
@@ -58,7 +58,7 @@ def run_publish(args: argparse.Namespace) -> int:
 
 
 def run_fetch(args: argparse.Namespace) -> int:
-    node = axon.KVNode(make_config(args.transport))
+    node = zerokv.KVNode(make_config(args.transport))
     status = node.start(args.server_addr, args.data_addr, args.node_id)
     status.throw_if_error()
     try:

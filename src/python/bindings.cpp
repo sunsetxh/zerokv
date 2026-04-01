@@ -1,5 +1,5 @@
 /// @file src/python/bindings.cpp
-/// @brief nanobind bindings for the AXON library.
+/// @brief nanobind bindings for the zerokv library.
 ///
 /// Key design decisions:
 ///   - All blocking/async C++ calls release the GIL.
@@ -145,7 +145,7 @@ static zerokv::Config create_config(
 // Module definition
 // ---------------------------------------------------------------------------
 NB_MODULE(_core, m) {
-    m.doc() = "AXON high-performance transport library – native bindings";
+    m.doc() = "zerokv high-performance transport library - native bindings";
 
     // --- Constants -----------------------------------------------------------
     m.attr("TAG_ANY") = zerokv::kTagAny;

@@ -3,8 +3,8 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-INIT_FILE = ROOT / "python" / "axon" / "__init__.py"
-STUB_FILE = ROOT / "python" / "axon" / "_core.pyi"
+INIT_FILE = ROOT / "python" / "zerokv" / "__init__.py"
+STUB_FILE = ROOT / "python" / "zerokv" / "_core.pyi"
 
 
 class PythonApiSurfaceTest(unittest.TestCase):
@@ -22,7 +22,7 @@ class PythonApiSurfaceTest(unittest.TestCase):
             "SubscriptionEventType",
             "Status",
         ]:
-            self.assertIn(f'"{symbol}"', content, f"{symbol} should be exported from axon.__init__")
+            self.assertIn(f'"{symbol}"', content, f"{symbol} should be exported from zerokv.__init__")
 
     def test_stub_declares_modern_kv_api(self) -> None:
         content = STUB_FILE.read_text(encoding="utf-8")
