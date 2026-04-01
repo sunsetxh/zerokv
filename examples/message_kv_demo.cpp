@@ -20,6 +20,8 @@ using namespace zerokv::kv;
 
 namespace zerokv::examples::message_kv_demo {
 
+#ifndef MESSAGE_KV_DEMO_BUILD_TESTS
+
 namespace {
 
 std::vector<size_t> parse_sizes_impl(const std::string& csv) {
@@ -381,7 +383,6 @@ int run_rank1(const Args& args, const Config& cfg) {
 
 }  // namespace
 
-#ifndef MESSAGE_KV_DEMO_BUILD_TESTS
 int main(int argc, char** argv) {
     Args args;
     if (!parse_args(argc, argv, &args) || args.role.empty()) {
@@ -401,4 +402,7 @@ int main(int argc, char** argv) {
     print_usage(argv[0]);
     return 1;
 }
-#endif
+
+#endif  // MESSAGE_KV_DEMO_BUILD_TESTS
+
+}  // namespace zerokv::examples::message_kv_demo
