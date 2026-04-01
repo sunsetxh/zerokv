@@ -129,6 +129,7 @@ set(ZEROKV_SOURCES
     src/endpoint.cpp
     src/future.cpp
     src/memory.cpp
+    src/message_kv.cpp
     src/kv/protocol.cpp
     src/kv/metadata_store.cpp
     src/kv/tcp_transport.cpp
@@ -263,6 +264,10 @@ if(ZEROKV_BUILD_TESTS)
     target_link_libraries(test_kv_bench_integration PRIVATE zerokv GTest::gtest GTest::gtest_main)
     target_include_directories(test_kv_bench_integration PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME IntegrationKvBench COMMAND test_kv_bench_integration)
+
+    add_executable(test_message_kv tests/integration/test_message_kv.cpp)
+    target_link_libraries(test_message_kv PRIVATE zerokv GTest::gtest GTest::gtest_main)
+    add_test(NAME IntegrationMessageKV COMMAND test_message_kv)
 endif()
 
 # ---------------------------------------------------------------------------

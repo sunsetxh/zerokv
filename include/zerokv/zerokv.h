@@ -9,6 +9,7 @@
 #include "zerokv/endpoint.h"
 #include "zerokv/future.h"
 #include "zerokv/kv.h"
+#include "zerokv/message_kv.h"
 #include "zerokv/memory.h"
 #include "zerokv/worker.h"
 #include "zerokv/plugin/plugin.h"
