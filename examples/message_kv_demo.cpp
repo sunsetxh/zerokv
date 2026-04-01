@@ -219,16 +219,6 @@ bool parse_args(int argc, char** argv, Args* args) {
     return true;
 }
 
-std::string make_key(int sender_rank, int receiver_rank, int thread_index) {
-    return "msg-rank" + std::to_string(sender_rank) + "-to-rank" +
-           std::to_string(receiver_rank) + "-thread" + std::to_string(thread_index);
-}
-
-std::string make_rank_payload(int sender_rank, int thread_index) {
-    return "payload-from-rank" + std::to_string(sender_rank) + "-thread" +
-           std::to_string(thread_index);
-}
-
 std::string make_sender_node_id(const std::string& base, int thread_index) {
     return base + "-thread" + std::to_string(thread_index);
 }
@@ -236,14 +226,6 @@ std::string make_sender_node_id(const std::string& base, int thread_index) {
 uint64_t elapsed_us(SteadyClock::time_point start, SteadyClock::time_point end) {
     return static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
-}
-
-double throughput_mib_per_sec(size_t bytes, uint64_t elapsed_us_value) {
-    if (elapsed_us_value == 0) {
-        return 0.0;
-    }
-    const double seconds = static_cast<double>(elapsed_us_value) / 1000000.0;
-    return static_cast<double>(bytes) / (1024.0 * 1024.0) / seconds;
 }
 
 int run_rank0(const Args& args, const Config& cfg) {
