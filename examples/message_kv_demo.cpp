@@ -173,6 +173,7 @@ struct Args {
     int messages = 4;
     int timeout_ms = 5000;
     int post_recv_wait_ms = 2000;
+    int warmup_rounds = 1;
 };
 
 void print_usage(const char* argv0) {
@@ -181,10 +182,10 @@ void print_usage(const char* argv0) {
         << "  " << argv0
         << " --role rank0 --listen <addr> --data-addr <addr> --node-id <id>\n"
         << "           [--messages 4] [--timeout-ms 5000] [--post-recv-wait-ms 2000]"
-        << " [--sizes 1K,64K,...] [--transport tcp|rdma]\n"
+        << " [--warmup-rounds 1] [--sizes 1K,64K,...] [--transport tcp|rdma]\n"
         << "  " << argv0
         << " --role rank1 --server-addr <addr> --data-addr <addr> --node-id <id>\n"
-        << "           [--threads 4] [--sizes 1K,64K,...] [--timeout-ms 5000]"
+        << "           [--threads 4] [--warmup-rounds 1] [--sizes 1K,64K,...] [--timeout-ms 5000]"
         << " [--transport tcp|rdma]\n";
 }
 
@@ -213,6 +214,8 @@ bool parse_args(int argc, char** argv, Args* args) {
             args->timeout_ms = std::stoi(argv[++i]);
         } else if (arg == "--post-recv-wait-ms" && i + 1 < argc) {
             args->post_recv_wait_ms = std::stoi(argv[++i]);
+        } else if (arg == "--warmup-rounds" && i + 1 < argc) {
+            args->warmup_rounds = std::stoi(argv[++i]);
         } else {
             return false;
         }
@@ -245,6 +248,10 @@ int run_rank0(const Args& args, const Config& cfg) {
         std::cerr << "--post-recv-wait-ms must be >= 0\n";
         return 1;
     }
+    if (args.warmup_rounds < 0) {
+        std::cerr << "--warmup-rounds must be >= 0\n";
+        return 1;
+    }
 
     std::vector<size_t> sizes;
     try {
@@ -272,21 +279,23 @@ int run_rank0(const Args& args, const Config& cfg) {
         return 1;
     }
 
-    for (size_t round_index = 0; round_index < sizes.size(); ++round_index) {
-        auto mq = MessageKV::create(cfg);
-        try {
-            mq->start(NodeConfig{
-                .server_addr = server->address(),
-                .local_data_addr = args.data_addr,
-                .node_id = args.node_id + "-round" + std::to_string(round_index),
-            });
-        } catch (const std::exception& ex) {
-            std::cerr << "failed to start rank0 receiver: " << ex.what() << "\n";
-            server->stop();
-            return 1;
-        }
+    auto mq = MessageKV::create(cfg);
+    try {
+        mq->start(NodeConfig{
+            .server_addr = server->address(),
+            .local_data_addr = args.data_addr,
+            .node_id = args.node_id,
+        });
+    } catch (const std::exception& ex) {
+        std::cerr << "failed to start rank0 receiver: " << ex.what() << "\n";
+        server->stop();
+        return 1;
+    }
 
-        const size_t size_bytes = sizes[round_index];
+    auto run_round = [&](size_t protocol_round_index,
+                         size_t report_round_index,
+                         size_t size_bytes,
+                         bool print_summary) -> bool {
         const size_t total_bytes = size_bytes * static_cast<size_t>(args.messages);
 
         std::vector<MessageKV::BatchRecvItem> items;
@@ -298,9 +307,9 @@ int run_rank0(const Args& args, const Config& cfg) {
 
         for (int i = 0; i < args.messages; ++i) {
             const auto key = zerokv::examples::message_kv_demo::make_round_key(
-                round_index, size_bytes, static_cast<size_t>(i));
+                protocol_round_index, size_bytes, static_cast<size_t>(i));
             const auto payload = zerokv::examples::message_kv_demo::make_payload(
-                round_index, size_bytes, static_cast<size_t>(i));
+                protocol_round_index, size_bytes, static_cast<size_t>(i));
             keys.push_back(key);
             payloads.push_back(payload);
             items.push_back(MessageKV::BatchRecvItem{
@@ -325,49 +334,66 @@ int run_rank0(const Args& args, const Config& cfg) {
             const auto recv_end = SteadyClock::now();
             const auto recv_us = elapsed_us(recv_start, recv_end);
 
-            std::cout << zerokv::examples::message_kv_demo::render_recv_round_summary(
-                             round_index,
-                             size_bytes,
-                             result.completed.size(),
-                             result.failed.size(),
-                             result.timed_out.size(),
-                             result.completed_all,
-                             recv_us,
-                             total_bytes)
-                      << "\n";
-
-            if (!result.completed_all || !result.failed.empty() || !result.timed_out.empty()) {
-                mq->stop();
-                server->stop();
-                return 1;
-            }
-
-            for (int i = 0; i < args.messages; ++i) {
-                const size_t offset = static_cast<size_t>(i) * size_bytes;
-                const auto* data = static_cast<const char*>(region->address()) + offset;
-                const auto& expected_payload = payloads[static_cast<size_t>(i)];
-                if (std::memcmp(data, expected_payload.data(), expected_payload.size()) != 0) {
-                    throw std::runtime_error("received payload mismatch for key " +
-                                             keys[static_cast<size_t>(i)]);
-                }
-                std::cout << "RECV_OK key=" << keys[static_cast<size_t>(i)]
-                          << " bytes=" << size_bytes
-                          << " preview="
-                          << zerokv::examples::message_kv_demo::make_compact_preview(
-                                 expected_payload.data(), expected_payload.size(), 24)
+            if (print_summary) {
+                std::cout << zerokv::examples::message_kv_demo::render_recv_round_summary(
+                                 report_round_index,
+                                 size_bytes,
+                                 result.completed.size(),
+                                 result.failed.size(),
+                                 result.timed_out.size(),
+                                 result.completed_all,
+                                 recv_us,
+                                 total_bytes)
                           << "\n";
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(args.post_recv_wait_ms));
+
+            if (!result.completed_all || !result.failed.empty() || !result.timed_out.empty()) {
+                return false;
+            }
+
+            if (print_summary) {
+                for (int i = 0; i < args.messages; ++i) {
+                    const size_t offset = static_cast<size_t>(i) * size_bytes;
+                    const auto* data = static_cast<const char*>(region->address()) + offset;
+                    const auto& expected_payload = payloads[static_cast<size_t>(i)];
+                    if (std::memcmp(data, expected_payload.data(), expected_payload.size()) != 0) {
+                        throw std::runtime_error("received payload mismatch for key " +
+                                                 keys[static_cast<size_t>(i)]);
+                    }
+                    std::cout << "RECV_OK key=" << keys[static_cast<size_t>(i)]
+                              << " bytes=" << size_bytes
+                              << " preview="
+                              << zerokv::examples::message_kv_demo::make_compact_preview(
+                                     expected_payload.data(), expected_payload.size(), 24)
+                              << "\n";
+                }
+            }
+            return true;
         } catch (const std::exception& ex) {
             std::cerr << "RECV_ERR message=" << ex.what() << "\n";
+            return false;
+        }
+    };
+
+    size_t protocol_round_index = 0;
+    for (int warmup = 0; warmup < args.warmup_rounds; ++warmup, ++protocol_round_index) {
+        if (!run_round(protocol_round_index, 0, sizes.front(), false)) {
             mq->stop();
             server->stop();
             return 1;
         }
-
-        mq->stop();
     }
 
+    for (size_t round_index = 0; round_index < sizes.size(); ++round_index, ++protocol_round_index) {
+        if (!run_round(protocol_round_index, round_index, sizes[round_index], true)) {
+            mq->stop();
+            server->stop();
+            return 1;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(args.post_recv_wait_ms));
+    }
+
+    mq->stop();
     server->stop();
     return 0;
 }
@@ -381,6 +407,10 @@ int run_rank1(const Args& args, const Config& cfg) {
         std::cerr << "--threads must be > 0\n";
         return 1;
     }
+    if (args.warmup_rounds < 0) {
+        std::cerr << "--warmup-rounds must be >= 0\n";
+        return 1;
+    }
     std::vector<size_t> sizes;
     try {
         sizes = zerokv::examples::message_kv_demo::parse_sizes_csv(args.sizes_csv);
@@ -389,8 +419,20 @@ int run_rank1(const Args& args, const Config& cfg) {
         return 1;
     }
 
-    for (size_t round_index = 0; round_index < sizes.size(); ++round_index) {
-        const size_t size_bytes = sizes[round_index];
+    std::vector<MessageKV::Ptr> workers_mq(static_cast<size_t>(args.threads));
+    for (int i = 0; i < args.threads; ++i) {
+        workers_mq[static_cast<size_t>(i)] = MessageKV::create(cfg);
+        workers_mq[static_cast<size_t>(i)]->start(NodeConfig{
+            .server_addr = args.server_addr,
+            .local_data_addr = args.data_addr,
+            .node_id = make_sender_node_id(args.node_id, 0, i),
+        });
+    }
+
+    auto run_round = [&](size_t protocol_round_index,
+                         size_t report_round_index,
+                         size_t size_bytes,
+                         bool print_summary) -> bool {
         std::vector<std::thread> workers;
         workers.reserve(static_cast<size_t>(args.threads));
         std::vector<std::exception_ptr> errors(static_cast<size_t>(args.threads));
@@ -398,36 +440,29 @@ int run_rank1(const Args& args, const Config& cfg) {
         const size_t total_bytes = size_bytes * static_cast<size_t>(args.threads);
 
         const auto round_start = SteadyClock::now();
-
         for (int i = 0; i < args.threads; ++i) {
-            workers.emplace_back([&, i, round_index, size_bytes] {
+            workers.emplace_back([&, i, protocol_round_index, size_bytes] {
                 try {
-                    auto mq = MessageKV::create(cfg);
-                    mq->start(NodeConfig{
-                        .server_addr = args.server_addr,
-                        .local_data_addr = args.data_addr,
-                        .node_id = make_sender_node_id(args.node_id, round_index, i),
-                    });
-
+                    auto& mq = workers_mq[static_cast<size_t>(i)];
                     const auto key = zerokv::examples::message_kv_demo::make_round_key(
-                        round_index, size_bytes, static_cast<size_t>(i));
+                        protocol_round_index, size_bytes, static_cast<size_t>(i));
                     const auto payload = zerokv::examples::message_kv_demo::make_payload(
-                        round_index, size_bytes, static_cast<size_t>(i));
+                        protocol_round_index, size_bytes, static_cast<size_t>(i));
                     const auto send_start = SteadyClock::now();
                     mq->send(key, payload.data(), payload.size());
                     const auto send_end = SteadyClock::now();
                     send_us[static_cast<size_t>(i)] = elapsed_us(send_start, send_end);
-                    std::cout << "SEND_OK key=" << key
-                              << " value=" << payload
-                              << " send_us=" << send_us[static_cast<size_t>(i)]
-                              << "\n";
-                    mq->stop();
+                    if (print_summary) {
+                        std::cout << "SEND_OK key=" << key
+                                  << " value=" << payload
+                                  << " send_us=" << send_us[static_cast<size_t>(i)]
+                                  << "\n";
+                    }
                 } catch (...) {
                     errors[static_cast<size_t>(i)] = std::current_exception();
                 }
             });
         }
-
         for (auto& worker : workers) {
             worker.join();
         }
@@ -441,7 +476,7 @@ int run_rank1(const Args& args, const Config& cfg) {
                 } catch (const std::exception& ex) {
                     std::cerr << "SEND_ERR message=" << ex.what() << "\n";
                 }
-                return 1;
+                return false;
             }
         }
 
@@ -452,14 +487,40 @@ int run_rank1(const Args& args, const Config& cfg) {
             }
         }
         const auto total_us = elapsed_us(round_start, round_end);
-        std::cout << zerokv::examples::message_kv_demo::render_send_round_summary(
-                         round_index,
-                         size_bytes,
-                         static_cast<size_t>(args.threads),
-                         total_us,
-                         max_thread_send_us,
-                         total_bytes)
-                  << "\n";
+        if (print_summary) {
+            std::cout << zerokv::examples::message_kv_demo::render_send_round_summary(
+                             report_round_index,
+                             size_bytes,
+                             static_cast<size_t>(args.threads),
+                             total_us,
+                             max_thread_send_us,
+                             total_bytes)
+                      << "\n";
+        }
+        return true;
+    };
+
+    size_t protocol_round_index = 0;
+    for (int warmup = 0; warmup < args.warmup_rounds; ++warmup, ++protocol_round_index) {
+        if (!run_round(protocol_round_index, 0, sizes.front(), false)) {
+            for (auto& mq : workers_mq) {
+                mq->stop();
+            }
+            return 1;
+        }
+    }
+
+    for (size_t round_index = 0; round_index < sizes.size(); ++round_index, ++protocol_round_index) {
+        if (!run_round(protocol_round_index, round_index, sizes[round_index], true)) {
+            for (auto& mq : workers_mq) {
+                mq->stop();
+            }
+            return 1;
+        }
+    }
+
+    for (auto& mq : workers_mq) {
+        mq->stop();
     }
 
     return 0;

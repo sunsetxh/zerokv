@@ -183,9 +183,12 @@ scenario. The default sweep list is `1K,64K,1M,4M,16M,32M,64M,128M`.
 
 - `RANK0` runs `KVServer + MessageKV receiver` in one process
 - `RANK1` sends 4 messages per round from 4 threads
+- both sides default to `--warmup-rounds 1`, reusing MessageKV instances across
+  rounds so the measured rounds are closer to steady-state behavior
 - the last round allocates about `4 * 128MiB = 512MiB` of receive region in total
-- the first round may include cold-start costs; if steady-state matters, start
-  with a small size or run a warmup pass first
+- the warmup rounds use the first size in `--sizes` and do not print
+  `SEND_ROUND` / `RECV_ROUND`
+- if you want raw cold-start behavior, set `--warmup-rounds 0`
 
 Build:
 
@@ -209,6 +212,7 @@ Run on two nodes:
   --data-addr 10.0.0.1:0 \
   --node-id rank0-receiver \
   --messages 4 \
+  --warmup-rounds 1 \
   --sizes 1K,64K,1M,4M,16M,32M,64M,128M \
   --timeout-ms 30000 \
   --transport rdma
@@ -220,6 +224,7 @@ Run on two nodes:
   --data-addr 10.0.0.2:0 \
   --node-id rank1-sender \
   --threads 4 \
+  --warmup-rounds 1 \
   --sizes 1K,64K,1M,4M,16M,32M,64M,128M \
   --transport rdma
 ```
