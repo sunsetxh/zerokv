@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(zerokv VERSION 1.0.0 LANGUAGES CXX)
 
+include(CMakePackageConfigHelpers)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -141,6 +143,7 @@ target_include_directories(zerokv
             $<INSTALL_INTERFACE:include>
     PRIVATE ${CMAKE_SOURCE_DIR}/src
 )
+target_compile_features(zerokv PUBLIC cxx_std_20)
 target_link_libraries(zerokv PUBLIC PkgConfig::UCX pthread)
 
 # Static library variant
@@ -150,6 +153,7 @@ if(ZEROKV_BUILD_STATIC)
         PUBLIC  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
         PRIVATE ${CMAKE_SOURCE_DIR}/src
     )
+    target_compile_features(zerokv_static PUBLIC cxx_std_20)
     target_link_libraries(zerokv_static PUBLIC PkgConfig::UCX pthread)
     set_target_properties(zerokv_static PROPERTIES OUTPUT_NAME zerokv)
 endif()
@@ -308,8 +312,16 @@ install(TARGETS zerokv EXPORT zerokvTargets
     RUNTIME DESTINATION bin
 )
 install(DIRECTORY include/zerokv DESTINATION include)
+configure_package_config_file(
+    "${CMAKE_SOURCE_DIR}/cmake/zerokvConfig.cmake.in"
+    "${CMAKE_BINARY_DIR}/zerokvConfig.cmake"
+    INSTALL_DESTINATION lib/cmake/zerokv
+)
 install(EXPORT zerokvTargets
-    FILE zerokvConfig.cmake
+    FILE zerokvTargets.cmake
     NAMESPACE zerokv::
+    DESTINATION lib/cmake/zerokv
+)
+install(FILES "${CMAKE_BINARY_DIR}/zerokvConfig.cmake"
     DESTINATION lib/cmake/zerokv
 )
