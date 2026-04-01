@@ -11,8 +11,10 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -45,6 +47,20 @@ uint64_t elapsed_us(SteadyClock::time_point start, SteadyClock::time_point end) 
         return 1;
     }
     return static_cast<uint64_t>(us);
+}
+
+bool kv_trace_enabled() {
+    static const bool enabled = []() {
+        const char* value = std::getenv("ZEROKV_KV_TRACE");
+        return value != nullptr && value[0] != '\0' && value[0] != '0';
+    }();
+    return enabled;
+}
+
+void trace_kv(const std::string& line) {
+    if (kv_trace_enabled()) {
+        std::cerr << line << "\n";
+    }
 }
 
 std::string make_ephemeral_bind_addr(const std::string& addr) {
@@ -1290,6 +1306,79 @@ Status KVNode::wait_for_subscription_event(const std::string& key,
     return Status(ErrorCode::kTimeout, "timed out waiting for subscription event");
 }
 
+std::optional<SubscriptionEvent> KVNode::wait_for_any_subscription_event(
+    const std::vector<std::string>& keys,
+    std::chrono::milliseconds timeout) {
+    if (!impl_ || !impl_->running_.load()) {
+        Status(ErrorCode::kConnectionRefused, "KVNode is not running").throw_if_error();
+    }
+    auto deduped = dedupe_keys(keys);
+    if (deduped.empty()) {
+        Status(ErrorCode::kInvalidArgument, "at least one key is required").throw_if_error();
+    }
+    std::unordered_set<std::string> wanted;
+    wanted.reserve(deduped.size());
+    for (const auto& key : deduped) {
+        if (key.empty()) {
+            Status(ErrorCode::kInvalidArgument, "key is required").throw_if_error();
+        }
+        wanted.insert(key);
+    }
+
+    trace_kv("KV_WAIT_ANY start keys=" + std::to_string(wanted.size()) +
+             " timeout_ms=" + std::to_string(timeout.count()));
+
+    auto matches = [&](const SubscriptionEvent& event) {
+        return wanted.count(event.key) &&
+               (event.type == SubscriptionEventType::kPublished ||
+                event.type == SubscriptionEventType::kUpdated);
+    };
+
+    auto consume_matching_event = [&]() -> std::optional<SubscriptionEvent> {
+        auto it = std::find_if(impl_->subscription_events_.begin(),
+                               impl_->subscription_events_.end(),
+                               matches);
+        if (it == impl_->subscription_events_.end()) {
+            return std::nullopt;
+        }
+        auto event = std::move(*it);
+        impl_->subscription_events_.erase(it);
+        return event;
+    };
+
+    std::unique_lock<std::mutex> lock(impl_->subscription_mu_);
+    if (auto event = consume_matching_event()) {
+        trace_kv("KV_WAIT_ANY match key=" + event->key +
+                 " type=" + std::to_string(static_cast<int>(event->type)));
+        return event;
+    }
+
+    const auto deadline = SteadyClock::now() + timeout;
+    while (impl_->running_.load()) {
+        if (impl_->subscription_cv_.wait_until(lock, deadline, [&] {
+                return std::any_of(impl_->subscription_events_.begin(),
+                                   impl_->subscription_events_.end(),
+                                   matches);
+            })) {
+            if (auto event = consume_matching_event()) {
+                trace_kv("KV_WAIT_ANY match key=" + event->key +
+                         " type=" + std::to_string(static_cast<int>(event->type)));
+                return event;
+            }
+        }
+        if (SteadyClock::now() >= deadline) {
+            break;
+        }
+    }
+
+    if (!impl_->running_.load()) {
+        Status(ErrorCode::kConnectionRefused, "KVNode is not running").throw_if_error();
+    }
+    trace_kv("KV_WAIT_ANY timeout keys=" + std::to_string(wanted.size()) +
+             " timeout_ms=" + std::to_string(timeout.count()));
+    return std::nullopt;
+}
+
 Status KVNode::wait_for_key(const std::string& key, std::chrono::milliseconds timeout) {
     if (!impl_ || !impl_->running_.load()) {
         return Status(ErrorCode::kConnectionRefused, "KVNode is not running");
@@ -1738,6 +1827,7 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
     const zerokv::MemoryRegion::Ptr& local_region,
     std::chrono::milliseconds timeout) {
     BatchFetchToResult result;
+    const auto op_start = SteadyClock::now();
     auto layout_status = validate_fetch_to_many_layout(items, local_region);
     layout_status.throw_if_error();
     if (!impl_ || !impl_->running_.load()) {
@@ -1769,7 +1859,7 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
     };
 
     auto try_fetch_key_placements =
-        [this, &placements_by_key, &local_region](const std::string& key) -> PlacementAttemptState {
+        [this, &placements_by_key, &local_region, &op_start](const std::string& key) -> PlacementAttemptState {
         Status status;
         auto meta = impl_->get_meta(key, &status, nullptr);
         if (!meta.has_value()) {
@@ -1781,14 +1871,31 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
 
         const auto& placements = placements_by_key.at(key);
         for (const auto* placement : placements) {
+            const auto fetch_start = SteadyClock::now();
+            trace_kv("KV_BATCH_FETCH fetch_begin key=" + key +
+                     " offset=" + std::to_string(placement->offset) +
+                     " length=" + std::to_string(placement->length) +
+                     " t_us=" + std::to_string(elapsed_us(op_start, fetch_start)));
             auto fetch = impl_->fetch_to_impl(*meta, local_region, placement->length, placement->offset, nullptr);
             if (!fetch.status().ok()) {
+                trace_kv("KV_BATCH_FETCH fetch_submit_failed key=" + key +
+                         " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())) +
+                         " status=" + std::to_string(static_cast<int>(fetch.status().code())));
                 return PlacementAttemptState::kFailed;
             }
             fetch.get();
             if (!fetch.status().ok()) {
+                trace_kv("KV_BATCH_FETCH fetch_complete_failed key=" + key +
+                         " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())) +
+                         " status=" + std::to_string(static_cast<int>(fetch.status().code())));
                 return PlacementAttemptState::kFailed;
             }
+            const auto fetch_end = SteadyClock::now();
+            trace_kv("KV_BATCH_FETCH fetch_done key=" + key +
+                     " offset=" + std::to_string(placement->offset) +
+                     " length=" + std::to_string(placement->length) +
+                     " fetch_us=" + std::to_string(elapsed_us(fetch_start, fetch_end)) +
+                     " t_us=" + std::to_string(elapsed_us(op_start, fetch_end)));
         }
         return PlacementAttemptState::kSuccess;
     };
@@ -1800,10 +1907,14 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
         auto attempt = try_fetch_key_placements(key);
         if (attempt == PlacementAttemptState::kSuccess) {
             append_placements(&result.completed, placements_by_key.at(key));
+            trace_kv("KV_BATCH_FETCH immediate_complete key=" + key +
+                     " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
             continue;
         }
         if (attempt == PlacementAttemptState::kFailed) {
             append_placements(&result.failed, placements_by_key.at(key));
+            trace_kv("KV_BATCH_FETCH immediate_failed key=" + key +
+                     " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
             continue;
         }
         pending.insert(key);
@@ -1820,6 +1931,10 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
         subscribe_future.get();
         subscribed_here.push_back(key);
     }
+
+    trace_kv("KV_BATCH_FETCH start total_keys=" + std::to_string(ordered_keys.size()) +
+             " pending=" + std::to_string(pending.size()) +
+             " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
 
     const auto deadline = SteadyClock::now() + timeout;
     auto next_lookup = SteadyClock::now();
@@ -1840,9 +1955,15 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
             if (attempt == PlacementAttemptState::kSuccess) {
                 append_placements(&result.completed, placements_by_key.at(event.key));
                 pending.erase(event.key);
+                trace_kv("KV_BATCH_FETCH event_complete key=" + event.key +
+                         " pending=" + std::to_string(pending.size()) +
+                         " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
             } else if (attempt == PlacementAttemptState::kFailed) {
                 append_placements(&result.failed, placements_by_key.at(event.key));
                 pending.erase(event.key);
+                trace_kv("KV_BATCH_FETCH event_failed key=" + event.key +
+                         " pending=" + std::to_string(pending.size()) +
+                         " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
             }
         }
         if (!unmatched.empty()) {
@@ -1867,10 +1988,16 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
             for (const auto& key : completed_keys) {
                 append_placements(&result.completed, placements_by_key.at(key));
                 pending.erase(key);
+                trace_kv("KV_BATCH_FETCH lookup_complete key=" + key +
+                         " pending=" + std::to_string(pending.size()) +
+                         " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
             }
             for (const auto& key : failed_keys) {
                 append_placements(&result.failed, placements_by_key.at(key));
                 pending.erase(key);
+                trace_kv("KV_BATCH_FETCH lookup_failed key=" + key +
+                         " pending=" + std::to_string(pending.size()) +
+                         " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
             }
             next_lookup = SteadyClock::now() + kWaitLookupRetryInterval;
         }
@@ -1893,6 +2020,11 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
             unsubscribe_future.get();
         }
     }
+
+    trace_kv("KV_BATCH_FETCH done completed=" + std::to_string(result.completed.size()) +
+             " failed=" + std::to_string(result.failed.size()) +
+             " timed_out=" + std::to_string(result.timed_out.size()) +
+             " t_us=" + std::to_string(elapsed_us(op_start, SteadyClock::now())));
 
     return result;
 }

@@ -161,6 +161,9 @@ public:
     [[nodiscard]] std::vector<SubscriptionEvent> drain_subscription_events();
     zerokv::Status wait_for_subscription_event(const std::string& key,
                                                std::chrono::milliseconds timeout);
+    std::optional<SubscriptionEvent> wait_for_any_subscription_event(
+        const std::vector<std::string>& keys,
+        std::chrono::milliseconds timeout);
     zerokv::Status wait_for_key(const std::string& key,
                               std::chrono::milliseconds timeout);
     WaitKeysResult wait_for_keys(const std::vector<std::string>& keys,

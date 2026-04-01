@@ -1218,6 +1218,57 @@ TEST(KvNodeIntegrationTest, FetchToManyRejectsOverlappingRanges) {
     }, region), std::system_error);
 }
 
+TEST(KvNodeIntegrationTest, WaitForAnySubscriptionEventReturnsMatchingKey) {
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
+
+    auto server = KVServer::create(cfg);
+    ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
+
+    auto publisher = KVNode::create(cfg);
+    auto reader = KVNode::create(cfg);
+    ASSERT_TRUE(publisher->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:0",
+        .node_id = "publisher-any-event",
+    }).ok());
+    ASSERT_TRUE(reader->start(NodeConfig{
+        .server_addr = server->address(),
+        .local_data_addr = "127.0.0.1:0",
+        .node_id = "reader-any-event",
+    }).ok());
+
+    auto sub_a = reader->subscribe("any-a");
+    auto sub_b = reader->subscribe("any-b");
+    ASSERT_TRUE(sub_a.status().ok());
+    ASSERT_TRUE(sub_b.status().ok());
+    sub_a.get();
+    sub_b.get();
+
+    std::optional<zerokv::kv::SubscriptionEvent> observed;
+    std::thread waiter([&] {
+        observed = reader->wait_for_any_subscription_event(
+            {"any-a", "any-b"}, std::chrono::milliseconds(1000));
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    auto publish = publisher->publish("any-b", "b", 1);
+    ASSERT_TRUE(publish.status().ok());
+    publish.get();
+    waiter.join();
+
+    ASSERT_TRUE(observed.has_value());
+    EXPECT_EQ(observed->key, "any-b");
+    EXPECT_EQ(observed->type, zerokv::kv::SubscriptionEventType::kPublished);
+
+    auto unsub_a = reader->unsubscribe("any-a");
+    auto unsub_b = reader->unsubscribe("any-b");
+    if (unsub_a.status().ok()) unsub_a.get();
+    if (unsub_b.status().ok()) unsub_b.get();
+    reader->stop();
+    publisher->stop();
+    server->stop();
+}
+
 TEST(KvNodeIntegrationTest, FetchToManyRejectsOutOfBoundsRanges) {
     auto cfg = zerokv::Config::builder().set_transport("tcp").build();
     auto node = KVNode::create(cfg);
