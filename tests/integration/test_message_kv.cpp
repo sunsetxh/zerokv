@@ -37,6 +37,57 @@ TEST(MessageKvApiSurfaceTest, PublicTypesExist) {
     EXPECT_FALSE(result.completed_all);
 }
 
+TEST_F(MessageKvIntegrationTest, SendRejectsEmptyKey) {
+    auto mq = zerokv::MessageKV::create(cfg);
+
+    auto ctx = zerokv::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 8);
+    ASSERT_NE(region, nullptr);
+
+    expect_system_error_code([&] { mq->send("", "x", 1); },
+                             zerokv::ErrorCode::kInvalidArgument);
+    expect_system_error_code([&] { mq->send_region("", region, 1); },
+                             zerokv::ErrorCode::kInvalidArgument);
+}
+
+TEST_F(MessageKvIntegrationTest, RecvRejectsEmptyKey) {
+    auto mq = zerokv::MessageKV::create(cfg);
+
+    auto ctx = zerokv::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 8);
+    ASSERT_NE(region, nullptr);
+
+    expect_system_error_code(
+        [&] { mq->recv("", region, 1, 0, std::chrono::milliseconds(1)); },
+        zerokv::ErrorCode::kInvalidArgument);
+}
+
+TEST_F(MessageKvIntegrationTest, RecvBatchRejectsInvalidLayoutBeforeWaiting) {
+    auto mq = zerokv::MessageKV::create(cfg);
+    auto server = zerokv::kv::KVServer::create(cfg);
+    ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
+    mq->start({server->address(), "127.0.0.1:0", "receiver"});
+
+    auto ctx = zerokv::Context::create(cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 16);
+    ASSERT_NE(region, nullptr);
+
+    expect_system_error_code(
+        [&] {
+            (void)mq->recv_batch({
+                {"a", 8, 0},
+                {"b", 8, 4},
+            }, region, std::chrono::milliseconds(1));
+        },
+        zerokv::ErrorCode::kInvalidArgument);
+
+    mq->stop();
+    server->stop();
+}
+
 TEST_F(MessageKvIntegrationTest, StopBeforeStartIsSafe) {
     auto mq = zerokv::MessageKV::create(cfg);
     EXPECT_NO_THROW(mq->stop());

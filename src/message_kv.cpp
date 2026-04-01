@@ -170,14 +170,14 @@ void MessageKV::send(const std::string& key, const void* data, size_t size) {
     auto guard = make_scope_exit([this] { impl_->sweep_cleanup_locked(); });
     (void)guard;
     impl_->sweep_cleanup_locked();
-    if (!impl_->node_ready_locked()) {
-        throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
-    }
     if (key.empty()) {
         throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
     }
     if (size > 0 && data == nullptr) {
         throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
+    }
+    if (!impl_->node_ready_locked()) {
+        throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
     }
 
     auto publish = impl_->node->publish(key, data, size);
@@ -196,9 +196,6 @@ void MessageKV::send_region(const std::string& key,
     auto guard = make_scope_exit([this] { impl_->sweep_cleanup_locked(); });
     (void)guard;
     impl_->sweep_cleanup_locked();
-    if (!impl_->node_ready_locked()) {
-        throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
-    }
     if (key.empty()) {
         throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
     }
@@ -207,6 +204,9 @@ void MessageKV::send_region(const std::string& key,
     }
     if (size > region->length()) {
         throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
+    }
+    if (!impl_->node_ready_locked()) {
+        throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
     }
 
     auto publish = impl_->node->publish_region(key, region, size);
@@ -223,6 +223,9 @@ void MessageKV::recv(const std::string& key,
                      size_t length,
                      size_t offset,
                      std::chrono::milliseconds timeout) {
+    if (key.empty()) {
+        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
+    }
     auto result = recv_batch({BatchRecvItem{key, length, offset}}, region, timeout);
     if (!result.completed_all || !result.failed.empty() || !result.timed_out.empty()) {
         throw std::system_error(make_error_code(ErrorCode::kTimeout));

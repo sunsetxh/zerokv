@@ -14,6 +14,8 @@ KV cache inference transfer, and HPC scenarios.
   unpublished, owner lost) with polling API
 - **Wait-and-fetch** — synchronous helpers to wait for keys then fetch them:
   single-key and batch, partial results on timeout, first-success-wins
+- **MessageKV** — message-style wrapper for applications that already manage
+  unique keys and want bounded ack-based cleanup
 - **Metrics** — per-operation latency breakdown (publish, fetch, push)
 - **Benchmark** — size-sweep publish/fetch benchmark (`kv_bench`)
 - **Python bindings** — nanobind-based Python API for KV operations
@@ -164,6 +166,15 @@ Accordingly:
 - `bench-publish` supports `--publish-api copy|region`
   - `copy` uses `publish()`
   - `region` uses `publish_region()` and is the zero-copy publish path
+
+## MessageKV
+
+`zerokv::MessageKV` is a scenario-oriented wrapper for message workflows where
+the application already owns unique keys.
+
+- `send()` / `send_region()` publish message keys and record them for bounded cleanup
+- `recv()` / `recv_batch()` wait for message keys and fetch into caller-owned memory
+- internal ack markers stay hidden from callers
 
 ### Python KV example
 
