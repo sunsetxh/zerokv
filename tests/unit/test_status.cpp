@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "zerokv/common.h"
 
-using namespace axon;
+using namespace zerokv;
 
 TEST(StatusTest, DefaultStatus) {
     Status s;

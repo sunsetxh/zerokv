@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file axon/plugin/plugin.h
+/// @file zerokv/plugin/plugin.h
 /// @brief Plugin interface for NCCL/HCCL collective communication backends.
 ///
 /// A Plugin bridges collective communication libraries (NCCL, HCCL) with
@@ -8,11 +8,11 @@
 /// discovery model:
 ///
 ///   1. Shared libraries implement the CollectivePlugin interface.
-///   2. Each .so exports a C factory function: axon_plugin_create().
+///   2. Each .so exports a C factory function: zerokv_plugin_create().
 ///   3. PluginRegistry discovers and loads plugins at runtime.
 ///
 /// Plugin lifecycle:
-///   load .so  ->  axon_plugin_create()  ->  init(ctx)  ->  create_comm()
+///   load .so  ->  zerokv_plugin_create()  ->  init(ctx)  ->  create_comm()
 ///   ->  allreduce / broadcast / ...  ->  destroy_comm()  ->  shutdown()
 
 #include "zerokv/common.h"
@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-namespace axon {
+namespace zerokv {
 namespace plugin {
 
 // ---------------------------------------------------------------------------
@@ -207,11 +207,11 @@ public:
 /// Every plugin .so must export this symbol.
 using PluginFactoryFunc = CollectivePlugin* (*)();
 
-#define AXON_PLUGIN_EXPORT extern "C" __attribute__((visibility("default")))
+#define ZEROKV_PLUGIN_EXPORT extern "C" __attribute__((visibility("default")))
 
 /// Example usage in a plugin .so:
 ///
-///   AXON_PLUGIN_EXPORT axon::plugin::CollectivePlugin* axon_plugin_create() {
+///   ZEROKV_PLUGIN_EXPORT zerokv::plugin::CollectivePlugin* zerokv_plugin_create() {
 ///       return new MyNcclPlugin();
 ///   }
 
@@ -232,7 +232,7 @@ public:
     /// Load a plugin from a shared library path.
     Status load_plugin(const std::string& library_path);
 
-    /// Discover plugins in a directory (searches for libaxon_plugin_*.so).
+    /// Discover plugins in a directory (searches for libzerokv_plugin_*.so).
     Status discover(const std::string& directory);
 
     /// Look up a plugin by name.
@@ -251,4 +251,4 @@ private:
 };
 
 }  // namespace plugin
-}  // namespace axon
+}  // namespace zerokv

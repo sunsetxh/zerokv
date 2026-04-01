@@ -14,7 +14,7 @@
 #include <cstring>
 #include <thread>
 
-using namespace axon;
+using namespace zerokv;
 
 int main() {
     // Create config - use TCP or shmem

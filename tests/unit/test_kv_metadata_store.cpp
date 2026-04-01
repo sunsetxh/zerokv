@@ -4,9 +4,9 @@
 
 namespace {
 
-using axon::kv::detail::KeyMetadata;
-using axon::kv::detail::MetadataStore;
-using axon::kv::detail::NodeInfo;
+using zerokv::kv::detail::KeyMetadata;
+using zerokv::kv::detail::MetadataStore;
+using zerokv::kv::detail::NodeInfo;
 
 NodeInfo make_node(std::string id, std::string data_addr = "10.0.0.1:14000") {
     NodeInfo node;

@@ -13,7 +13,7 @@
 #include <array>
 #include <thread>
 
-using namespace axon;
+using namespace zerokv;
 
 namespace {
 

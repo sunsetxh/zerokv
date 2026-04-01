@@ -2,7 +2,7 @@
 #include "zerokv/config.h"
 #include "zerokv/memory.h"
 
-using namespace axon;
+using namespace zerokv;
 
 class MemoryTest : public ::testing::Test {
 protected:

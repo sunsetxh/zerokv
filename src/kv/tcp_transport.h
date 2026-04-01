@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace axon::kv::detail {
+namespace zerokv::kv::detail {
 
 class TcpTransport {
 public:
@@ -25,4 +25,4 @@ public:
     static void close_fd(int* fd);
 };
 
-}  // namespace axon::kv::detail
+}  // namespace zerokv::kv::detail

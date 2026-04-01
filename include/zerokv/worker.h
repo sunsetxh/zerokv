@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file axon/worker.h
+/// @file zerokv/worker.h
 /// @brief Worker – the UCX progress engine and endpoint factory.
 ///
 /// Each Worker owns one ucp_worker_h. The implementation enables UCX's
@@ -8,7 +8,7 @@
 /// lifecycle control as coordinated operations.
 ///
 /// Usage:
-///   auto worker = axon::Worker::create(ctx);
+///   auto worker = zerokv::Worker::create(ctx);
 ///   auto ep     = worker->connect("192.168.1.2:13337");
 
 #include "zerokv/common.h"
@@ -24,7 +24,7 @@
 #include <atomic>
 #include <condition_variable>
 
-namespace axon {
+namespace zerokv {
 
 // Forward
 class Context;
@@ -185,4 +185,4 @@ private:
     friend class Endpoint;
 };
 
-}  // namespace axon
+}  // namespace zerokv

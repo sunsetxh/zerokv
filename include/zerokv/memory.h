@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file axon/memory.h
+/// @file zerokv/memory.h
 /// @brief Memory registration, remote keys, and memory pool interfaces.
 ///
 /// Key design points:
@@ -9,8 +9,8 @@
 ///   - MemoryPool provides slab-based allocation of registered buffers.
 ///
 /// Usage:
-///   auto region = axon::MemoryRegion::register_mem(ctx, ptr, len, MemoryType::kHost);
-///   auto pool   = axon::MemoryPool::create(ctx, 64 * 1024 * 1024);
+///   auto region = zerokv::MemoryRegion::register_mem(ctx, ptr, len, MemoryType::kHost);
+///   auto pool   = zerokv::MemoryPool::create(ctx, 64 * 1024 * 1024);
 ///   auto buf    = pool->allocate(4096);
 
 #include "zerokv/common.h"
@@ -22,7 +22,7 @@
 #include <span>
 #include <vector>
 
-namespace axon {
+namespace zerokv {
 
 // ---------------------------------------------------------------------------
 // MemoryRegion – registered memory for zero-copy RDMA
@@ -180,4 +180,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace axon
+}  // namespace zerokv

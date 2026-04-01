@@ -9,7 +9,7 @@
 #include <cstring>
 #include <vector>
 
-namespace axon {
+namespace zerokv {
 
 // ============================================================================
 // MemoryRegion::Impl
@@ -164,4 +164,4 @@ void* MemoryRegion::native_handle() const noexcept {
     return impl_ ? reinterpret_cast<void*>(impl_->handle_) : nullptr;
 }
 
-} // namespace axon
+} // namespace zerokv

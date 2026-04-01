@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-namespace axon::kv {
+namespace zerokv::kv {
 
 namespace {
 
@@ -80,7 +80,7 @@ struct FetchToRange {
 };
 
 Status validate_fetch_to_many_layout(const std::vector<FetchToItem>& items,
-                                     const axon::MemoryRegion::Ptr& region) {
+                                     const zerokv::MemoryRegion::Ptr& region) {
     if (!region) {
         return Status(ErrorCode::kInvalidArgument, "local region is required");
     }
@@ -141,7 +141,7 @@ Status status_from_msg(detail::MsgStatus status, const std::string& message, Err
 }  // namespace
 
 struct KVNode::Impl {
-    explicit Impl(const axon::Config& cfg) : cfg_(cfg) {}
+    explicit Impl(const zerokv::Config& cfg) : cfg_(cfg) {}
 
     struct PublishedObject {
         MemoryRegion::Ptr region;
@@ -977,13 +977,13 @@ struct KVNode::Impl {
     }
 };
 
-KVNode::KVNode(const axon::Config& cfg) : impl_(std::make_unique<Impl>(cfg)) {}
+KVNode::KVNode(const zerokv::Config& cfg) : impl_(std::make_unique<Impl>(cfg)) {}
 
 KVNode::~KVNode() {
     stop();
 }
 
-KVNode::Ptr KVNode::create(const axon::Config& cfg) {
+KVNode::Ptr KVNode::create(const zerokv::Config& cfg) {
     return Ptr(new KVNode(cfg));
 }
 
@@ -1007,13 +1007,13 @@ Status KVNode::start(const NodeConfig& cfg) {
     impl_->context_ = Context::create(impl_->cfg_);
     if (!impl_->context_) {
         impl_->node_id_.clear();
-        return Status(ErrorCode::kTransportError, "failed to create axon context");
+        return Status(ErrorCode::kTransportError, "failed to create zerokv context");
     }
     impl_->worker_ = Worker::create(impl_->context_);
     if (!impl_->worker_) {
         impl_->context_.reset();
         impl_->node_id_.clear();
-        return Status(ErrorCode::kTransportError, "failed to create axon worker");
+        return Status(ErrorCode::kTransportError, "failed to create zerokv worker");
     }
     impl_->listener_ = impl_->worker_->listen(cfg.local_data_addr, [impl = impl_.get()](Endpoint::Ptr ep) {
         std::lock_guard<std::mutex> lock(impl->peer_mu_);
@@ -1554,7 +1554,7 @@ Future<void> KVNode::publish(const std::string& key, const void* data, size_t si
 }
 
 Future<void> KVNode::publish_region(const std::string& key,
-                                    const axon::MemoryRegion::Ptr& region,
+                                    const zerokv::MemoryRegion::Ptr& region,
                                     size_t size) {
     if (!impl_) {
         return Future<void>::make_error(Status(ErrorCode::kInternalError, "KVNode not initialized"));
@@ -1627,7 +1627,7 @@ Future<FetchResult> KVNode::fetch(const std::string& key) {
 }
 
 Future<void> KVNode::fetch_to(const std::string& key,
-                              const axon::MemoryRegion::Ptr& local_region,
+                              const zerokv::MemoryRegion::Ptr& local_region,
                               size_t length,
                               size_t local_offset) {
     if (!impl_) {
@@ -1655,7 +1655,7 @@ Future<void> KVNode::fetch_to(const std::string& key,
 }
 
 FetchToManyResult KVNode::fetch_to_many(const std::vector<FetchToItem>& items,
-                                        const axon::MemoryRegion::Ptr& local_region) {
+                                        const zerokv::MemoryRegion::Ptr& local_region) {
     FetchToManyResult result;
     auto status = validate_fetch_to_many_layout(items, local_region);
     status.throw_if_error();
@@ -1684,7 +1684,7 @@ FetchToManyResult KVNode::fetch_to_many(const std::vector<FetchToItem>& items,
 
 BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
     const std::vector<FetchToItem>& items,
-    const axon::MemoryRegion::Ptr& local_region,
+    const zerokv::MemoryRegion::Ptr& local_region,
     std::chrono::milliseconds timeout) {
     BatchFetchToResult result;
     auto layout_status = validate_fetch_to_many_layout(items, local_region);
@@ -2165,4 +2165,4 @@ Future<void> KVNode::unpublish(const std::string& key) {
     return Future<void>::make_ready();
 }
 
-}  // namespace axon::kv
+}  // namespace zerokv::kv

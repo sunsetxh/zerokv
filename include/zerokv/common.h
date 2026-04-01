@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file axon/common.h
+/// @file zerokv/common.h
 /// @brief Common types, status codes, and forward declarations for the AXON library.
 
 #include <cstddef>
@@ -8,7 +8,7 @@
 #include <string>
 #include <system_error>
 
-namespace axon {
+namespace zerokv {
 
 // ---------------------------------------------------------------------------
 // Version
@@ -54,10 +54,10 @@ enum class ErrorCode : int {
 };
 
 /// Category singleton for std::error_code integration.
-const std::error_category& axon_category() noexcept;
+const std::error_category& zerokv_category() noexcept;
 
 inline std::error_code make_error_code(ErrorCode ec) noexcept {
-    return {static_cast<int>(ec), axon_category()};
+    return {static_cast<int>(ec), zerokv_category()};
 }
 
 /// Lightweight status wrapper – implicitly convertible from ErrorCode.
@@ -141,9 +141,9 @@ class Request;
 template <typename T> class Future;
 template <typename T> class Promise;
 
-}  // namespace axon
+}  // namespace zerokv
 
 // Enable std::error_code interop.
 namespace std {
-template<> struct is_error_code_enum<axon::ErrorCode> : true_type {};
+template<> struct is_error_code_enum<zerokv::ErrorCode> : true_type {};
 }

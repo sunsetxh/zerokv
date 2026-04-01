@@ -20,7 +20,7 @@
 #include <mutex>
 #include <condition_variable>
 
-using namespace axon;
+using namespace zerokv;
 
 constexpr size_t kMessageSize = 4096;
 constexpr int kNumIterations = 1000;

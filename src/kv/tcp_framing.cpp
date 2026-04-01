@@ -4,7 +4,7 @@
 
 #include <array>
 
-namespace axon::kv::detail {
+namespace zerokv::kv::detail {
 
 bool send_frame(int fd, const MsgHeader& header, std::span<const uint8_t> payload) {
     return TcpTransport::send_all(fd, encode_message(header, payload));
@@ -41,4 +41,4 @@ bool recv_frame(int fd, MsgHeader* header, std::vector<uint8_t>* payload) {
     return true;
 }
 
-}  // namespace axon::kv::detail
+}  // namespace zerokv::kv::detail

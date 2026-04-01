@@ -8,7 +8,7 @@
 #include <string>
 #include <chrono>
 
-namespace axon {
+namespace zerokv {
 
 // ============================================================================
 // Config::Impl
@@ -324,4 +324,4 @@ bool Context::supports_hw_tag_matching() const noexcept {
     return false;
 }
 
-} // namespace axon
+} // namespace zerokv

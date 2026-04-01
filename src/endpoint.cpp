@@ -8,7 +8,7 @@
 #include <ucp/api/ucp.h>
 #include <memory>
 
-namespace axon {
+namespace zerokv {
 
 namespace {
 
@@ -728,4 +728,4 @@ void* Endpoint::native_handle() const noexcept {
     return impl_ ? reinterpret_cast<void*>(impl_->handle_) : nullptr;
 }
 
-} // namespace axon
+} // namespace zerokv

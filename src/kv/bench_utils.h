@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace axon::kv::detail {
+namespace zerokv::kv::detail {
 
 struct SizeListResult {
     Status status;
@@ -53,4 +53,4 @@ double throughput_mb_per_sec(uint64_t size_bytes, double avg_total_us);
 std::string render_publish_rows(const std::vector<PublishBenchRow>& rows);
 std::string render_fetch_rows(const std::vector<FetchBenchRow>& rows);
 
-}  // namespace axon::kv::detail
+}  // namespace zerokv::kv::detail

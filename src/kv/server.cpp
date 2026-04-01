@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace axon::kv {
+namespace zerokv::kv {
 
 namespace {
 
@@ -108,7 +108,7 @@ detail::ErrorResponse error_response(detail::MsgStatus status, std::string messa
 }  // namespace
 
 struct KVServer::Impl {
-    explicit Impl(const axon::Config& cfg) : cfg_(cfg) {}
+    explicit Impl(const zerokv::Config& cfg) : cfg_(cfg) {}
 
     struct Session {
         int fd = -1;
@@ -451,13 +451,13 @@ struct KVServer::Impl {
     }
 };
 
-KVServer::KVServer(const axon::Config& cfg) : impl_(std::make_unique<Impl>(cfg)) {}
+KVServer::KVServer(const zerokv::Config& cfg) : impl_(std::make_unique<Impl>(cfg)) {}
 
 KVServer::~KVServer() {
     stop();
 }
 
-KVServer::Ptr KVServer::create(const axon::Config& cfg) {
+KVServer::Ptr KVServer::create(const zerokv::Config& cfg) {
     return Ptr(new KVServer(cfg));
 }
 
@@ -527,4 +527,4 @@ std::vector<std::string> KVServer::list_keys() const {
     return impl_ ? impl_->store_.list_keys() : std::vector<std::string>{};
 }
 
-}  // namespace axon::kv
+}  // namespace zerokv::kv

@@ -11,7 +11,7 @@
 #include <vector>
 #include <cstring>
 
-using namespace axon;
+using namespace zerokv;
 
 // Benchmark worker creation
 void benchmark_worker_creation() {

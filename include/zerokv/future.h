@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file axon/future.h
+/// @file zerokv/future.h
 /// @brief Asynchronous operation primitives: Request, Future<T>, callback support.
 ///
 /// Design rationale:
@@ -19,7 +19,7 @@
 #include <optional>
 #include <variant>
 
-namespace axon {
+namespace zerokv {
 
 // ---------------------------------------------------------------------------
 // Request – low-level async handle
@@ -333,7 +333,7 @@ private:
     mutable bool ready_ = true;
 };
 
-// Forward declare Endpoint (included via axon/endpoint.h in user code)
+// Forward declare Endpoint (included via zerokv/endpoint.h in user code)
 // The template will be instantiated for std::shared_ptr<Endpoint>
 
 // ---------------------------------------------------------------------------
@@ -350,4 +350,4 @@ template <typename T>
 std::optional<size_t> wait_any(std::vector<Future<T>>& futures,
                                std::chrono::milliseconds timeout = std::chrono::milliseconds{-1});
 
-}  // namespace axon
+}  // namespace zerokv

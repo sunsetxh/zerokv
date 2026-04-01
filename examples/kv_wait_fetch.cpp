@@ -6,8 +6,8 @@
 #include <iostream>
 #include <string>
 
-using namespace axon;
-using namespace axon::kv;
+using namespace zerokv;
+using namespace zerokv::kv;
 
 namespace {
 

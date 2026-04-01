@@ -7,7 +7,7 @@
 #include <chrono>
 #include <cstring>
 
-using namespace axon;
+using namespace zerokv;
 
 class ConnectionTest : public ::testing::Test {
 protected:

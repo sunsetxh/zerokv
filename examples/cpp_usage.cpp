@@ -14,7 +14,7 @@
 // ============================================================================
 void example_tag_messaging() {
     // --- Configuration ---
-    auto cfg = axon::Config::builder()
+    auto cfg = zerokv::Config::builder()
                    .set_transport("ucx")
                    .set_num_workers(2)
                    .set_memory_pool_size(128 * 1024 * 1024)  // 128 MiB
@@ -23,10 +23,10 @@ void example_tag_messaging() {
                    .from_env()  // override with AXON_* env vars
                    .build();
 
-    auto ctx = axon::Context::create(cfg);
+    auto ctx = zerokv::Context::create(cfg);
 
     // --- Sender side ---
-    auto sender_worker = axon::Worker::create(ctx, /*index=*/0);
+    auto sender_worker = zerokv::Worker::create(ctx, /*index=*/0);
     auto send_ep_future = sender_worker->connect("192.168.1.2:13337");
 
     // Drive progress while connecting
@@ -35,7 +35,7 @@ void example_tag_messaging() {
 
     // Prepare data
     std::vector<float> data(1024, 3.14f);
-    axon::Tag tag = axon::make_tag(/*context_id=*/0, /*user_tag=*/42);
+    zerokv::Tag tag = zerokv::make_tag(/*context_id=*/0, /*user_tag=*/42);
 
     // --- Async send (small message, eager path) ---
     auto send_future = send_ep->tag_send(data.data(), data.size() * sizeof(float), tag);
@@ -53,12 +53,12 @@ void example_tag_messaging() {
 // Example 2: Zero-copy large transfer with pre-registered memory
 // ============================================================================
 void example_zero_copy_large() {
-    auto ctx = axon::Context::create();
-    auto worker = axon::Worker::create(ctx);
+    auto ctx = zerokv::Context::create();
+    auto worker = zerokv::Worker::create(ctx);
 
     // Pre-allocate and register a 1 GB buffer
     constexpr size_t kSize = 1ULL << 30;  // 1 GiB
-    auto region = axon::MemoryRegion::allocate(ctx, kSize, axon::MemoryType::kHost);
+    auto region = zerokv::MemoryRegion::allocate(ctx, kSize, zerokv::MemoryType::kHost);
 
     // Fill data (cast to typed span)
     auto span = region->as_span<double>();
@@ -71,7 +71,7 @@ void example_zero_copy_large() {
     worker->run_until([&] { return ep_future.ready(); });
     auto ep = ep_future.get();
 
-    axon::Tag tag = axon::make_tag(0, 1);
+    zerokv::Tag tag = zerokv::make_tag(0, 1);
 
     // Zero-copy send: the registered region is sent directly via RDMA rendezvous.
     // No copy into an intermediate buffer.
@@ -84,16 +84,16 @@ void example_zero_copy_large() {
 // Example 3: One-sided RDMA put/get
 // ============================================================================
 void example_rdma() {
-    auto ctx = axon::Context::create();
-    auto worker = axon::Worker::create(ctx);
+    auto ctx = zerokv::Context::create();
+    auto worker = zerokv::Worker::create(ctx);
 
     // --- Local memory ---
-    auto local_region = axon::MemoryRegion::allocate(ctx, 4096);
+    auto local_region = zerokv::MemoryRegion::allocate(ctx, 4096);
 
     // --- Exchange rkeys out-of-band (e.g. via tag_send/tag_recv) ---
     // Assume we received:  remote_addr (uint64_t) + remote_rkey (RemoteKey)
     uint64_t       remote_addr = 0;  // placeholder
-    axon::RemoteKey remote_rkey;      // placeholder
+    zerokv::RemoteKey remote_rkey;      // placeholder
 
     auto ep_future = worker->connect("10.0.0.1:13337");
     worker->run_until([&] { return ep_future.ready(); });
@@ -118,11 +118,11 @@ void example_rdma() {
 // Example 4: Memory pool + callback-based completion
 // ============================================================================
 void example_memory_pool_and_callbacks() {
-    auto ctx = axon::Context::create();
-    auto worker = axon::Worker::create(ctx);
+    auto ctx = zerokv::Context::create();
+    auto worker = zerokv::Worker::create(ctx);
 
     // Create a pool: avoids repeated registration on the hot path
-    auto pool = axon::MemoryPool::create(ctx, 64 * 1024 * 1024);
+    auto pool = zerokv::MemoryPool::create(ctx, 64 * 1024 * 1024);
 
     auto ep_future = worker->connect("10.0.0.1:13337");
     worker->run_until([&] { return ep_future.ready(); });
@@ -133,11 +133,11 @@ void example_memory_pool_and_callbacks() {
         auto buf = pool->allocate(4096);
         std::memset(buf.data, 0, 4096);
 
-        axon::Tag tag = axon::make_tag(0, static_cast<uint32_t>(i));
+        zerokv::Tag tag = zerokv::make_tag(0, static_cast<uint32_t>(i));
 
         // Use callback-based completion (avoids polling overhead)
         auto future = ep->tag_send(buf.region, tag);
-        future.on_complete([&pool, buf_copy = buf](axon::Status st, auto) mutable {
+        future.on_complete([&pool, buf_copy = buf](zerokv::Status st, auto) mutable {
             if (!st.ok()) {
                 std::cerr << "Send failed: " << st.message() << "\n";
             }
@@ -154,22 +154,22 @@ void example_memory_pool_and_callbacks() {
 // Example 5: Server (listener) with accept callback
 // ============================================================================
 void example_server() {
-    auto ctx = axon::Context::create();
-    auto worker = axon::Worker::create(ctx);
+    auto ctx = zerokv::Context::create();
+    auto worker = zerokv::Worker::create(ctx);
 
-    auto listener = worker->listen(":13337", [&](axon::Endpoint::Ptr ep) {
+    auto listener = worker->listen(":13337", [&](zerokv::Endpoint::Ptr ep) {
         std::cout << "Accepted connection from " << ep->remote_address() << "\n";
 
         // Post a recv for each new connection
         std::vector<char> buf(1024 * 1024);
-        axon::Tag tag = axon::make_tag(0, 0);
+        zerokv::Tag tag = zerokv::make_tag(0, 0);
 
         auto recv_future = ep->tag_recv(buf.data(), buf.size(),
-                                        tag, axon::kTagMaskUser);
-        recv_future.on_complete([](axon::Status st, auto result) {
+                                        tag, zerokv::kTagMaskUser);
+        recv_future.on_complete([](zerokv::Status st, auto result) {
             auto [bytes, matched_tag] = result;
             std::cout << "Received " << bytes << " bytes, tag="
-                      << axon::tag_user(matched_tag) << "\n";
+                      << zerokv::tag_user(matched_tag) << "\n";
         });
     });
 
@@ -181,24 +181,24 @@ void example_server() {
 // Example 6: Batch futures with wait_all
 // ============================================================================
 void example_batch() {
-    auto ctx = axon::Context::create();
-    auto worker = axon::Worker::create(ctx);
+    auto ctx = zerokv::Context::create();
+    auto worker = zerokv::Worker::create(ctx);
 
     auto ep_future = worker->connect("10.0.0.1:13337");
     worker->run_until([&] { return ep_future.ready(); });
     auto ep = ep_future.get();
 
     // Send many small messages in parallel
-    std::vector<axon::Future<void>> futures;
+    std::vector<zerokv::Future<void>> futures;
     futures.reserve(100);
 
     for (int i = 0; i < 100; ++i) {
         float val = static_cast<float>(i);
-        futures.push_back(ep->tag_send(&val, sizeof(val), axon::make_tag(0, i)));
+        futures.push_back(ep->tag_send(&val, sizeof(val), zerokv::make_tag(0, i)));
     }
 
     // Wait for all sends to complete (with timeout)
-    auto status = axon::wait_all(futures, std::chrono::seconds{5});
+    auto status = zerokv::wait_all(futures, std::chrono::seconds{5});
     status.throw_if_error();
 }
 

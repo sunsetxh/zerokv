@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "zerokv/config.h"
 
-using namespace axon;
+using namespace zerokv;
 
 TEST(ConfigTest, DefaultConfig) {
     auto config = Config::builder().build();

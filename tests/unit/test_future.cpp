@@ -2,7 +2,7 @@
 #include "zerokv/future.h"
 #include "zerokv/endpoint.h"
 
-using namespace axon;
+using namespace zerokv;
 
 TEST(FutureVoidTest, Ready) {
     auto f = Future<void>::make_ready();

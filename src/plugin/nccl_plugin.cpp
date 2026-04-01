@@ -4,7 +4,7 @@
 /// This file shows how a real NCCL plugin would implement the
 /// CollectivePlugin interface.  Build as a shared library:
 ///
-///   g++ -shared -fPIC -o libaxon_plugin_nccl.so nccl_plugin.cpp -lnccl -lcudart
+///   g++ -shared -fPIC -o libzerokv_plugin_nccl.so nccl_plugin.cpp -lnccl -lcudart
 
 #include "zerokv/plugin/plugin.h"
 
@@ -16,7 +16,7 @@
 // #include <nccl.h>
 // #include <cuda_runtime.h>
 
-namespace axon {
+namespace zerokv {
 namespace plugin {
 
 // ---------------------------------------------------------------------------
@@ -217,13 +217,13 @@ private:
 };
 
 }  // namespace plugin
-}  // namespace axon
+}  // namespace zerokv
 
 // ---------------------------------------------------------------------------
 // C factory function – the single entry point loaded by PluginRegistry
 // ---------------------------------------------------------------------------
 
-AXON_PLUGIN_EXPORT
-axon::plugin::CollectivePlugin* axon_plugin_create() {
-    return new axon::plugin::NcclPlugin();
+ZEROKV_PLUGIN_EXPORT
+zerokv::plugin::CollectivePlugin* zerokv_plugin_create() {
+    return new zerokv::plugin::NcclPlugin();
 }

@@ -6,7 +6,7 @@
 #include <vector>
 #include <cstring>
 
-using namespace axon;
+using namespace zerokv;
 
 static void BenchmarkCreateContext(benchmark::State& state) {
     auto config = Config::builder()

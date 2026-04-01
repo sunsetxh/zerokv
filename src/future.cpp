@@ -9,7 +9,7 @@
 #include <functional>
 #include <vector>
 
-namespace axon {
+namespace zerokv {
 
 // ============================================================================
 // Request
@@ -181,4 +181,4 @@ void Request::populate_recv_info() const {
     // Completion metadata is captured via per-operation callbacks.
 }
 
-} // namespace axon
+} // namespace zerokv

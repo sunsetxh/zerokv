@@ -9,7 +9,7 @@
 ///   - HCCL library: libhccl.so
 ///
 /// Build as a shared library:
-///   g++ -shared -fPIC -o libaxon_plugin_hccl.so hccl_plugin.cpp \
+///   g++ -shared -fPIC -o libzerokv_plugin_hccl.so hccl_plugin.cpp \
 ///       -lhccl -lascendcl -I${ASCEND_HOME}/include
 
 #include "zerokv/plugin/plugin.h"
@@ -110,7 +110,7 @@ inline int aclrtSynchronizeStream(aclrtStream) { return 0; }
 
 #endif  // !HCCL_H
 
-namespace axon {
+namespace zerokv {
 namespace plugin {
 
 // ---------------------------------------------------------------------------
@@ -537,13 +537,13 @@ private:
 };
 
 }  // namespace plugin
-}  // namespace axon
+}  // namespace zerokv
 
 // ---------------------------------------------------------------------------
 // C factory function -- the single entry point loaded by PluginRegistry
 // ---------------------------------------------------------------------------
 
-AXON_PLUGIN_EXPORT
-axon::plugin::CollectivePlugin* axon_plugin_create() {
-    return new axon::plugin::HcclPlugin();
+ZEROKV_PLUGIN_EXPORT
+zerokv::plugin::CollectivePlugin* zerokv_plugin_create() {
+    return new zerokv::plugin::HcclPlugin();
 }

@@ -21,7 +21,7 @@
 #include <mutex>
 #include <condition_variable>
 
-using namespace axon;
+using namespace zerokv;
 
 constexpr size_t kDefaultBufferSize = 4096;
 constexpr Tag kRkeyTag = make_tag(1, 100);   // tag for rkey exchange

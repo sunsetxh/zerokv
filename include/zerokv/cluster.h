@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file axon/cluster.h
+/// @file zerokv/cluster.h
 /// @brief Cluster membership and alias-routing API skeleton.
 
 #include "zerokv/common.h"
@@ -15,7 +15,7 @@
 #include <string_view>
 #include <vector>
 
-namespace axon {
+namespace zerokv {
 
 enum class ClusterState {
     kInit,
@@ -120,4 +120,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace axon
+}  // namespace zerokv

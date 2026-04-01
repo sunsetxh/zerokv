@@ -3,7 +3,7 @@
 #include <cstring>
 #include <limits>
 
-namespace axon::kv::detail {
+namespace zerokv::kv::detail {
 
 namespace {
 
@@ -569,4 +569,4 @@ std::optional<ErrorResponse> decode_error_response(std::span<const uint8_t> data
     return decode_checked<ErrorResponse>(data, decode_error_response_impl);
 }
 
-}  // namespace axon::kv::detail
+}  // namespace zerokv::kv::detail

@@ -7,7 +7,7 @@
 #include <memory>
 #include <functional>
 
-namespace axon {
+namespace zerokv {
 namespace internal {
 
 /// RAII wrapper for UCX worker
@@ -61,4 +61,4 @@ private:
 };
 
 } // namespace internal
-} // namespace axon
+} // namespace zerokv

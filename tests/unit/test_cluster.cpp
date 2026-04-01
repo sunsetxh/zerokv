@@ -4,7 +4,7 @@
 #include "zerokv/config.h"
 #include "zerokv/worker.h"
 
-using namespace axon;
+using namespace zerokv;
 
 TEST(ClusterTypesTest, RankAliasRoundTrip) {
     EXPECT_EQ(rank_alias(0), "RANK0");

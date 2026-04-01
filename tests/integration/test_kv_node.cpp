@@ -13,11 +13,11 @@
 
 namespace {
 
-using axon::kv::KVNode;
-using axon::kv::KVServer;
-using axon::kv::NodeConfig;
-using axon::kv::ServerConfig;
-namespace proto = axon::kv::detail;
+using zerokv::kv::KVNode;
+using zerokv::kv::KVServer;
+using zerokv::kv::NodeConfig;
+using zerokv::kv::ServerConfig;
+namespace proto = zerokv::kv::detail;
 
 std::optional<proto::GetMetaResponse> get_meta(const std::string& server_addr,
                                                const std::string& key,
@@ -79,11 +79,11 @@ std::optional<proto::GetPushTargetResponse> get_push_target(const std::string& s
     return proto::decode_get_push_target_response(payload);
 }
 
-std::vector<axon::kv::SubscriptionEvent> drain_until_count(const KVNode::Ptr& node,
+std::vector<zerokv::kv::SubscriptionEvent> drain_until_count(const KVNode::Ptr& node,
                                                            size_t expected_count,
                                                            std::chrono::milliseconds timeout = std::chrono::milliseconds(1000)) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
-    std::vector<axon::kv::SubscriptionEvent> all;
+    std::vector<zerokv::kv::SubscriptionEvent> all;
     while (std::chrono::steady_clock::now() < deadline) {
         auto drained = node->drain_subscription_events();
         all.insert(all.end(), drained.begin(), drained.end());
@@ -96,7 +96,7 @@ std::vector<axon::kv::SubscriptionEvent> drain_until_count(const KVNode::Ptr& no
 }
 
 TEST(KvNodeIntegrationTest, StartRegistersNodeAndStopDropsLiveness) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -153,7 +153,7 @@ TEST(KvNodeIntegrationTest, StartRegistersNodeAndStopDropsLiveness) {
 }
 
 TEST(KvNodeIntegrationTest, DestructorStopsRunningNode) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -174,7 +174,7 @@ TEST(KvNodeIntegrationTest, DestructorStopsRunningNode) {
 }
 
 TEST(KvNodeIntegrationTest, StartFailsWithinConnectTimeoutWhenServerIsUnavailable) {
-    auto cfg = axon::Config::builder()
+    auto cfg = zerokv::Config::builder()
                    .set_transport("tcp")
                    .set_connect_timeout(std::chrono::milliseconds(100))
                    .build();
@@ -191,8 +191,8 @@ TEST(KvNodeIntegrationTest, StartFailsWithinConnectTimeoutWhenServerIsUnavailabl
     const auto elapsed = std::chrono::steady_clock::now() - start_time;
 
     EXPECT_FALSE(status.ok());
-    EXPECT_TRUE(status.code() == axon::ErrorCode::kTimeout ||
-                status.code() == axon::ErrorCode::kConnectionRefused);
+    EXPECT_TRUE(status.code() == zerokv::ErrorCode::kTimeout ||
+                status.code() == zerokv::ErrorCode::kConnectionRefused);
     EXPECT_LT(elapsed, std::chrono::seconds(2));
     EXPECT_FALSE(node->is_running());
 
@@ -200,7 +200,7 @@ TEST(KvNodeIntegrationTest, StartFailsWithinConnectTimeoutWhenServerIsUnavailabl
 }
 
 TEST(KvNodeIntegrationTest, WaitForKeyReturnsWhenKeyAppears) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -228,7 +228,7 @@ TEST(KvNodeIntegrationTest, WaitForKeyReturnsWhenKeyAppears) {
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceFetchesPublishedKey) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -259,7 +259,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceFetchesPublishedKey) {
 }
 
 TEST(KvNodeIntegrationTest, WaitForKeysReturnsWhenAllKeysAppear) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -294,7 +294,7 @@ TEST(KvNodeIntegrationTest, WaitForKeysReturnsWhenAllKeysAppear) {
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyFetchesEachKeyWhenReady) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -331,7 +331,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyFetchesEachKeyWhenReady) {
 }
 
 TEST(KvNodeIntegrationTest, WaitAndFetchHelpersReturnImmediatelyForExistingKeys) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -373,7 +373,7 @@ TEST(KvNodeIntegrationTest, WaitAndFetchHelpersReturnImmediatelyForExistingKeys)
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyReturnsPartialResultsOnTimeout) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -406,7 +406,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyReturnsPartialResultsOnTime
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyDeduplicatesKeys) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -434,7 +434,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyDeduplicatesKeys) {
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyLocksFirstSuccessfulVersion) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -470,7 +470,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyLocksFirstSuccessfulVersion
 }
 
 TEST(KvNodeIntegrationTest, MetricsAreEmptyBeforeAnyOperation) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -496,7 +496,7 @@ TEST(KvNodeIntegrationTest, MetricsAreEmptyBeforeAnyOperation) {
 }
 
 TEST(KvNodeIntegrationTest, PushMetricsAreRecordedAndOverwritten) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -549,7 +549,7 @@ TEST(KvNodeIntegrationTest, PushMetricsAreRecordedAndOverwritten) {
 }
 
 TEST(KvNodeIntegrationTest, PushFailureRecordsPushMetrics) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -580,7 +580,7 @@ TEST(KvNodeIntegrationTest, PushFailureRecordsPushMetrics) {
 }
 
 TEST(KvNodeIntegrationTest, SubscriptionQueueIsEmptyBeforeUse) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -607,7 +607,7 @@ TEST(KvNodeIntegrationTest, SubscriptionQueueIsEmptyBeforeUse) {
 }
 
 TEST(KvNodeIntegrationTest, SubscriptionReceivesPublishedAndUpdatedEvents) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -642,11 +642,11 @@ TEST(KvNodeIntegrationTest, SubscriptionReceivesPublishedAndUpdatedEvents) {
 
     auto events = drain_until_count(subscriber, 2);
     ASSERT_EQ(events.size(), 2u);
-    EXPECT_EQ(events[0].type, axon::kv::SubscriptionEventType::kPublished);
+    EXPECT_EQ(events[0].type, zerokv::kv::SubscriptionEventType::kPublished);
     EXPECT_EQ(events[0].key, "alpha");
     EXPECT_EQ(events[0].owner_node_id, "sub-publisher-a");
     EXPECT_EQ(events[0].version, 1u);
-    EXPECT_EQ(events[1].type, axon::kv::SubscriptionEventType::kUpdated);
+    EXPECT_EQ(events[1].type, zerokv::kv::SubscriptionEventType::kUpdated);
     EXPECT_EQ(events[1].version, 2u);
 
     subscriber->stop();
@@ -655,7 +655,7 @@ TEST(KvNodeIntegrationTest, SubscriptionReceivesPublishedAndUpdatedEvents) {
 }
 
 TEST(KvNodeIntegrationTest, SubscriptionReceivesUnpublishedEvent) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -688,8 +688,8 @@ TEST(KvNodeIntegrationTest, SubscriptionReceivesUnpublishedEvent) {
 
     auto events = drain_until_count(subscriber, 2);
     ASSERT_EQ(events.size(), 2u);
-    EXPECT_EQ(events[0].type, axon::kv::SubscriptionEventType::kPublished);
-    EXPECT_EQ(events[1].type, axon::kv::SubscriptionEventType::kUnpublished);
+    EXPECT_EQ(events[0].type, zerokv::kv::SubscriptionEventType::kPublished);
+    EXPECT_EQ(events[1].type, zerokv::kv::SubscriptionEventType::kUnpublished);
     EXPECT_EQ(events[1].key, "beta");
     EXPECT_EQ(events[1].owner_node_id, "sub-publisher-b");
 
@@ -699,7 +699,7 @@ TEST(KvNodeIntegrationTest, SubscriptionReceivesUnpublishedEvent) {
 }
 
 TEST(KvNodeIntegrationTest, SubscriptionReceivesOwnerLostEvent) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -731,8 +731,8 @@ TEST(KvNodeIntegrationTest, SubscriptionReceivesOwnerLostEvent) {
 
     auto events = drain_until_count(subscriber, 2);
     ASSERT_EQ(events.size(), 2u);
-    EXPECT_EQ(events[0].type, axon::kv::SubscriptionEventType::kPublished);
-    EXPECT_EQ(events[1].type, axon::kv::SubscriptionEventType::kOwnerLost);
+    EXPECT_EQ(events[0].type, zerokv::kv::SubscriptionEventType::kPublished);
+    EXPECT_EQ(events[1].type, zerokv::kv::SubscriptionEventType::kOwnerLost);
     EXPECT_EQ(events[1].key, "gamma");
     EXPECT_EQ(events[1].owner_node_id, "sub-publisher-c");
 
@@ -741,7 +741,7 @@ TEST(KvNodeIntegrationTest, SubscriptionReceivesOwnerLostEvent) {
 }
 
 TEST(KvNodeIntegrationTest, UnsubscribeStopsFutureSubscriptionEvents) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -771,7 +771,7 @@ TEST(KvNodeIntegrationTest, UnsubscribeStopsFutureSubscriptionEvents) {
 
     auto first_events = drain_until_count(subscriber, 1);
     ASSERT_EQ(first_events.size(), 1u);
-    EXPECT_EQ(first_events[0].type, axon::kv::SubscriptionEventType::kPublished);
+    EXPECT_EQ(first_events[0].type, zerokv::kv::SubscriptionEventType::kPublished);
 
     auto unsubscribe = subscriber->unsubscribe("delta");
     ASSERT_TRUE(unsubscribe.status().ok());
@@ -791,7 +791,7 @@ TEST(KvNodeIntegrationTest, UnsubscribeStopsFutureSubscriptionEvents) {
 }
 
 TEST(KvNodeIntegrationTest, StartGeneratesNodeIdWhenMissing) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -834,7 +834,7 @@ TEST(KvNodeIntegrationTest, StartGeneratesNodeIdWhenMissing) {
 }
 
 TEST(KvNodeIntegrationTest, PublishRegistersMetadataAndTracksCount) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -879,7 +879,7 @@ TEST(KvNodeIntegrationTest, PublishRegistersMetadataAndTracksCount) {
 }
 
 TEST(KvNodeIntegrationTest, PublishMetricsAreRecordedAndOverwritten) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -924,7 +924,7 @@ TEST(KvNodeIntegrationTest, PublishMetricsAreRecordedAndOverwritten) {
 }
 
 TEST(KvNodeIntegrationTest, UnpublishRemovesLocalAndServerState) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -957,7 +957,7 @@ TEST(KvNodeIntegrationTest, UnpublishRemovesLocalAndServerState) {
 }
 
 TEST(KvNodeIntegrationTest, PublishRegionUsesCallerRegionAddress) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -971,9 +971,9 @@ TEST(KvNodeIntegrationTest, PublishRegionUsesCallerRegionAddress) {
         .node_id = "publisher-b",
     }).ok());
 
-    auto ctx = axon::Context::create(cfg);
+    auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = axon::MemoryRegion::allocate(ctx, 256);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 256);
     ASSERT_NE(region, nullptr);
 
     auto publish = node->publish_region("beta", region, 128);
@@ -996,7 +996,7 @@ TEST(KvNodeIntegrationTest, PublishRegionUsesCallerRegionAddress) {
 }
 
 TEST(KvNodeIntegrationTest, FetchReturnsPublishedBytesAcrossNodes) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -1052,7 +1052,7 @@ TEST(KvNodeIntegrationTest, FetchReturnsPublishedBytesAcrossNodes) {
 }
 
 TEST(KvNodeIntegrationTest, FetchToWritesIntoCallerRegion) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -1079,9 +1079,9 @@ TEST(KvNodeIntegrationTest, FetchToWritesIntoCallerRegion) {
     ASSERT_TRUE(publish.status().ok());
     publish.get();
 
-    auto ctx = axon::Context::create(cfg);
+    auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     auto fetch = reader->fetch_to("fetch-to-key", region, region->length(), 8);
@@ -1106,7 +1106,7 @@ TEST(KvNodeIntegrationTest, FetchToWritesIntoCallerRegion) {
 }
 
 TEST(KvNodeIntegrationTest, FetchToManyWritesMultipleKeysIntoSharedRegion) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -1133,9 +1133,9 @@ TEST(KvNodeIntegrationTest, FetchToManyWritesMultipleKeysIntoSharedRegion) {
     publish_a.get();
     publish_b.get();
 
-    auto ctx = axon::Context::create(cfg);
+    auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     auto result = reader->fetch_to_many({
@@ -1157,7 +1157,7 @@ TEST(KvNodeIntegrationTest, FetchToManyWritesMultipleKeysIntoSharedRegion) {
 }
 
 TEST(KvNodeIntegrationTest, FetchToManyReturnsPartialProgressOnPerKeyFailure) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -1180,9 +1180,9 @@ TEST(KvNodeIntegrationTest, FetchToManyReturnsPartialProgressOnPerKeyFailure) {
     ASSERT_TRUE(publish.status().ok());
     publish.get();
 
-    auto ctx = axon::Context::create(cfg);
+    auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     auto result = reader->fetch_to_many({
@@ -1203,11 +1203,11 @@ TEST(KvNodeIntegrationTest, FetchToManyReturnsPartialProgressOnPerKeyFailure) {
 }
 
 TEST(KvNodeIntegrationTest, FetchToManyRejectsOverlappingRanges) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
     auto node = KVNode::create(cfg);
-    auto ctx = axon::Context::create(cfg);
+    auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = axon::MemoryRegion::allocate(ctx, 64);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 64);
     ASSERT_NE(region, nullptr);
 
     EXPECT_THROW((void)node->fetch_to_many({
@@ -1217,11 +1217,11 @@ TEST(KvNodeIntegrationTest, FetchToManyRejectsOverlappingRanges) {
 }
 
 TEST(KvNodeIntegrationTest, FetchToManyRejectsOutOfBoundsRanges) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
     auto node = KVNode::create(cfg);
-    auto ctx = axon::Context::create(cfg);
+    auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = axon::MemoryRegion::allocate(ctx, 32);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 32);
     ASSERT_NE(region, nullptr);
 
     EXPECT_THROW((void)node->fetch_to_many({
@@ -1230,7 +1230,7 @@ TEST(KvNodeIntegrationTest, FetchToManyRejectsOutOfBoundsRanges) {
 }
 
 TEST(KvNodeIntegrationTest, FetchToManyAllowsDuplicateKeysAtDistinctOffsets) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -1253,9 +1253,9 @@ TEST(KvNodeIntegrationTest, FetchToManyAllowsDuplicateKeysAtDistinctOffsets) {
     ASSERT_TRUE(publish.status().ok());
     publish.get();
 
-    auto ctx = axon::Context::create(cfg);
+    auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     auto result = reader->fetch_to_many({
@@ -1276,18 +1276,18 @@ TEST(KvNodeIntegrationTest, FetchToManyAllowsDuplicateKeysAtDistinctOffsets) {
 }
 
 TEST(KvNodeIntegrationTest, FetchToManyRejectsEmptyItems) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
     auto node = KVNode::create(cfg);
-    auto ctx = axon::Context::create(cfg);
+    auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = axon::MemoryRegion::allocate(ctx, 32);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 32);
     ASSERT_NE(region, nullptr);
 
     EXPECT_THROW((void)node->fetch_to_many({}, region), std::system_error);
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyReturnsImmediatelyForExistingKeys) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -1314,8 +1314,8 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyReturnsImmediatelyForExis
     publish_a.get();
     publish_b.get();
 
-    auto ctx = axon::Context::create(cfg);
-    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    auto ctx = zerokv::Context::create(cfg);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     auto result = reader->subscribe_and_fetch_to_once_many({
@@ -1337,7 +1337,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyReturnsImmediatelyForExis
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyWaitsForMissingKey) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -1355,8 +1355,8 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyWaitsForMissingKey) {
         .node_id = "reader-sub-fetchto-wait",
     }).ok());
 
-    auto ctx = axon::Context::create(cfg);
-    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    auto ctx = zerokv::Context::create(cfg);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     const std::string value = "waited-zero-copy";
@@ -1385,7 +1385,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyWaitsForMissingKey) {
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyReturnsPartialTimeout) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -1408,8 +1408,8 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyReturnsPartialTimeout) {
     ASSERT_TRUE(publish.status().ok());
     publish.get();
 
-    auto ctx = axon::Context::create(cfg);
-    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    auto ctx = zerokv::Context::create(cfg);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     auto result = reader->subscribe_and_fetch_to_once_many({
@@ -1430,7 +1430,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyReturnsPartialTimeout) {
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyWritesDuplicateKeyToMultipleOffsets) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -1448,8 +1448,8 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyWritesDuplicateKeyToMulti
         .node_id = "reader-sub-fetchto-dup",
     }).ok());
 
-    auto ctx = axon::Context::create(cfg);
-    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    auto ctx = zerokv::Context::create(cfg);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     const std::string value = "dup-zero-copy";
@@ -1481,7 +1481,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyWritesDuplicateKeyToMulti
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyPreservesPreExistingSubscriptions) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -1503,8 +1503,8 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyPreservesPreExistingSubsc
     ASSERT_TRUE(subscribe_future.status().ok());
     subscribe_future.get();
 
-    auto ctx = axon::Context::create(cfg);
-    auto region = axon::MemoryRegion::allocate(ctx, 128);
+    auto ctx = zerokv::Context::create(cfg);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     const std::string value = "preserve-subscription";
@@ -1529,7 +1529,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyPreservesPreExistingSubsc
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     auto events = drain_until_count(reader, 1, std::chrono::milliseconds(500));
     ASSERT_FALSE(events.empty());
-    EXPECT_EQ(events.back().type, axon::kv::SubscriptionEventType::kUnpublished);
+    EXPECT_EQ(events.back().type, zerokv::kv::SubscriptionEventType::kUnpublished);
     EXPECT_EQ(events.back().key, "sft-preserve");
 
     auto unsubscribe_future = reader->unsubscribe("sft-preserve");
@@ -1542,11 +1542,11 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyPreservesPreExistingSubsc
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyRejectsInvalidLayoutBeforeWaiting) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
     auto node = KVNode::create(cfg);
-    auto ctx = axon::Context::create(cfg);
+    auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = axon::MemoryRegion::allocate(ctx, 64);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 64);
     ASSERT_NE(region, nullptr);
 
     EXPECT_THROW((void)node->subscribe_and_fetch_to_once_many({
@@ -1556,7 +1556,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyRejectsInvalidLayoutBefor
 }
 
 TEST(KvNodeIntegrationTest, FetchFailsAfterUnpublish) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -1607,7 +1607,7 @@ TEST(KvNodeIntegrationTest, FetchFailsAfterUnpublish) {
 }
 
 TEST(KvNodeIntegrationTest, PushPublishesOnTarget) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -1657,7 +1657,7 @@ TEST(KvNodeIntegrationTest, PushPublishesOnTarget) {
 }
 
 TEST(KvNodeIntegrationTest, PushFailsWhenTargetNodeIsUnknown) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -1680,7 +1680,7 @@ TEST(KvNodeIntegrationTest, PushFailsWhenTargetNodeIsUnknown) {
 }
 
 TEST(KvNodeIntegrationTest, PushFailsWhenPayloadExceedsInboxCapacity) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -1712,7 +1712,7 @@ TEST(KvNodeIntegrationTest, PushFailsWhenPayloadExceedsInboxCapacity) {
 }
 
 TEST(KvNodeIntegrationTest, PushCoexistsWithPublish) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);
@@ -1770,7 +1770,7 @@ TEST(KvNodeIntegrationTest, PushCoexistsWithPublish) {
 }
 
 TEST(KvNodeIntegrationTest, PushFailsWhileTargetInboxReservationIsHeld) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_NE(server, nullptr);

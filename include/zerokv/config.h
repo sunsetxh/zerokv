@@ -1,15 +1,15 @@
 #pragma once
 
-/// @file axon/config.h
+/// @file zerokv/config.h
 /// @brief Configuration and context initialization for the AXON library.
 ///
 /// Usage:
-///   auto cfg = axon::Config::builder()
+///   auto cfg = zerokv::Config::builder()
 ///                  .set_transport("ucx")
 ///                  .set_num_workers(4)
 ///                  .set_memory_pool_size(256 * 1024 * 1024)
 ///                  .build();
-///   auto ctx = axon::Context::create(cfg);
+///   auto ctx = zerokv::Context::create(cfg);
 
 #include "zerokv/common.h"
 
@@ -18,7 +18,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace axon {
+namespace zerokv {
 
 // ---------------------------------------------------------------------------
 // Config
@@ -148,4 +148,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace axon
+}  // namespace zerokv

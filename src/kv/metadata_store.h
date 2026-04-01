@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace axon::kv::detail {
+namespace zerokv::kv::detail {
 
 struct NodeInfo {
     enum class State {
@@ -55,4 +55,4 @@ private:
     std::unordered_map<std::string, std::vector<std::string>> subscriptions_;
 };
 
-}  // namespace axon::kv::detail
+}  // namespace zerokv::kv::detail

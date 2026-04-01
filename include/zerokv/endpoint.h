@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file axon/endpoint.h
+/// @file zerokv/endpoint.h
 /// @brief Endpoint – a connection to a remote peer with send/recv and RDMA APIs.
 ///
 /// An Endpoint is always associated with exactly one Worker.
@@ -24,7 +24,7 @@
 #include <memory>
 #include <string>
 
-namespace axon {
+namespace zerokv {
 
 // Forward declarations
 class Worker;
@@ -174,4 +174,4 @@ private:
     friend class Worker;
 };
 
-}  // namespace axon
+}  // namespace zerokv

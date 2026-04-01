@@ -9,7 +9,7 @@
 #include <cstring>
 #include <atomic>
 
-using namespace axon;
+using namespace zerokv;
 
 // =============================================================================
 // Loopback Communication Tests (single process, dual worker)

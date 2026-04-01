@@ -10,9 +10,9 @@
 
 namespace {
 
-using axon::kv::KVServer;
-using axon::kv::ServerConfig;
-namespace proto = axon::kv::detail;
+using zerokv::kv::KVServer;
+using zerokv::kv::ServerConfig;
+namespace proto = zerokv::kv::detail;
 
 template <typename Request>
 std::vector<uint8_t> make_frame(proto::MsgType type, uint64_t request_id, const Request& req) {
@@ -36,7 +36,7 @@ std::pair<proto::MsgHeader, std::vector<uint8_t>> recv_frame(int fd) {
 }
 
 TEST(KvServerIntegrationTest, HandlesRegisterPutLookupAndUnpublish) {
-    auto cfg = axon::Config::builder()
+    auto cfg = zerokv::Config::builder()
                    .set_transport("tcp")
                    .build();
 
@@ -124,7 +124,7 @@ TEST(KvServerIntegrationTest, HandlesRegisterPutLookupAndUnpublish) {
 }
 
 TEST(KvServerIntegrationTest, ReturnsPushTargetMetadata) {
-    auto cfg = axon::Config::builder()
+    auto cfg = zerokv::Config::builder()
                    .set_transport("tcp")
                    .build();
 
@@ -173,7 +173,7 @@ TEST(KvServerIntegrationTest, ReturnsPushTargetMetadata) {
 }
 
 TEST(KvServerIntegrationTest, HandlesSubscribeAndUnsubscribe) {
-    auto cfg = axon::Config::builder()
+    auto cfg = zerokv::Config::builder()
                    .set_transport("tcp")
                    .build();
 
@@ -225,7 +225,7 @@ TEST(KvServerIntegrationTest, HandlesSubscribeAndUnsubscribe) {
 }
 
 TEST(KvServerIntegrationTest, RejectsSubscribeWithEmptyKey) {
-    auto cfg = axon::Config::builder()
+    auto cfg = zerokv::Config::builder()
                    .set_transport("tcp")
                    .build();
 

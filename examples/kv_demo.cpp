@@ -34,8 +34,8 @@
 #include <string>
 #include <thread>
 
-using namespace axon;
-using namespace axon::kv;
+using namespace zerokv;
+using namespace zerokv::kv;
 
 namespace {
 

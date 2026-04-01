@@ -1,7 +1,7 @@
 #pragma once
 
-/// @file axon/kv.h
-/// @brief High-level RDMA KV MVP API built on top of axon transport primitives.
+/// @file zerokv/kv.h
+/// @brief High-level RDMA KV MVP API built on top of zerokv transport primitives.
 
 #include "zerokv/common.h"
 #include "zerokv/config.h"
@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-namespace axon::kv {
+namespace zerokv::kv {
 
 struct KeyInfo {
     std::string key;
@@ -119,13 +119,13 @@ class KVServer {
 public:
     using Ptr = std::shared_ptr<KVServer>;
 
-    static Ptr create(const axon::Config& cfg = {});
+    static Ptr create(const zerokv::Config& cfg = {});
 
     ~KVServer();
     KVServer(const KVServer&) = delete;
     KVServer& operator=(const KVServer&) = delete;
 
-    axon::Status start(const ServerConfig& cfg);
+    zerokv::Status start(const ServerConfig& cfg);
     void stop();
 
     [[nodiscard]] bool is_running() const noexcept;
@@ -134,7 +134,7 @@ public:
     [[nodiscard]] std::vector<std::string> list_keys() const;
 
 private:
-    explicit KVServer(const axon::Config& cfg);
+    explicit KVServer(const zerokv::Config& cfg);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
@@ -143,13 +143,13 @@ class KVNode {
 public:
     using Ptr = std::shared_ptr<KVNode>;
 
-    static Ptr create(const axon::Config& cfg = {});
+    static Ptr create(const zerokv::Config& cfg = {});
 
     ~KVNode();
     KVNode(const KVNode&) = delete;
     KVNode& operator=(const KVNode&) = delete;
 
-    axon::Status start(const NodeConfig& cfg);
+    zerokv::Status start(const NodeConfig& cfg);
     void stop();
 
     [[nodiscard]] bool is_running() const noexcept;
@@ -159,7 +159,7 @@ public:
     [[nodiscard]] std::optional<FetchMetrics> last_fetch_metrics() const;
     [[nodiscard]] std::optional<PushMetrics> last_push_metrics() const;
     [[nodiscard]] std::vector<SubscriptionEvent> drain_subscription_events();
-    axon::Status wait_for_key(const std::string& key,
+    zerokv::Status wait_for_key(const std::string& key,
                               std::chrono::milliseconds timeout);
     WaitKeysResult wait_for_keys(const std::vector<std::string>& keys,
                                  std::chrono::milliseconds timeout);
@@ -170,47 +170,47 @@ public:
 
     /// Copy-publish semantics: the implementation owns the data after the
     /// returned future completes, so the caller may release the input buffer.
-    axon::Future<void> publish(const std::string& key,
+    zerokv::Future<void> publish(const std::string& key,
                                const void* data,
                                size_t size);
 
     /// Zero-copy publish semantics: the caller must keep the region alive
     /// until the key is unpublished or the node stops.
-    axon::Future<void> publish_region(const std::string& key,
-                                      const axon::MemoryRegion::Ptr& region,
+    zerokv::Future<void> publish_region(const std::string& key,
+                                      const zerokv::MemoryRegion::Ptr& region,
                                       size_t size);
 
     /// Convenience API that allocates a local buffer and fetches into it.
-    axon::Future<FetchResult> fetch(const std::string& key);
+    zerokv::Future<FetchResult> fetch(const std::string& key);
 
     /// Primary zero-copy fetch API.
-    axon::Future<void> fetch_to(const std::string& key,
-                                const axon::MemoryRegion::Ptr& local_region,
+    zerokv::Future<void> fetch_to(const std::string& key,
+                                const zerokv::MemoryRegion::Ptr& local_region,
                                 size_t length,
                                 size_t local_offset = 0);
 
     FetchToManyResult fetch_to_many(const std::vector<FetchToItem>& items,
-                                    const axon::MemoryRegion::Ptr& local_region);
+                                    const zerokv::MemoryRegion::Ptr& local_region);
 
     BatchFetchToResult subscribe_and_fetch_to_once_many(
         const std::vector<FetchToItem>& items,
-        const axon::MemoryRegion::Ptr& local_region,
+        const zerokv::MemoryRegion::Ptr& local_region,
         std::chrono::milliseconds timeout);
 
-    axon::Future<void> push(const std::string& target_node_id,
+    zerokv::Future<void> push(const std::string& target_node_id,
                             const std::string& key,
                             const void* data,
                             size_t size);
 
-    axon::Future<void> subscribe(const std::string& key);
-    axon::Future<void> unsubscribe(const std::string& key);
+    zerokv::Future<void> subscribe(const std::string& key);
+    zerokv::Future<void> unsubscribe(const std::string& key);
 
-    axon::Future<void> unpublish(const std::string& key);
+    zerokv::Future<void> unpublish(const std::string& key);
 
 private:
-    explicit KVNode(const axon::Config& cfg);
+    explicit KVNode(const zerokv::Config& cfg);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace axon::kv
+}  // namespace zerokv::kv

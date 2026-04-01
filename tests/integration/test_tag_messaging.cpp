@@ -8,7 +8,7 @@
 #include <vector>
 #include <cstring>
 
-using namespace axon;
+using namespace zerokv;
 
 // Test fixture for messaging tests
 class TagMessagingTest : public ::testing::Test {

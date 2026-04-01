@@ -2,7 +2,7 @@
 
 #include <gtest/gtest.h>
 
-namespace axon::kv::detail {
+namespace zerokv::kv::detail {
 
 TEST(KvBenchUtilsTest, ParseSizeListSupportsBinarySuffixes) {
     const auto sizes = parse_size_list("4K,64K,1M,32M");
@@ -29,4 +29,4 @@ TEST(KvBenchUtilsTest, DeriveIterationsPrefersExplicitIters) {
     EXPECT_EQ(derive_iterations(4ull * 1024ull, 7u, 1ull << 30), 7u);
 }
 
-}  // namespace axon::kv::detail
+}  // namespace zerokv::kv::detail
