@@ -1,6 +1,7 @@
 #include "zerokv/message_kv.h"
 
 #include <algorithm>
+#include <future>
 #include <cstring>
 #include <functional>
 #include <gtest/gtest.h>
@@ -198,6 +199,56 @@ TEST_F(MessageKvIntegrationTest, RecvBatchReturnsPartialTimeout) {
     EXPECT_FALSE(result.completed_all);
 
     sender->stop();
+    receiver->stop();
+    server->stop();
+}
+
+TEST_F(MessageKvIntegrationTest, RecvBatchAcknowledgesCompletedKeyBeforeBatchFinishes) {
+    auto timeout_cfg = zerokv::Config::builder()
+                           .set_transport("tcp")
+                           .set_connect_timeout(std::chrono::milliseconds(1000))
+                           .build();
+    auto server = zerokv::kv::KVServer::create(timeout_cfg);
+    ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
+
+    auto sender_a = zerokv::MessageKV::create(timeout_cfg);
+    auto sender_b = zerokv::MessageKV::create(timeout_cfg);
+    auto receiver = zerokv::MessageKV::create(timeout_cfg);
+    sender_a->start({server->address(), "127.0.0.1:0", "sender-a"});
+    sender_b->start({server->address(), "127.0.0.1:0", "sender-b"});
+    receiver->start({server->address(), "127.0.0.1:0", "receiver"});
+
+    auto ctx = zerokv::Context::create(timeout_cfg);
+    ASSERT_NE(ctx, nullptr);
+    auto region = zerokv::MemoryRegion::allocate(ctx, 16);
+    ASSERT_NE(region, nullptr);
+
+    std::promise<void> recv_started;
+    std::thread recv_thread([&] {
+        recv_started.set_value();
+        auto result = receiver->recv_batch({
+            {"batch-fast", 4, 0},
+            {"batch-slow", 4, 8},
+        }, region, std::chrono::milliseconds(2000));
+        EXPECT_EQ(result.completed.size(), 2u);
+        EXPECT_TRUE(result.failed.empty());
+        EXPECT_TRUE(result.timed_out.empty());
+        EXPECT_TRUE(result.completed_all);
+    });
+    recv_started.get_future().wait();
+
+    auto send_a = std::async(std::launch::async, [&] {
+        sender_a->send("batch-fast", "fast", 4);
+    });
+
+    EXPECT_EQ(send_a.wait_for(std::chrono::milliseconds(300)), std::future_status::ready);
+
+    sender_b->send("batch-slow", "slow", 4);
+    send_a.get();
+    recv_thread.join();
+
+    sender_a->stop();
+    sender_b->stop();
     receiver->stop();
     server->stop();
 }
