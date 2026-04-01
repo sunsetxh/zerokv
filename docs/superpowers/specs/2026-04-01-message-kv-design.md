@@ -13,7 +13,7 @@ The initial target scenario is:
 - the business layer already guarantees that message keys are unique
 
 The wrapper should provide message-style send/receive APIs without exposing the
-underlying subscription, fetch, or cleanup details to the business layer.
+underlying subscription, fetch, ack, or cleanup details to the business layer.
 
 ## Scope
 
@@ -32,6 +32,8 @@ In scope:
 - Keep message cleanup internal to the wrapper
 - Use an internal ack-based reclaim path so sender-side published objects are
   eventually unpublished after successful consumption
+- Keep cleanup on the wrapper's synchronous execution path rather than adding a
+  background thread that issues KV operations on the same `KVNode`
 
 Out of scope:
 
@@ -149,14 +151,27 @@ Phase 1 internal flow:
 1. sender publishes the message key
 2. receiver receives the message successfully
 3. receiver internally emits an ack key tied to that message key
-4. sender-side background cleanup watches for that ack
-5. sender-side background cleanup performs `unpublish(message_key)`
-6. sender-side background cleanup removes the ack marker when safe
+4. sender-side cleanup logic checks for that ack during later wrapper calls
+5. sender-side cleanup logic performs `unpublish(message_key)`
+6. receiver-side cleanup logic later performs `unpublish(ack_key)`
 
 The important API rule is:
 
 - successful receive eventually causes sender-side reclamation
 - no ack-related surface leaks into the application API
+
+### Ack ownership
+
+Ack keys follow the same owner-only-unpublish rule as any other published key.
+
+That means:
+
+- the receiver publishes the ack key
+- the receiver is the owner of the ack key
+- only the receiver-side wrapper may later `unpublish(ack_key)`
+- the sender watches for ack key presence but never unpublishes the ack key
+
+This keeps Phase 1 coherent with current ZeroKV ownership semantics.
 
 ## Key rules
 
@@ -194,6 +209,12 @@ to resolve that conflict. That remains a caller contract violation.
 
 Neither sender API waits for the receiver to consume the message.
 
+`send()` and `send_region()` are intentionally blocking APIs in Phase 1:
+
+- they synchronously wait for the underlying `publish()` /
+  `publish_region()` future to complete
+- they throw on publish failure
+
 ## Receiver semantics
 
 ### `recv(key, region, length, offset, timeout)`
@@ -203,7 +224,7 @@ Single-key receive is a thin wrapper around the batch path:
 - build one `BatchRecvItem`
 - call `recv_batch(...)`
 - success means the bytes are written into the caller region
-- failure or timeout throws
+- any failure or timeout throws
 
 ### `recv_batch(items, region, timeout)`
 
@@ -225,26 +246,42 @@ call `unpublish(message_key)` directly.
 
 ## Cleanup behavior
 
-Cleanup should be sender-driven and asynchronous.
+Cleanup should stay internal, but Phase 1 should not introduce a background
+thread that performs KV operations on the same `KVNode`.
 
 Suggested internal components:
 
 - a sender-side pending-message registry
-- a sender-side background ack watcher
-- a sender-side background unpublish worker
+- a sender-side pending-ack lookup set
+- a receiver-side pending-ack cleanup registry
+- an internal wrapper mutex that serializes public API calls and cleanup sweeps
 
 Phase 1 behavior:
 
 - sender adds a key to the pending registry after successful publish
 - receiver success generates an internal ack marker
-- sender watcher consumes ack markers and queues cleanup
-- cleanup worker performs `unpublish(message_key)`
+- sender-side cleanup sweep checks whether pending ack keys now exist
+- when an ack key is observed, sender-side cleanup sweep performs
+  `unpublish(message_key)`
+- receiver-side cleanup sweep later performs `unpublish(ack_key)`
+
+Cleanup runs on:
+
+- entry and/or exit of `send()`
+- entry and/or exit of `send_region()`
+- entry and/or exit of `recv()`
+- entry and/or exit of `recv_batch()`
+- `stop()`
 
 Cleanup is best-effort in Phase 1:
 
-- if unpublish fails transiently, the worker may retry
-- if the process exits abruptly, pending published keys may remain until later
-  manual or test cleanup
+- if unpublish fails transiently, later cleanup sweeps may retry
+- if no later API call happens after a receive, message cleanup may be delayed
+  until `stop()`
+- `stop()` should perform a bounded final cleanup sweep, but it should not wait
+  indefinitely for missing ack keys
+- if the process exits abruptly, pending published keys or ack keys may remain
+  until later manual or test cleanup
 
 ## Error handling
 
@@ -256,6 +293,7 @@ Examples:
 - invalid layout -> throw
 - publish failure -> throw
 - single-key receive timeout -> throw
+- `send()` / `send_region()` are blocking and throw on publish failure
 
 For batch receive:
 
@@ -285,6 +323,21 @@ Phase 1 does not promise:
 
 Those are future improvements, not initial wrapper responsibilities.
 
+## Lifecycle
+
+`MessageKV::stop()` should:
+
+- stop accepting new public operations
+- run a bounded final cleanup sweep on locally known pending message keys
+- run a bounded final cleanup sweep on locally owned ack keys
+- stop the underlying `KVNode`
+
+`stop()` should not promise global cleanup completion if:
+
+- the matching peer has not produced the expected ack yet
+- the peer is already down
+- a final local `unpublish()` still fails
+
 ## Testing
 
 Phase 1 should cover at least:
@@ -294,10 +347,13 @@ Phase 1 should cover at least:
 3. receiver `recv_batch()` with some keys already present
 4. receiver `recv_batch()` with keys that appear later
 5. batch timeout returns partial progress
-6. sender-side cleanup eventually unpublishes after internal ack
-7. duplicate keys in one receive batch are rejected only if the output layout is
+6. sender-side cleanup eventually unpublishes the message key after internal
+   ack observation
+7. receiver-side cleanup eventually unpublishes internally owned ack keys
+8. duplicate keys in one receive batch are rejected only if the output layout is
    invalid; otherwise business-level duplicate-key semantics are caller-owned
-8. stop/shutdown drains or safely stops internal cleanup workers
+9. stop/shutdown performs bounded cleanup sweeps and then stops without
+   indefinite waiting
 
 ## Future evolution
 
