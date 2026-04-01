@@ -20,8 +20,6 @@ using namespace zerokv::kv;
 
 namespace zerokv::examples::message_kv_demo {
 
-#ifndef MESSAGE_KV_DEMO_BUILD_TESTS
-
 namespace {
 
 std::vector<size_t> parse_sizes_impl(const std::string& csv) {
@@ -94,6 +92,8 @@ std::string make_payload(size_t round_index, size_t size_bytes, size_t thread_in
 }
 
 }  // namespace zerokv::examples::message_kv_demo
+
+#ifndef MESSAGE_KV_DEMO_BUILD_TESTS
 
 namespace {
 
@@ -404,5 +404,3 @@ int main(int argc, char** argv) {
 }
 
 #endif  // MESSAGE_KV_DEMO_BUILD_TESTS
-
-}  // namespace zerokv::examples::message_kv_demo
