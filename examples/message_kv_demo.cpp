@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <exception>
 #include <iostream>
@@ -116,6 +117,42 @@ std::string render_send_round_summary(size_t round_index,
     return out.str();
 }
 
+std::string make_compact_preview(const void* data, size_t size_bytes, size_t max_bytes) {
+    const auto* bytes = static_cast<const unsigned char*>(data);
+    const size_t preview_bytes = std::min(size_bytes, max_bytes);
+    std::string preview;
+    preview.reserve(preview_bytes + (size_bytes > max_bytes ? 3 : 0));
+    for (size_t i = 0; i < preview_bytes; ++i) {
+        const unsigned char ch = bytes[i];
+        preview.push_back(std::isprint(ch) ? static_cast<char>(ch) : '.');
+    }
+    if (size_bytes > max_bytes) {
+        preview += "...";
+    }
+    return preview;
+}
+
+std::string render_recv_round_summary(size_t round_index,
+                                      size_t size_bytes,
+                                      size_t completed,
+                                      size_t failed,
+                                      size_t timed_out,
+                                      bool completed_all,
+                                      uint64_t recv_total_us,
+                                      size_t total_bytes) {
+    std::ostringstream out;
+    out << "RECV_ROUND round=" << round_index
+        << " size=" << size_bytes
+        << " completed=" << completed
+        << " failed=" << failed
+        << " timed_out=" << timed_out
+        << " completed_all=" << (completed_all ? 1 : 0)
+        << " recv_total_us=" << recv_total_us
+        << " total_bytes=" << total_bytes
+        << " throughput_MiBps=" << throughput_mib_per_sec(total_bytes, recv_total_us);
+    return out.str();
+}
+
 }  // namespace zerokv::examples::message_kv_demo
 
 #ifndef MESSAGE_KV_DEMO_BUILD_TESTS
@@ -144,7 +181,7 @@ void print_usage(const char* argv0) {
         << "  " << argv0
         << " --role rank0 --listen <addr> --data-addr <addr> --node-id <id>\n"
         << "           [--messages 4] [--timeout-ms 5000] [--post-recv-wait-ms 2000]"
-        << " [--transport tcp|rdma]\n"
+        << " [--sizes 1K,64K,...] [--transport tcp|rdma]\n"
         << "  " << argv0
         << " --role rank1 --server-addr <addr> --data-addr <addr> --node-id <id>\n"
         << "           [--threads 4] [--sizes 1K,64K,...] [--transport tcp|rdma]\n";
@@ -223,6 +260,14 @@ int run_rank0(const Args& args, const Config& cfg) {
         return 1;
     }
 
+    std::vector<size_t> sizes;
+    try {
+        sizes = zerokv::examples::message_kv_demo::parse_sizes_csv(args.sizes_csv);
+    } catch (const std::exception& ex) {
+        std::cerr << "--sizes: " << ex.what() << "\n";
+        return 1;
+    }
+
     auto server = KVServer::create(cfg);
     if (!server) {
         std::cerr << "failed to create KVServer\n";
@@ -255,72 +300,85 @@ int run_rank0(const Args& args, const Config& cfg) {
         return 1;
     }
 
-    std::vector<MessageKV::BatchRecvItem> items;
-    std::vector<std::string> keys;
-    std::vector<std::string> payloads;
-    std::vector<size_t> offsets;
-    size_t total_bytes = 0;
-    items.reserve(static_cast<size_t>(args.messages));
-    keys.reserve(static_cast<size_t>(args.messages));
-    payloads.reserve(static_cast<size_t>(args.messages));
-    offsets.reserve(static_cast<size_t>(args.messages));
+    for (size_t round_index = 0; round_index < sizes.size(); ++round_index) {
+        const size_t size_bytes = sizes[round_index];
+        const size_t total_bytes = size_bytes * static_cast<size_t>(args.messages);
 
-    for (int i = 0; i < args.messages; ++i) {
-        const auto key = make_key(1, 0, i);
-        const auto payload = make_rank_payload(1, i);
-        keys.push_back(key);
-        payloads.push_back(payload);
-        offsets.push_back(total_bytes);
-        items.push_back(MessageKV::BatchRecvItem{
-            .key = key,
-            .length = payload.size(),
-            .offset = total_bytes,
-        });
-        total_bytes += payload.size();
-    }
+        std::vector<MessageKV::BatchRecvItem> items;
+        std::vector<std::string> keys;
+        std::vector<std::string> payloads;
+        items.reserve(static_cast<size_t>(args.messages));
+        keys.reserve(static_cast<size_t>(args.messages));
+        payloads.reserve(static_cast<size_t>(args.messages));
 
-    auto region = MemoryRegion::allocate(ctx, total_bytes);
-    if (!region) {
-        std::cerr << "failed to allocate receive region\n";
-        mq->stop();
-        return 1;
-    }
+        for (int i = 0; i < args.messages; ++i) {
+            const auto key = zerokv::examples::message_kv_demo::make_round_key(
+                round_index, size_bytes, static_cast<size_t>(i));
+            const auto payload = zerokv::examples::message_kv_demo::make_payload(
+                round_index, size_bytes, static_cast<size_t>(i));
+            keys.push_back(key);
+            payloads.push_back(payload);
+            items.push_back(MessageKV::BatchRecvItem{
+                .key = key,
+                .length = size_bytes,
+                .offset = static_cast<size_t>(i) * size_bytes,
+            });
+        }
 
-    try {
-        const auto recv_start = SteadyClock::now();
-        const auto result =
-            mq->recv_batch(items, region, std::chrono::milliseconds(args.timeout_ms));
-        const auto recv_end = SteadyClock::now();
-        const auto recv_us = elapsed_us(recv_start, recv_end);
-
-        std::cout << "RECV_BATCH completed=" << result.completed.size()
-                  << " failed=" << result.failed.size()
-                  << " timed_out=" << result.timed_out.size()
-                  << " completed_all=" << (result.completed_all ? 1 : 0)
-                  << " recv_batch_us=" << recv_us
-                  << " total_bytes=" << total_bytes
-                  << " throughput_MiBps=" << throughput_mib_per_sec(total_bytes, recv_us)
-                  << "\n";
-
-        if (!result.completed_all || !result.failed.empty() || !result.timed_out.empty()) {
+        auto region = MemoryRegion::allocate(ctx, total_bytes);
+        if (!region) {
+            std::cerr << "failed to allocate receive region\n";
             mq->stop();
             server->stop();
             return 1;
         }
 
-        for (int i = 0; i < args.messages; ++i) {
-            const std::string value(
-                static_cast<const char*>(region->address()) + offsets[static_cast<size_t>(i)],
-                payloads[static_cast<size_t>(i)].size());
-            std::cout << "RECV_OK key=" << keys[static_cast<size_t>(i)]
-                      << " value=" << value << "\n";
+        try {
+            const auto recv_start = SteadyClock::now();
+            const auto result =
+                mq->recv_batch(items, region, std::chrono::milliseconds(args.timeout_ms));
+            const auto recv_end = SteadyClock::now();
+            const auto recv_us = elapsed_us(recv_start, recv_end);
+
+            std::cout << zerokv::examples::message_kv_demo::render_recv_round_summary(
+                             round_index,
+                             size_bytes,
+                             result.completed.size(),
+                             result.failed.size(),
+                             result.timed_out.size(),
+                             result.completed_all,
+                             recv_us,
+                             total_bytes)
+                      << "\n";
+
+            if (!result.completed_all || !result.failed.empty() || !result.timed_out.empty()) {
+                mq->stop();
+                server->stop();
+                return 1;
+            }
+
+            for (int i = 0; i < args.messages; ++i) {
+                const size_t offset = static_cast<size_t>(i) * size_bytes;
+                const auto* data = static_cast<const char*>(region->address()) + offset;
+                const auto& expected_payload = payloads[static_cast<size_t>(i)];
+                if (std::memcmp(data, expected_payload.data(), expected_payload.size()) != 0) {
+                    throw std::runtime_error("received payload mismatch for key " +
+                                             keys[static_cast<size_t>(i)]);
+                }
+                std::cout << "RECV_OK key=" << keys[static_cast<size_t>(i)]
+                          << " bytes=" << size_bytes
+                          << " preview="
+                          << zerokv::examples::message_kv_demo::make_compact_preview(
+                                 expected_payload.data(), expected_payload.size(), 24)
+                          << "\n";
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(args.post_recv_wait_ms));
+        } catch (const std::exception& ex) {
+            std::cerr << "RECV_ERR message=" << ex.what() << "\n";
+            mq->stop();
+            server->stop();
+            return 1;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(args.post_recv_wait_ms));
-    } catch (const std::exception& ex) {
-        std::cerr << "RECV_ERR message=" << ex.what() << "\n";
-        mq->stop();
-        server->stop();
-        return 1;
     }
 
     mq->stop();

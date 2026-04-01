@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,15 @@ std::string render_send_round_summary(size_t round_index,
                                       uint64_t send_total_us,
                                       uint64_t max_thread_send_us,
                                       size_t total_bytes);
+std::string render_recv_round_summary(size_t round_index,
+                                      size_t size_bytes,
+                                      size_t completed,
+                                      size_t failed,
+                                      size_t timed_out,
+                                      bool completed_all,
+                                      uint64_t recv_total_us,
+                                      size_t total_bytes);
+std::string make_compact_preview(const void* data, size_t size_bytes, size_t max_bytes);
 }  // namespace zerokv::examples::message_kv_demo
 
 TEST(MessageKvDemoHelpersTest, ParsesDefaultLikeSizeCsv) {
@@ -43,4 +53,25 @@ TEST(MessageKvDemoHelpersTest, SendRoundSummaryUsesConfiguredSizeAndCounts) {
     EXPECT_NE(line.find("size=65536"), std::string::npos);
     EXPECT_NE(line.find("messages=4"), std::string::npos);
     EXPECT_NE(line.find("total_bytes=262144"), std::string::npos);
+}
+
+TEST(MessageKvDemoHelpersTest, RecvRoundSummaryUsesCompletedCountsAndThroughput) {
+    auto line = zerokv::examples::message_kv_demo::render_recv_round_summary(
+        2, 4096, 4, 0, 0, true, 1500, 16384);
+    EXPECT_NE(line.find("RECV_ROUND"), std::string::npos);
+    EXPECT_NE(line.find("round=2"), std::string::npos);
+    EXPECT_NE(line.find("size=4096"), std::string::npos);
+    EXPECT_NE(line.find("completed=4"), std::string::npos);
+    EXPECT_NE(line.find("failed=0"), std::string::npos);
+    EXPECT_NE(line.find("timed_out=0"), std::string::npos);
+    EXPECT_NE(line.find("completed_all=1"), std::string::npos);
+    EXPECT_NE(line.find("recv_total_us=1500"), std::string::npos);
+    EXPECT_NE(line.find("total_bytes=16384"), std::string::npos);
+}
+
+TEST(MessageKvDemoHelpersTest, CompactPreviewTruncatesLongPayloads) {
+    const std::string payload = "round0-thread1-abcdefghijklmnopqrstuvwxyz";
+    auto preview = zerokv::examples::message_kv_demo::make_compact_preview(
+        payload.data(), payload.size(), 16);
+    EXPECT_EQ(preview, "round0-thread1-a...");
 }
