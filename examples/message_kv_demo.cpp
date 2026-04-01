@@ -91,6 +91,31 @@ std::string make_payload(size_t round_index, size_t size_bytes, size_t thread_in
     return payload;
 }
 
+double throughput_mib_per_sec(size_t bytes, uint64_t elapsed_us_value) {
+    if (elapsed_us_value == 0) {
+        return 0.0;
+    }
+    const double seconds = static_cast<double>(elapsed_us_value) / 1000000.0;
+    return static_cast<double>(bytes) / (1024.0 * 1024.0) / seconds;
+}
+
+std::string render_send_round_summary(size_t round_index,
+                                      size_t size_bytes,
+                                      size_t messages,
+                                      uint64_t send_total_us,
+                                      uint64_t max_thread_send_us,
+                                      size_t total_bytes) {
+    std::ostringstream out;
+    out << "SEND_ROUND round=" << round_index
+        << " size=" << size_bytes
+        << " messages=" << messages
+        << " send_total_us=" << send_total_us
+        << " max_thread_send_us=" << max_thread_send_us
+        << " total_bytes=" << total_bytes
+        << " throughput_MiBps=" << throughput_mib_per_sec(total_bytes, send_total_us);
+    return out.str();
+}
+
 }  // namespace zerokv::examples::message_kv_demo
 
 #ifndef MESSAGE_KV_DEMO_BUILD_TESTS
@@ -106,6 +131,7 @@ struct Args {
     std::string data_addr;
     std::string node_id = "rank0";
     std::string transport = "tcp";
+    std::string sizes_csv = "1K,64K,1M,4M,16M,32M,64M,128M";
     int threads = 4;
     int messages = 4;
     int timeout_ms = 5000;
@@ -121,7 +147,7 @@ void print_usage(const char* argv0) {
         << " [--transport tcp|rdma]\n"
         << "  " << argv0
         << " --role rank1 --server-addr <addr> --data-addr <addr> --node-id <id>\n"
-        << "           [--threads 4] [--transport tcp|rdma]\n";
+        << "           [--threads 4] [--sizes 1K,64K,...] [--transport tcp|rdma]\n";
 }
 
 bool parse_args(int argc, char** argv, Args* args) {
@@ -139,6 +165,8 @@ bool parse_args(int argc, char** argv, Args* args) {
             args->node_id = argv[++i];
         } else if (arg == "--transport" && i + 1 < argc) {
             args->transport = argv[++i];
+        } else if (arg == "--sizes" && i + 1 < argc) {
+            args->sizes_csv = argv[++i];
         } else if (arg == "--threads" && i + 1 < argc) {
             args->threads = std::stoi(argv[++i]);
         } else if (arg == "--messages" && i + 1 < argc) {
@@ -309,74 +337,83 @@ int run_rank1(const Args& args, const Config& cfg) {
         std::cerr << "--threads must be > 0\n";
         return 1;
     }
-    std::vector<std::thread> workers;
-    workers.reserve(static_cast<size_t>(args.threads));
-    std::vector<std::exception_ptr> errors(static_cast<size_t>(args.threads));
-    std::vector<uint64_t> send_us(static_cast<size_t>(args.threads), 0);
-    size_t total_bytes = 0;
-
-    for (int i = 0; i < args.threads; ++i) {
-        total_bytes += make_payload(1, i).size();
+    std::vector<size_t> sizes;
+    try {
+        sizes = parse_sizes_csv(args.sizes_csv);
+    } catch (const std::exception& ex) {
+        std::cerr << "--sizes: " << ex.what() << "\n";
+        return 1;
     }
 
-    const auto total_start = SteadyClock::now();
+    for (size_t round_index = 0; round_index < sizes.size(); ++round_index) {
+        const size_t size_bytes = sizes[round_index];
+        std::vector<std::thread> workers;
+        workers.reserve(static_cast<size_t>(args.threads));
+        std::vector<std::exception_ptr> errors(static_cast<size_t>(args.threads));
+        std::vector<uint64_t> send_us(static_cast<size_t>(args.threads), 0);
+        const size_t total_bytes = size_bytes * static_cast<size_t>(args.threads);
 
-    for (int i = 0; i < args.threads; ++i) {
-        workers.emplace_back([&, i] {
-            try {
-                auto mq = MessageKV::create(cfg);
-                mq->start(NodeConfig{
-                    .server_addr = args.server_addr,
-                    .local_data_addr = args.data_addr,
-                    .node_id = make_sender_node_id(args.node_id, i),
-                });
+        const auto round_start = SteadyClock::now();
 
-                const auto key = make_key(1, 0, i);
-                const auto payload = make_payload(1, i);
-                const auto send_start = SteadyClock::now();
-                mq->send(key, payload.data(), payload.size());
-                const auto send_end = SteadyClock::now();
-                send_us[static_cast<size_t>(i)] = elapsed_us(send_start, send_end);
-                std::cout << "SEND_OK key=" << key
-                          << " value=" << payload
-                          << " send_us=" << send_us[static_cast<size_t>(i)]
-                          << "\n";
-                mq->stop();
-            } catch (...) {
-                errors[static_cast<size_t>(i)] = std::current_exception();
-            }
-        });
-    }
+        for (int i = 0; i < args.threads; ++i) {
+            workers.emplace_back([&, i, round_index, size_bytes] {
+                try {
+                    auto mq = MessageKV::create(cfg);
+                    mq->start(NodeConfig{
+                        .server_addr = args.server_addr,
+                        .local_data_addr = args.data_addr,
+                        .node_id = make_sender_node_id(args.node_id, i),
+                    });
 
-    for (auto& worker : workers) {
-        worker.join();
-    }
-
-    const auto total_end = SteadyClock::now();
-
-    for (const auto& error : errors) {
-        if (error) {
-            try {
-                std::rethrow_exception(error);
-            } catch (const std::exception& ex) {
-                std::cerr << "SEND_ERR message=" << ex.what() << "\n";
-            }
-            return 1;
+                    const auto key = make_round_key(round_index, size_bytes, static_cast<size_t>(i));
+                    const auto payload = make_payload(round_index, size_bytes, static_cast<size_t>(i));
+                    const auto send_start = SteadyClock::now();
+                    mq->send(key, payload.data(), payload.size());
+                    const auto send_end = SteadyClock::now();
+                    send_us[static_cast<size_t>(i)] = elapsed_us(send_start, send_end);
+                    std::cout << "SEND_OK key=" << key
+                              << " value=" << payload
+                              << " send_us=" << send_us[static_cast<size_t>(i)]
+                              << "\n";
+                    mq->stop();
+                } catch (...) {
+                    errors[static_cast<size_t>(i)] = std::current_exception();
+                }
+            });
         }
-    }
 
-    uint64_t max_thread_send_us = 0;
-    for (uint64_t value : send_us) {
-        if (value > max_thread_send_us) {
-            max_thread_send_us = value;
+        for (auto& worker : workers) {
+            worker.join();
         }
+
+        const auto round_end = SteadyClock::now();
+
+        for (const auto& error : errors) {
+            if (error) {
+                try {
+                    std::rethrow_exception(error);
+                } catch (const std::exception& ex) {
+                    std::cerr << "SEND_ERR message=" << ex.what() << "\n";
+                }
+                return 1;
+            }
+        }
+
+        uint64_t max_thread_send_us = 0;
+        for (uint64_t value : send_us) {
+            if (value > max_thread_send_us) {
+                max_thread_send_us = value;
+            }
+        }
+        const auto total_us = elapsed_us(round_start, round_end);
+        std::cout << render_send_round_summary(round_index,
+                                               size_bytes,
+                                               static_cast<size_t>(args.threads),
+                                               total_us,
+                                               max_thread_send_us,
+                                               total_bytes)
+                  << "\n";
     }
-    const auto total_us = elapsed_us(total_start, total_end);
-    std::cout << "RANK1_SUMMARY total_us=" << total_us
-              << " max_thread_send_us=" << max_thread_send_us
-              << " total_bytes=" << total_bytes
-              << " throughput_MiBps=" << throughput_mib_per_sec(total_bytes, total_us)
-              << "\n";
 
     return 0;
 }
