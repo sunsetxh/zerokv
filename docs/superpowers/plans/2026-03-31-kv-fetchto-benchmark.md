@@ -30,7 +30,7 @@ Expected: FAIL because `result_copy_us` field and `bench-fetch-to` mode/header d
 ### Task 2: Implement fetch metrics accounting and MiB naming
 
 **Files:**
-- Modify: `include/axon/kv.h`
+- Modify: `include/zerokv/kv.h`
 - Modify: `src/kv/node.cpp`
 - Modify: `src/python/bindings.cpp`
 - Modify: `src/kv/bench_utils.h`
@@ -88,7 +88,7 @@ Expected: PASS.
 
 **Files:**
 - Modify: `README.md`
-- Modify: `docs/reports/axon-rdma-kv-mvp.md`
+- Modify: `docs/reports/zerokv-rdma-kv-mvp.md`
 - Modify: `docs/reports/todo-cluster-next-steps.md`
 
 - [ ] **Step 1: Document zero-copy fetch positioning**
@@ -102,12 +102,12 @@ Update README and MVP report to state:
 
 Add a TODO entry summarizing:
 - UCX multi-rail support exists
-- AXON currently registers one `data_addr`
+- ZeroKV currently registers one `data_addr`
 - future work: multi-address registration -> per-key NIC selection -> optional striping
 
 - [ ] **Step 3: Run a focused doc/benchmark sanity check**
 
-Run: `cmake --build build --target kv_bench -j4 && ./build/kv_bench --mode bench-fetch-to --help >/tmp/kv_bench_help.txt 2>&1 || true && rg -n 'fetch_to|throughput_MiBps|multi-NIC|multi-rail|data_addr' README.md docs/reports/axon-rdma-kv-mvp.md docs/reports/todo-cluster-next-steps.md`
+Run: `cmake --build build --target kv_bench -j4 && ./build/kv_bench --mode bench-fetch-to --help >/tmp/kv_bench_help.txt 2>&1 || true && rg -n 'fetch_to|throughput_MiBps|multi-NIC|multi-rail|data_addr' README.md docs/reports/zerokv-rdma-kv-mvp.md docs/reports/todo-cluster-next-steps.md`
 Expected: docs mention the new terminology and TODO text.
 
 ### Task 5: Final verification and commit
@@ -123,6 +123,6 @@ Expected: PASS.
 - [ ] **Step 2: Commit**
 
 ```bash
-git add include/axon/kv.h src/kv/node.cpp src/python/bindings.cpp src/kv/bench_utils.h src/kv/bench_utils.cpp examples/kv_bench.cpp tests/integration/test_kv_node.cpp tests/integration/test_kv_bench.cpp README.md docs/reports/axon-rdma-kv-mvp.md docs/reports/todo-cluster-next-steps.md
+git add include/zerokv/kv.h src/kv/node.cpp src/python/bindings.cpp src/kv/bench_utils.h src/kv/bench_utils.cpp examples/kv_bench.cpp tests/integration/test_kv_node.cpp tests/integration/test_kv_bench.cpp README.md docs/reports/zerokv-rdma-kv-mvp.md docs/reports/todo-cluster-next-steps.md
 git commit -m "Improve KV fetch metrics and benchmarks"
 ```

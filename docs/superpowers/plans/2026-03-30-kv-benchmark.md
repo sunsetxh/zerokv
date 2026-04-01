@@ -6,7 +6,7 @@
 
 **Architecture:** Add a standalone `kv_bench` CLI with four modes: `server`, `hold-owner`, `bench-publish`, and `bench-fetch`. Put parsing, size normalization, iteration calculation, and table formatting in a small reusable benchmark helper module so the executable and tests share the same logic. Keep the benchmark independent from `kv_demo`, but reuse `KVServer`, `KVNode`, `PublishMetrics`, and `FetchMetrics`.
 
-**Tech Stack:** C++17, CMake, AXON KV API (`KVServer`, `KVNode`), GoogleTest, UCX-backed AXON transport
+**Tech Stack:** C++17, CMake, ZeroKV KV API (`KVServer`, `KVNode`), GoogleTest, UCX-backed ZeroKV transport
 
 ---
 
@@ -39,7 +39,7 @@
 
 #include <gtest/gtest.h>
 
-namespace axon::kv::detail {
+namespace zerokv::kv::detail {
 
 TEST(KvBenchUtilsTest, ParseSizeListSupportsBinarySuffixes) {
     const auto sizes = parse_size_list("4K,64K,1M,32M");
@@ -66,7 +66,7 @@ TEST(KvBenchUtilsTest, DeriveIterationsPrefersExplicitIters) {
     EXPECT_EQ(derive_iterations(4ull * 1024ull, 7u, 1ull << 30), 7u);
 }
 
-}  // namespace axon::kv::detail
+}  // namespace zerokv::kv::detail
 ```
 
 - [ ] **Step 2: Run the unit test to confirm it fails**
@@ -86,14 +86,14 @@ Expected:
 ```cpp
 #pragma once
 
-#include "axon/status.h"
+#include "zerokv/status.h"
 
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
-namespace axon::kv::detail {
+namespace zerokv::kv::detail {
 
 struct SizeListResult {
     Status status;
@@ -109,7 +109,7 @@ uint64_t derive_iterations(uint64_t size_bytes,
                            uint64_t total_bytes);
 std::string format_size(uint64_t size_bytes);
 
-}  // namespace axon::kv::detail
+}  // namespace zerokv::kv::detail
 ```
 
 - [ ] **Step 4: Write the minimal helper implementation**
@@ -121,7 +121,7 @@ std::string format_size(uint64_t size_bytes);
 #include <cctype>
 #include <sstream>
 
-namespace axon::kv::detail {
+namespace zerokv::kv::detail {
 namespace {
 
 uint64_t parse_size_token(std::string token, Status* status) {
@@ -199,7 +199,7 @@ std::string format_size(uint64_t size_bytes) {
     return std::to_string(size_bytes) + "B";
 }
 
-}  // namespace axon::kv::detail
+}  // namespace zerokv::kv::detail
 ```
 
 - [ ] **Step 5: Add the new unit test target**
@@ -209,7 +209,7 @@ add_executable(test_kv_bench
     tests/unit/test_kv_bench.cpp
     src/kv/bench_utils.cpp
 )
-target_link_libraries(test_kv_bench PRIVATE axon GTest::gtest GTest::gtest_main)
+target_link_libraries(test_kv_bench PRIVATE zerokv GTest::gtest GTest::gtest_main)
 target_include_directories(test_kv_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
 add_test(NAME UnitKvBench COMMAND test_kv_bench)
 ```
@@ -244,18 +244,18 @@ git commit -m "Add KV benchmark helper utilities"
 - [ ] **Step 1: Write the failing integration smoke test for server and hold-owner**
 
 ```cpp
-#include "axon/kv.h"
+#include "zerokv/kv.h"
 
 #include <gtest/gtest.h>
 
 TEST(KvBenchIntegrationTest, HoldOwnerPublishesStableKeys) {
-    const auto cfg = axon::Config::builder().set_transport("tcp").build();
+    const auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
-    auto server = axon::kv::KVServer::create(cfg);
-    ASSERT_TRUE(server->start(axon::kv::ServerConfig{"127.0.0.1:0"}).ok());
+    auto server = zerokv::kv::KVServer::create(cfg);
+    ASSERT_TRUE(server->start(zerokv::kv::ServerConfig{"127.0.0.1:0"}).ok());
 
-    auto owner = axon::kv::KVNode::create(cfg);
-    ASSERT_TRUE(owner->start(axon::kv::NodeConfig{
+    auto owner = zerokv::kv::KVNode::create(cfg);
+    ASSERT_TRUE(owner->start(zerokv::kv::NodeConfig{
         .server_addr = server->address(),
         .local_data_addr = "127.0.0.1:0",
         .node_id = "bench-owner",
@@ -289,7 +289,7 @@ Expected:
 - [ ] **Step 3: Create the `kv_bench` skeleton with common argument parsing**
 
 ```cpp
-#include "axon/kv.h"
+#include "zerokv/kv.h"
 #include "kv/bench_utils.h"
 
 #include <atomic>
@@ -299,8 +299,8 @@ Expected:
 #include <string>
 #include <thread>
 
-using namespace axon;
-using namespace axon::kv;
+using namespace zerokv;
+using namespace zerokv::kv;
 
 namespace {
 
@@ -409,7 +409,7 @@ add_executable(kv_bench
     examples/kv_bench.cpp
     src/kv/bench_utils.cpp
 )
-target_link_libraries(kv_bench PRIVATE axon)
+target_link_libraries(kv_bench PRIVATE zerokv)
 target_include_directories(kv_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
 ```
 
@@ -446,13 +446,13 @@ git commit -m "Add KV benchmark server and owner modes"
 
 ```cpp
 TEST(KvBenchIntegrationTest, PublishBenchmarkCompletesSingleSizeSweep) {
-    const auto cfg = axon::Config::builder().set_transport("tcp").build();
+    const auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
-    auto server = axon::kv::KVServer::create(cfg);
-    ASSERT_TRUE(server->start(axon::kv::ServerConfig{"127.0.0.1:0"}).ok());
+    auto server = zerokv::kv::KVServer::create(cfg);
+    ASSERT_TRUE(server->start(zerokv::kv::ServerConfig{"127.0.0.1:0"}).ok());
 
-    auto node = axon::kv::KVNode::create(cfg);
-    ASSERT_TRUE(node->start(axon::kv::NodeConfig{
+    auto node = zerokv::kv::KVNode::create(cfg);
+    ASSERT_TRUE(node->start(zerokv::kv::NodeConfig{
         .server_addr = server->address(),
         .local_data_addr = "127.0.0.1:0",
         .node_id = "bench-publish-node",
@@ -587,13 +587,13 @@ git commit -m "Add KV publish benchmark mode"
 
 ```cpp
 TEST(KvBenchIntegrationTest, FetchBenchmarkReadsStableOwnerKeys) {
-    const auto cfg = axon::Config::builder().set_transport("tcp").build();
+    const auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
-    auto server = axon::kv::KVServer::create(cfg);
-    ASSERT_TRUE(server->start(axon::kv::ServerConfig{"127.0.0.1:0"}).ok());
+    auto server = zerokv::kv::KVServer::create(cfg);
+    ASSERT_TRUE(server->start(zerokv::kv::ServerConfig{"127.0.0.1:0"}).ok());
 
-    auto owner = axon::kv::KVNode::create(cfg);
-    ASSERT_TRUE(owner->start(axon::kv::NodeConfig{
+    auto owner = zerokv::kv::KVNode::create(cfg);
+    ASSERT_TRUE(owner->start(zerokv::kv::NodeConfig{
         .server_addr = server->address(),
         .local_data_addr = "127.0.0.1:0",
         .node_id = "bench-owner",
@@ -604,8 +604,8 @@ TEST(KvBenchIntegrationTest, FetchBenchmarkReadsStableOwnerKeys) {
     ASSERT_TRUE(publish.status().ok());
     publish.get();
 
-    auto reader = axon::kv::KVNode::create(cfg);
-    ASSERT_TRUE(reader->start(axon::kv::NodeConfig{
+    auto reader = zerokv::kv::KVNode::create(cfg);
+    ASSERT_TRUE(reader->start(zerokv::kv::NodeConfig{
         .server_addr = server->address(),
         .local_data_addr = "127.0.0.1:0",
         .node_id = "bench-reader",
@@ -747,7 +747,7 @@ git commit -m "Add KV fetch benchmark mode"
 ### Task 5: Final Verification and Docs
 
 **Files:**
-- Modify: `docs/reports/axon-rdma-kv-mvp.md`
+- Modify: `docs/reports/zerokv-rdma-kv-mvp.md`
 - Modify: `examples/kv_bench.cpp`
 - Test: existing benchmark and KV test targets
 
@@ -782,6 +782,6 @@ Expected:
 - [ ] **Step 3: Commit**
 
 ```bash
-git add docs/reports/axon-rdma-kv-mvp.md examples/kv_bench.cpp
+git add docs/reports/zerokv-rdma-kv-mvp.md examples/kv_bench.cpp
 git commit -m "Document KV benchmark workflow"
 ```

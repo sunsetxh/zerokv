@@ -1,4 +1,4 @@
-# AXON RDMA KV MVP
+# ZeroKV RDMA KV MVP
 
 ## 1. Product Goal
 
@@ -88,9 +88,9 @@ Used for:
 
 Server holds metadata only. Large value payload is not forwarded by server.
 
-## 5. Mapping to Current AXON
+## 5. Mapping to Current ZeroKV
 
-Current AXON already provides the transport core:
+Current ZeroKV already provides the transport core:
 
 - `Context`
 - `Worker`
@@ -389,7 +389,7 @@ This keeps the model uniform and avoids special-case data path logic.
 ### Technical Risks
 
 - endpoint cache can become stale
-- current AXON sockaddr path is IPv4-literal oriented
+- current ZeroKV sockaddr path is IPv4-literal oriented
 - current error callback path is weak
 - current atomic path is not production-ready
 
@@ -456,7 +456,7 @@ The following extensions have been implemented since the initial MVP closure.
 
 ## 14. Practical Conclusion
 
-Current AXON is already strong enough to support the MVP transport layer.
+Current ZeroKV is already strong enough to support the MVP transport layer.
 What is still missing is not the core RDMA mechanism, but the control-plane
 and product-level object model:
 
@@ -465,7 +465,7 @@ and product-level object model:
 - publish / lookup / fetch APIs
 - peer routing and lifecycle handling
 
-The right next step is to build the MVP control plane on top of AXON rather
+The right next step is to build the MVP control plane on top of ZeroKV rather
 than continuing to broaden low-level transport APIs first.
 
 ## 15. Known Limitations
@@ -474,7 +474,7 @@ than continuing to broaden low-level transport APIs first.
   assertion in `proto_select.c` when using the new protocol stack.
   This was observed with the KV demo across the two QEMU VMs.
 
-- This is not a general AXON RDMA failure:
+- This is not a general ZeroKV RDMA failure:
   - `rdma_put_get` still works cross-VM in the same environment.
   - KV fetch works inside a single VM.
   - Cross-VM KV fetch succeeds when the UCX new protocol stack is disabled.
@@ -510,7 +510,7 @@ UCX_PROTO_ENABLE=n UCX_NET_DEVICES=rxe0:1 \
 
 ## 16. Real RDMA Validation
 
-The current AXON KV stack is ready for functional validation on real RDMA
+The current ZeroKV KV stack is ready for functional validation on real RDMA
 hardware.
 
 Recommended validation order:

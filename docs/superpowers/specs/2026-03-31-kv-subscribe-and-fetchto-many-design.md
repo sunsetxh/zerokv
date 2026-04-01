@@ -12,8 +12,8 @@ The target scenario is:
 
 1. the caller prepares a shared output `MemoryRegion`
 2. some keys already exist, some do not
-3. AXON waits for missing keys to appear
-4. as soon as an individual key becomes ready, AXON fetches it directly into
+3. ZeroKV waits for missing keys to appear
+4. as soon as an individual key becomes ready, ZeroKV fetches it directly into
    the caller's region at the requested offset
 5. the helper returns only after the whole batch is either completed or timed
    out
@@ -40,7 +40,7 @@ Out of scope:
 
 ## API
 
-Add a new result type and method to `axon::kv`.
+Add a new result type and method to `zerokv::kv`.
 
 ```cpp
 struct BatchFetchToResult {
@@ -52,7 +52,7 @@ struct BatchFetchToResult {
 
 BatchFetchToResult subscribe_and_fetch_to_once_many(
     const std::vector<FetchToItem>& items,
-    const axon::MemoryRegion::Ptr& region,
+    const zerokv::MemoryRegion::Ptr& region,
     std::chrono::milliseconds timeout);
 ```
 

@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up workdir
-WORKDIR /axon
+WORKDIR /zerokv
 
 # The entrypoint script will be copied/mounted
 COPY entrypoint.sh /entrypoint.sh

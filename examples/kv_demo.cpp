@@ -20,7 +20,7 @@
 ///   Workaround for this environment:
 ///     UCX_PROTO_ENABLE=n UCX_NET_DEVICES=rxe0:1 ./kv_demo --mode fetch ...
 ///   This workaround was not needed for single-VM testing and should not be
-///   treated as a general AXON library requirement.
+///   treated as a general ZeroKV library requirement.
 
 #include <zerokv/kv.h>
 #include <zerokv/config.h>

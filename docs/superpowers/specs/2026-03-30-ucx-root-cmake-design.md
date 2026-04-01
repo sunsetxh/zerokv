@@ -4,7 +4,7 @@
 
 ## Goal
 
-Allow AXON to locate a non-system UCX installation through a single explicit
+Allow ZeroKV to locate a non-system UCX installation through a single explicit
 CMake option:
 
 ```bash
@@ -66,8 +66,8 @@ cmake -S . -B build -DUCX_ROOT=/opt/ucx
 
 Expected result:
 
-- if `/opt/ucx/lib/pkgconfig/ucx.pc` exists, AXON finds UCX there
-- if `/opt/ucx/lib64/pkgconfig/ucx.pc` exists instead, AXON finds it there
+- if `/opt/ucx/lib/pkgconfig/ucx.pc` exists, ZeroKV finds UCX there
+- if `/opt/ucx/lib64/pkgconfig/ucx.pc` exists instead, ZeroKV finds it there
 - if neither exists, configuration still fails in the normal `pkg_check_modules`
   path with a clear missing-package error
 
@@ -75,7 +75,7 @@ Expected result:
 
 - `UCX_ROOT` is optional
 - non-existent pkg-config subdirectories are ignored silently
-- if `UCX_ROOT` is set but no valid UCX pkg-config directory is found, AXON
+- if `UCX_ROOT` is set but no valid UCX pkg-config directory is found, ZeroKV
   still fails through the normal `pkg-config` check
 - no fallback manual probing is added in this phase
 

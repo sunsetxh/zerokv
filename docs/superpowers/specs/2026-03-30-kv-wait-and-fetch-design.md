@@ -38,7 +38,7 @@ Out of scope:
 
 ## API
 
-Add the following public types and methods to `axon::kv::KVNode`.
+Add the following public types and methods to `zerokv::kv::KVNode`.
 
 ```cpp
 struct WaitKeysResult {

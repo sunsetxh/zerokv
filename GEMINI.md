@@ -1,10 +1,10 @@
-# GEMINI.md - AXON Transport Library Context
+# GEMINI.md - ZeroKV Transport Library Context
 
-This file provides architectural overview, development standards, and operational guidance for the `axon` project.
+This file provides architectural overview, development standards, and operational guidance for the `zerokv` project.
 
 ## Project Overview
 
-`axon` is a high-performance C++ transport library built on **OpenUCX (UCP layer)**. It provides low-latency, high-bandwidth point-to-point data transfer (1KB-1GB) over **RDMA (InfiniBand/RoCE)** and **TCP**.
+`zerokv` is a high-performance C++ transport library built on **OpenUCX (UCP layer)**. It provides low-latency, high-bandwidth point-to-point data transfer (1KB-1GB) over **RDMA (InfiniBand/RoCE)** and **TCP**.
 
 ### Core Use Cases
 - **AI Distributed Training**: Gradient synchronization and parameter exchange.
@@ -50,9 +50,9 @@ The library follows a layered architecture over UCX, emphasizing a **lock-free, 
 ```bash
 # Configure
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DAXON_BUILD_TESTS=ON \
-      -DAXON_BUILD_EXAMPLES=ON \
-      -DAXON_BUILD_PYTHON=ON
+      -DZEROKV_BUILD_TESTS=ON \
+      -DZEROKV_BUILD_EXAMPLES=ON \
+      -DZEROKV_BUILD_PYTHON=ON
 
 # Build all targets
 cmake --build build -j$(nproc)
@@ -83,9 +83,9 @@ cd build && ctest --output-on-failure
 - **Tool**: Use `clang-format -i <file>` (configured via `.clang-format`).
 
 ### Error Handling
-- Functions return `axon::Status`.
+- Functions return `zerokv::Status`.
 - Use `status.ok()` to check success.
-- Use `status.throw_if_error()` to convert to `AXONError` exception (common in Python/top-level C++).
+- Use `status.throw_if_error()` to convert to `ZeroKVError` exception (common in Python/top-level C++).
 
 ### Testing Standards
 - **Unit Tests**: Place in `tests/unit/`. Focus on logic without network side effects (e.g., `Config`, `Status`).
@@ -93,14 +93,14 @@ cd build && ctest --output-on-failure
 - **Benchmarks**: Place in `tests/benchmark/`. Use Google Benchmark for latency/throughput metrics.
 
 ### Python Bindings
-- Located in `python/axon/`.
+- Located in `python/zerokv/`.
 - Built using `nanobind`.
-- The native module is `_core`, exposed through the `axon` package.
+- The native module is `_core`, exposed through the `zerokv` package.
 
 ---
 
 ## Directory Structure
-- `include/axon/`: Public C++ headers.
+- `include/zerokv/`: Public C++ headers.
 - `src/`: Core implementation.
   - `src/core/`: Internal logic.
   - `src/transport/`: UCX abstraction and backend management.

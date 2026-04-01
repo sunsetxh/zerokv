@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-# Change directory to the axon project root
+# Change directory to the zerokv project root
 cd "$(dirname "$0")/.."
 
-IMAGE_NAME="axon-rdma-sim"
+IMAGE_NAME="zerokv-rdma-sim"
 
 echo "Building Docker image: $IMAGE_NAME..."
 docker build -t "$IMAGE_NAME" -f scripts/rdma_sim/Dockerfile scripts/rdma_sim/
@@ -16,6 +16,6 @@ echo "Note: Running with --privileged to enable RDMA kernel modules."
 # To avoid permissions issues, we use the current user's UID/GID where possible,
 # but for simple verification, mounting and running as root inside docker is fine.
 docker run --privileged --network host --rm \
-    -v "$(pwd):/axon" \
-    -w /axon \
+    -v "$(pwd):/zerokv" \
+    -w /zerokv \
     "$IMAGE_NAME"

@@ -1,5 +1,5 @@
 """
-zerokv - High-performance AXON transport and RDMA KV library with Python bindings.
+zerokv - High-performance ZeroKV transport and RDMA KV library with Python bindings.
 
 Usage:
     import zerokv

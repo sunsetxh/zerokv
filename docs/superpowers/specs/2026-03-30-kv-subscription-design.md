@@ -53,8 +53,8 @@ struct SubscriptionEvent {
     uint64_t version = 0;
 };
 
-axon::Future<void> subscribe(const std::string& key);
-axon::Future<void> unsubscribe(const std::string& key);
+zerokv::Future<void> subscribe(const std::string& key);
+zerokv::Future<void> unsubscribe(const std::string& key);
 std::vector<SubscriptionEvent> drain_subscription_events();
 ```
 

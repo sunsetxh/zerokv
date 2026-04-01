@@ -1,4 +1,4 @@
-# AXON
+# ZeroKV
 
 High-performance C++ transport library built on UCX for point-to-point data
 transfer (1 KB - 1 GB) over RDMA and TCP. Targeting AI distributed training,

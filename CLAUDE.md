@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AXON is a high-performance C++ transport library built on UCX for point-to-point data transfer (1KB-1GB) over RDMA and TCP. It targets AI distributed training, KV Cache inference transfer, and HPC scenarios.
+ZeroKV is a high-performance C++ transport library built on UCX for point-to-point data transfer (1KB-1GB) over RDMA and TCP. It targets AI distributed training, KV Cache inference transfer, and HPC scenarios.
 
 ## Build Commands
 
@@ -33,16 +33,16 @@ cd build && ctest -R UnitConfig --output-on-failure
 
 - **Runtime**: UCX >= 1.14 (`libucx-dev` on Ubuntu/Debian, `ucx-devel` on RHEL/CentOS)
 - **Build**: CMake >= 3.20, C++20 compiler (GCC >= 11 or Clang >= 14)
-- **Test**: Google Test (optional, for `AXON_BUILD_TESTS=ON`)
-- **Benchmark**: Google Benchmark (optional, for `AXON_BUILD_BENCHMARK=ON`)
+- **Test**: Google Test (optional, for `ZEROKV_BUILD_TESTS=ON`)
+- **Benchmark**: Google Benchmark (optional, for `ZEROKV_BUILD_BENCHMARK=ON`)
 
 ## CMake Options
 
-- `AXON_BUILD_STATIC` - Build static library (default: OFF)
-- `AXON_BUILD_EXAMPLES` - Build examples (default: ON)
-- `AXON_BUILD_TESTS` - Build tests (default: ON)
-- `AXON_BUILD_BENCHMARK` - Build benchmarks (default: ON)
-- `AXON_BUILD_PYTHON` - Build Python bindings (default: ON)
+- `ZEROKV_BUILD_STATIC` - Build static library (default: OFF)
+- `ZEROKV_BUILD_EXAMPLES` - Build examples (default: ON)
+- `ZEROKV_BUILD_TESTS` - Build tests (default: ON)
+- `ZEROKV_BUILD_BENCHMARK` - Build benchmarks (default: ON)
+- `ZEROKV_BUILD_PYTHON` - Build Python bindings (default: ON)
 - `UCX_ROOT` - Path to custom UCX installation (default: "")
 
 ## Vendored Dependencies
@@ -115,14 +115,14 @@ integration tests use TCP transport by default and do not require RDMA hardware.
 
 ## KV Layer
 
-The KV module (`src/kv/`, `include/axon/kv.h`) provides an RDMA KV store on top
+The KV module (`src/kv/`, `include/zerokv/kv.h`) provides an RDMA KV store on top
 of the transport core.
 
 ### Key files
 
 | File | Purpose |
 |------|---------|
-| `include/axon/kv.h` | Public API: KVServer, KVNode, all types |
+| `include/zerokv/kv.h` | Public API: KVServer, KVNode, all types |
 | `src/kv/node.cpp` | KVNode implementation |
 | `src/kv/server.cpp` | KVServer with subscription fan-out |
 | `src/kv/protocol.h` | Wire protocol types and encode/decode |

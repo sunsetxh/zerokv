@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 examples/python_usage.py
-Demonstrates the Python API for the AXON transport library.
+Demonstrates the Python API for the ZeroKV transport library.
 """
 
 import asyncio

@@ -1,5 +1,5 @@
 /// @file examples/cpp_usage.cpp
-/// @brief Demonstrates how to use the AXON library for point-to-point communication.
+/// @brief Demonstrates how to use the ZeroKV library for point-to-point communication.
 ///
 /// Build:  g++ -std=c++20 -I../include cpp_usage.cpp -lzerokv -lpthread -o demo
 
@@ -20,7 +20,7 @@ void example_tag_messaging() {
                    .set_memory_pool_size(128 * 1024 * 1024)  // 128 MiB
                    .enable_registration_cache()
                    .set("UCX_TLS", "rc,ud,shm,self")
-                   .from_env()  // override with AXON_* env vars
+                   .from_env()  // override with ZEROKV_* env vars
                    .build();
 
     auto ctx = zerokv::Context::create(cfg);

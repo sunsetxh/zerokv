@@ -108,7 +108,7 @@ void benchmark_progress() {
 }
 
 int main() {
-    std::cout << "=== AXON Single-Process Performance Benchmark ===" << std::endl;
+    std::cout << "=== ZeroKV Single-Process Performance Benchmark ===" << std::endl;
     std::cout << std::endl;
 
     std::cout << "--- Worker Creation ---" << std::endl;

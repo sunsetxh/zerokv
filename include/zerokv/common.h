@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file zerokv/common.h
-/// @brief Common types, status codes, and forward declarations for the AXON library.
+/// @brief Common types, status codes, and forward declarations for the ZeroKV library.
 
 #include <cstddef>
 #include <cstdint>

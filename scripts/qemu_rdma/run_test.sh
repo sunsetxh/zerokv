@@ -5,8 +5,8 @@
 #   1. rxe0 device verification
 #   2. ibv_rc_pingpong (Soft-RoCE baseline)
 #   3. ibv_ud_pingpong
-#   4. axon ping_pong (tag send/recv across nodes)
-#   5. axon rdma_put_get (RDMA put/get + atomics across nodes)
+#   4. zerokv ping_pong (tag send/recv across nodes)
+#   5. zerokv rdma_put_get (RDMA put/get + atomics across nodes)
 set -euo pipefail
 
 VM1_SSH_PORT=2222
@@ -108,46 +108,46 @@ test_ud_pingpong() {
     wait "${server_pid}" 2>/dev/null || true
 }
 
-# --- Test 4: axon binaries exist ---
+# --- Test 4: zerokv binaries exist ---
 test_axon_binaries() {
-    echo "==> Test 4: axon binaries exist..."
+    echo "==> Test 4: zerokv binaries exist..."
 
     for bin in ping_pong send_recv rdma_put_get; do
         local exists="false"
-        vm_ssh "${VM1_SSH_PORT}" "test -x /tmp/axon/build/${bin}" && exists="true" || true
-        record_result "axon ${bin} binary exists in VM1" "${exists}"
+        vm_ssh "${VM1_SSH_PORT}" "test -x /tmp/zerokv/build/${bin}" && exists="true" || true
+        record_result "zerokv ${bin} binary exists in VM1" "${exists}"
 
         local exists2="false"
-        vm_ssh "${VM2_SSH_PORT}" "test -x /tmp/axon/build/${bin}" && exists2="true" || true
-        record_result "axon ${bin} binary exists in VM2" "${exists2}"
+        vm_ssh "${VM2_SSH_PORT}" "test -x /tmp/zerokv/build/${bin}" && exists2="true" || true
+        record_result "zerokv ${bin} binary exists in VM2" "${exists2}"
     done
 }
 
-# --- Test 5: axon ping_pong (tag send/recv) ---
+# --- Test 5: zerokv ping_pong (tag send/recv) ---
 test_axon_ping_pong_tcp() {
-    echo "==> Test 5: axon ping_pong (TCP transport)..."
+    echo "==> Test 5: zerokv ping_pong (TCP transport)..."
 
     # Start server on VM1
     vm_ssh "${VM1_SSH_PORT}" \
-        "cd /tmp/axon && timeout 60 ./build/ping_pong --listen 0.0.0.0:13337 --transport tcp" \
+        "cd /tmp/zerokv && timeout 60 ./build/ping_pong --listen 0.0.0.0:13337 --transport tcp" \
         > /dev/null 2>&1 &
     local server_pid=$!
     sleep 3
 
     local client_output
     if client_output=$(vm_ssh "${VM2_SSH_PORT}" \
-        "cd /tmp/axon && timeout 60 ./build/ping_pong --connect ${VM1_RDMA_IP}:13337 --transport tcp" 2>&1); then
+        "cd /tmp/zerokv && timeout 60 ./build/ping_pong --connect ${VM1_RDMA_IP}:13337 --transport tcp" 2>&1); then
         # Check for success indicator in output
         if echo "${client_output}" | grep -q "Completed"; then
-            record_result "axon ping_pong (TCP) VM1<->VM2" "true"
+            record_result "zerokv ping_pong (TCP) VM1<->VM2" "true"
             echo "${client_output}" | grep -E "(latency|Throughput|Completed)" | sed 's/^/      /'
         else
-            record_result "axon ping_pong (TCP) VM1<->VM2" "false"
+            record_result "zerokv ping_pong (TCP) VM1<->VM2" "false"
             echo "    Client output (last 10 lines):"
             echo "${client_output}" | tail -10 | sed 's/^/      /'
         fi
     else
-        record_result "axon ping_pong (TCP) VM1<->VM2" "false"
+        record_result "zerokv ping_pong (TCP) VM1<->VM2" "false"
         echo "    Client exited with error"
         echo "${client_output}" | tail -10 | sed 's/^/      /'
     fi
@@ -156,29 +156,29 @@ test_axon_ping_pong_tcp() {
     wait "${server_pid}" 2>/dev/null || true
 }
 
-# --- Test 6: axon ping_pong (RDMA transport) ---
+# --- Test 6: zerokv ping_pong (RDMA transport) ---
 test_axon_ping_pong_rdma() {
-    echo "==> Test 6: axon ping_pong (RDMA transport)..."
+    echo "==> Test 6: zerokv ping_pong (RDMA transport)..."
 
     vm_ssh "${VM1_SSH_PORT}" \
-        "cd /tmp/axon && timeout 60 ./build/ping_pong --listen 0.0.0.0:13338 --transport rdma" \
+        "cd /tmp/zerokv && timeout 60 ./build/ping_pong --listen 0.0.0.0:13338 --transport rdma" \
         > /dev/null 2>&1 &
     local server_pid=$!
     sleep 3
 
     local client_output
     if client_output=$(vm_ssh "${VM2_SSH_PORT}" \
-        "cd /tmp/axon && timeout 60 ./build/ping_pong --connect ${VM1_RDMA_IP}:13338 --transport rdma" 2>&1); then
+        "cd /tmp/zerokv && timeout 60 ./build/ping_pong --connect ${VM1_RDMA_IP}:13338 --transport rdma" 2>&1); then
         if echo "${client_output}" | grep -q "Completed"; then
-            record_result "axon ping_pong (RDMA) VM1<->VM2" "true"
+            record_result "zerokv ping_pong (RDMA) VM1<->VM2" "true"
             echo "${client_output}" | grep -E "(latency|Throughput|Completed)" | sed 's/^/      /'
         else
-            record_result "axon ping_pong (RDMA) VM1<->VM2" "false"
+            record_result "zerokv ping_pong (RDMA) VM1<->VM2" "false"
             echo "    Client output (last 10 lines):"
             echo "${client_output}" | tail -10 | sed 's/^/      /'
         fi
     else
-        record_result "axon ping_pong (RDMA) VM1<->VM2" "false"
+        record_result "zerokv ping_pong (RDMA) VM1<->VM2" "false"
         echo "    Client exited with error"
         echo "${client_output}" | tail -10 | sed 's/^/      /'
     fi
@@ -187,33 +187,33 @@ test_axon_ping_pong_rdma() {
     wait "${server_pid}" 2>/dev/null || true
 }
 
-# --- Test 7: axon rdma_put_get (RDMA put/get + atomics) ---
+# --- Test 7: zerokv rdma_put_get (RDMA put/get + atomics) ---
 test_axon_rdma_put_get() {
-    echo "==> Test 7: axon rdma_put_get (RDMA put/get + atomics)..."
+    echo "==> Test 7: zerokv rdma_put_get (RDMA put/get + atomics)..."
 
     local transport="rdma"
     local port=13339
 
     vm_ssh "${VM1_SSH_PORT}" \
-        "cd /tmp/axon && timeout 120 ./build/rdma_put_get --listen 0.0.0.0:${port} --transport ${transport}" \
+        "cd /tmp/zerokv && timeout 120 ./build/rdma_put_get --listen 0.0.0.0:${port} --transport ${transport}" \
         > /tmp/axon_rdma_server.log 2>&1 &
     local server_pid=$!
     sleep 3
 
     local client_output
     if client_output=$(vm_ssh "${VM2_SSH_PORT}" \
-        "cd /tmp/axon && timeout 120 ./build/rdma_put_get --connect ${VM1_RDMA_IP}:${port} --transport ${transport}" 2>&1); then
+        "cd /tmp/zerokv && timeout 120 ./build/rdma_put_get --connect ${VM1_RDMA_IP}:${port} --transport ${transport}" 2>&1); then
         # Check for success
         if echo "${client_output}" | grep -q "Client done"; then
-            record_result "axon rdma_put_get (RDMA) VM1<->VM2" "true"
+            record_result "zerokv rdma_put_get (RDMA) VM1<->VM2" "true"
             echo "${client_output}" | grep -E "(Put|Get|fadd|cswap|verified|done)" | sed 's/^/      /'
         else
-            record_result "axon rdma_put_get (RDMA) VM1<->VM2" "false"
+            record_result "zerokv rdma_put_get (RDMA) VM1<->VM2" "false"
             echo "    Client output (last 15 lines):"
             echo "${client_output}" | tail -15 | sed 's/^/      /'
         fi
     else
-        record_result "axon rdma_put_get (RDMA) VM1<->VM2" "false"
+        record_result "zerokv rdma_put_get (RDMA) VM1<->VM2" "false"
         echo "    Client exited with error"
         echo "${client_output}" | tail -15 | sed 's/^/      /'
     fi

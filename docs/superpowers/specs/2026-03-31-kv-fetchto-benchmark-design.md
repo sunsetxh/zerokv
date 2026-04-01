@@ -20,7 +20,7 @@ In scope:
 - rename benchmark throughput columns from `throughput_MBps` to
   `throughput_MiBps`
 - add `bench-fetch-to` to `kv_bench`
-- add documentation/TODO notes for UCX multi-rail vs. current AXON single
+- add documentation/TODO notes for UCX multi-rail vs. current ZeroKV single
   `data_addr` model
 
 Out of scope:
@@ -140,10 +140,10 @@ This matches the actual implementation, which divides by `1024 * 1024`.
 The current findings should be preserved as an explicit TODO:
 
 - UCX itself supports multi-rail / multi-NIC usage
-- current AXON KV metadata registers only one `data_addr` per node
-- therefore AXON currently benefits only from whatever UCX can do behind a
+- current ZeroKV KV metadata registers only one `data_addr` per node
+- therefore ZeroKV currently benefits only from whatever UCX can do behind a
   single registered endpoint
-- AXON does not yet model:
+- ZeroKV does not yet model:
   - multiple `data_addr` entries per node
   - per-key NIC selection
   - per-object striping across multiple NICs

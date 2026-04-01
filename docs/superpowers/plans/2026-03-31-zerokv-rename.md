@@ -49,7 +49,7 @@
 
 **Docs / reports / active specs/plans**
 - Modify: `docs/INDEX.md`
-- Modify: `docs/reports/axon-rdma-kv-mvp.md`
+- Modify: `docs/reports/zerokv-rdma-kv-mvp.md`
 - Modify active docs/specs/plans that still contain actionable build or API references
 - Leave purely historical archived reports untouched unless they are current user guidance
 
@@ -389,7 +389,7 @@ git add CMakeLists.txt src/config.cpp scripts README.md tests docs
 - Modify: `CLAUDE.md`
 - Modify: `GEMINI.md`
 - Modify: `docs/INDEX.md`
-- Modify: `docs/reports/axon-rdma-kv-mvp.md`
+- Modify: `docs/reports/zerokv-rdma-kv-mvp.md`
 - Modify active `docs/superpowers/specs/*.md`
 - Modify active `docs/superpowers/plans/*.md`
 - Modify examples/tests with user-facing output strings
@@ -399,7 +399,7 @@ git add CMakeLists.txt src/config.cpp scripts README.md tests docs
 Run:
 
 ```bash
-rg -n '\baxon\b|AXON_' README.md CLAUDE.md GEMINI.md examples tests docs/superpowers docs/INDEX.md docs/reports/axon-rdma-kv-mvp.md --glob '!**/report-*' --glob '!**/meeting-*'
+rg -n '\baxon\b|AXON_' README.md CLAUDE.md GEMINI.md examples tests docs/superpowers docs/INDEX.md docs/reports/zerokv-rdma-kv-mvp.md --glob '!**/report-*' --glob '!**/meeting-*'
 ```
 
 Expected before implementation:
@@ -421,7 +421,7 @@ Do not spend time rewriting archived historical reports beyond current user guid
 Run:
 
 ```bash
-rg -n '\baxon\b|AXON_' README.md CLAUDE.md GEMINI.md examples tests docs/superpowers docs/INDEX.md docs/reports/axon-rdma-kv-mvp.md --glob '!**/report-*' --glob '!**/meeting-*'
+rg -n '\baxon\b|AXON_' README.md CLAUDE.md GEMINI.md examples tests docs/superpowers docs/INDEX.md docs/reports/zerokv-rdma-kv-mvp.md --glob '!**/report-*' --glob '!**/meeting-*'
 ```
 
 Expected:

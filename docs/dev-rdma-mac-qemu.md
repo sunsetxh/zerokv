@@ -4,7 +4,7 @@
 
 ## 1. 背景与限制
 
-在 macOS 上开发 RDMA 应用（如 `axon`）时，由于 macOS 原生不支持 RDMA，必须使用 Linux 仿真（Soft-RoCE/RXE）。
+在 macOS 上开发 RDMA 应用（如 `zerokv`）时，由于 macOS 原生不支持 RDMA，必须使用 Linux 仿真（Soft-RoCE/RXE）。
 
 - **Docker Desktop / OrbStack**: 使用的是轻量化、共享且通常为**只读**的 Linux 内核镜像。这导致无法使用 `modprobe` 加载自定义内核模块（如 `rdma_rxe`），或无法修改 `/lib/modules`。
 - **QEMU / UTM**: 提供全虚拟化（Full Virtualization），虚拟机拥有独立的内核、模块目录和完全可写的根文件系统。这是在 macOS 上运行 Soft-RoCE 的最稳妥方案。
@@ -50,7 +50,7 @@ cd scripts/qemu_rdma
 # 2. 启动两台 VM（等待 SSH 就绪）
 ./start_vms.sh
 
-# 3. 安装依赖、加载 rxe、编译 axon（约 10-15 分钟）
+# 3. 安装依赖、加载 rxe、编译 zerokv（约 10-15 分钟）
 ./provision.sh
 
 # 4. 运行双节点 RDMA 测试
@@ -67,8 +67,8 @@ cd scripts/qemu_rdma
 | `setup.sh` | 下载 Ubuntu 22.04 Server cloudimg ARM64，为两台 VM 创建 qcow2 overlay，生成 cloud-init seed ISO（用户 axon/axon，DHCP 网络配置） |
 | `start_vms.sh` | 使用 hvf 加速启动两台 QEMU VM，配置 socket listen/connect + user-mode 双网卡，等待 SSH 就绪 |
 | `stop_vms.sh` | 优雅停止两台 VM |
-| `provision.sh` | 通过 SSH 在两台 VM 内：切换 tuna 镜像源、安装依赖（含 `linux-modules-extra`）、加载 `rdma_rxe`、创建 `rxe0`、配置静态 IP (10.0.0.1/2)、传输并编译 axon |
-| `run_test.sh` | 自动化测试：`ibv_rc_pingpong`、`ibv_ud_pingpong`、axon 单机 loopback |
+| `provision.sh` | 通过 SSH 在两台 VM 内：切换 tuna 镜像源、安装依赖（含 `linux-modules-extra`）、加载 `rdma_rxe`、创建 `rxe0`、配置静态 IP (10.0.0.1/2)、传输并编译 zerokv |
+| `run_test.sh` | 自动化测试：`ibv_rc_pingpong`、`ibv_ud_pingpong`、zerokv 单机 loopback |
 
 #### 已验证通过的测试
 
@@ -78,12 +78,12 @@ cd scripts/qemu_rdma
 | VM 间 ping (10.0.0.1 ↔ 10.0.0.2) | PASS | VM 间网络互通正常 |
 | `ibv_rc_pingpong` 双机互通 | PASS | RC 传输，~578 Mbit/sec |
 | `ibv_ud_pingpong` 双机互通 | PASS | UD 传输，~170 Mbit/sec |
-| axon `ping_pong` 双机 (RDMA) | BLOCKED | UCX 1.12 不支持 Soft-RoCE RDMA 传输；axon 示例的 TCP bootstrap 尚未实现 |
+| zerokv `ping_pong` 双机 (RDMA) | BLOCKED | UCX 1.12 不支持 Soft-RoCE RDMA 传输；zerokv 示例的 TCP bootstrap 尚未实现 |
 
 #### 已知限制
 
 1. **UCX 版本过旧**: Ubuntu 22.04 自带 UCX 1.12，不支持 Soft-RoCE 的 IB 传输。需要 UCX >= 1.14 才能通过 `UCX_TLS=rc` 使用 RDMA。可通过源码编译更新 UCX 解决。
-2. **axon 跨节点 bootstrap**: axon 的 `ping_pong` 等示例目前仅实现了 `shmem`（单机 loopback）模式，跨节点 TCP/RDMA 连接需要实现 bootstrap 机制。
+2. **zerokv 跨节点 bootstrap**: zerokv 的 `ping_pong` 等示例目前仅实现了 `shmem`（单机 loopback）模式，跨节点 TCP/RDMA 连接需要实现 bootstrap 机制。
 3. **QEMU 网络性能**: user-mode NAT 网络速度较慢，首次 apt 安装需要较长时间。脚本已切换到 tuna 镜像源加速。
 
 ### 方案 B：UTM (GUI 操作，适合单机调试)
@@ -95,7 +95,7 @@ cd scripts/qemu_rdma
    - 选择 `Virtualize` -> `Linux`。
    - 建议使用 [Ubuntu 22.04 Server](https://ubuntu.com/download/server/arm) (Apple Silicon 选 ARM64，Intel 选 AMD64)。
 3. **网络设置**: 默认使用 `Shared Network` 即可。
-4. **共享文件夹**: 在 UTM 设置中挂载 `axon` 项目目录。
+4. **共享文件夹**: 在 UTM 设置中挂载 `zerokv` 项目目录。
 
 ### 方案 C：QEMU CLI 手动操作
 
@@ -148,14 +148,14 @@ lsmod | grep rxe
 
 ---
 
-## 4. 在虚拟机中开发与验证 AXON
+## 4. 在虚拟机中开发与验证 ZeroKV
 
 ### 4.1 挂载代码
 利用 UTM 的 VirtFS 挂载 macOS 上的项目代码（路径通常在 `/mnt/` 下）。
 
 ### 4.2 编译与运行
 ```bash
-cd /path/to/axon
+cd /path/to/zerokv
 mkdir -p build && cd build
 cmake .. -DZEROKV_BUILD_TESTS=OFF -DZEROKV_BUILD_PYTHON=OFF
 make -j$(nproc)

@@ -90,7 +90,7 @@ def run_fetch(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="AXON Python KV example")
+    parser = argparse.ArgumentParser(description="ZeroKV Python KV example")
     parser.add_argument("--mode", choices=["server", "publish", "fetch"], required=True)
     parser.add_argument("--transport", default="rdma")
     parser.add_argument("--listen", default="0.0.0.0:15000")

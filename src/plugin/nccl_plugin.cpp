@@ -201,8 +201,8 @@ public:
 
     Status register_transport(int peer_rank,
                               std::shared_ptr<Endpoint> ep) override {
-        // Store the AXON endpoint for hybrid communication patterns.
-        // For example, NCCL can fall back to AXON transport for cross-network
+        // Store the ZeroKV endpoint for hybrid communication patterns.
+        // For example, NCCL can fall back to ZeroKV transport for cross-network
         // communication or when direct GPU-GPU paths are unavailable.
         std::lock_guard lock(mu_);
         transport_eps_[peer_rank] = std::move(ep);

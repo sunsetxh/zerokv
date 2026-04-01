@@ -1,7 +1,7 @@
 #pragma once
 
 /// @file zerokv/config.h
-/// @brief Configuration and context initialization for the AXON library.
+/// @brief Configuration and context initialization for the ZeroKV library.
 ///
 /// Usage:
 ///   auto cfg = zerokv::Config::builder()
@@ -95,7 +95,7 @@ public:
     /// Examples: ("UCX_TLS", "rc,ud"), ("UCX_NET_DEVICES", "mlx5_0:1").
     Builder& set(std::string key, std::string value);
 
-    /// Populate from environment variables prefixed with AXON_.
+    /// Populate from environment variables prefixed with ZEROKV_.
     Builder& from_env();
 
     Config build();

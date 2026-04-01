@@ -1,7 +1,7 @@
 /// @file src/plugin/hccl_plugin.cpp
 /// @brief HCCL (Huawei Collective Communication Library) plugin for Ascend NPU.
 ///
-/// This plugin bridges the AXON transport layer with HCCL for collective and
+/// This plugin bridges the ZeroKV transport layer with HCCL for collective and
 /// point-to-point communication on Huawei Ascend NPU devices.
 ///
 /// Dependencies:
@@ -114,14 +114,14 @@ namespace zerokv {
 namespace plugin {
 
 // ---------------------------------------------------------------------------
-// Helper: HCCL result -> AXON Status
+// Helper: HCCL result -> ZeroKV Status
 // ---------------------------------------------------------------------------
 
 static Status hccl_to_status(HcclResult res) {
     if (res == HCCL_SUCCESS) {
         return Status::OK();
     }
-    // Map HCCL error codes to AXON error codes.
+    // Map HCCL error codes to ZeroKV error codes.
     ErrorCode ec;
     switch (res) {
         case HCCL_E_PARA:
@@ -155,7 +155,7 @@ static Status hccl_to_status(HcclResult res) {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: AXON DataType -> HcclDataType
+// Helper: ZeroKV DataType -> HcclDataType
 // ---------------------------------------------------------------------------
 
 static HcclDataType to_hccl_dtype(DataType dt) {
@@ -174,7 +174,7 @@ static HcclDataType to_hccl_dtype(DataType dt) {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: AXON ReduceOp -> HcclReduceOp
+// Helper: ZeroKV ReduceOp -> HcclReduceOp
 // ---------------------------------------------------------------------------
 
 static HcclReduceOp to_hccl_op(ReduceOp op) {

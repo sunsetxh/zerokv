@@ -6,7 +6,7 @@ Add a batch zero-copy fetch API that writes multiple keys into caller-provided
 registered memory without allocating per-key result buffers.
 
 The immediate target is a high-throughput path where the application already
-owns a large `MemoryRegion` and wants AXON to place multiple fetched values into
+owns a large `MemoryRegion` and wants ZeroKV to place multiple fetched values into
 that region using explicit offsets.
 
 ## Scope
@@ -31,7 +31,7 @@ Out of scope:
 
 ## API
 
-Add the following public types and method to `axon::kv`.
+Add the following public types and method to `zerokv::kv`.
 
 ```cpp
 struct FetchToItem {
@@ -47,7 +47,7 @@ struct FetchToManyResult {
 };
 
 FetchToManyResult fetch_to_many(const std::vector<FetchToItem>& items,
-                                const axon::MemoryRegion::Ptr& region);
+                                const zerokv::MemoryRegion::Ptr& region);
 ```
 
 ## Semantics
@@ -61,7 +61,7 @@ registered output region.
 - `length`: available output capacity for this key
 - `offset`: byte offset into the provided `MemoryRegion`
 
-Phase 1 requires the caller to provide a complete layout. AXON does not pack or
+Phase 1 requires the caller to provide a complete layout. ZeroKV does not pack or
 reorder items.
 
 `length` is a caller-provided capacity bound, not the fetched object's true

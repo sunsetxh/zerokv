@@ -4,7 +4,7 @@
 /// @brief Plugin interface for NCCL/HCCL collective communication backends.
 ///
 /// A Plugin bridges collective communication libraries (NCCL, HCCL) with
-/// the AXON transport layer.  The plugin system uses a registration-based
+/// the ZeroKV transport layer.  The plugin system uses a registration-based
 /// discovery model:
 ///
 ///   1. Shared libraries implement the CollectivePlugin interface.
@@ -98,7 +98,7 @@ public:
 
     // --- Lifecycle -----------------------------------------------------------
 
-    /// Initialise the plugin with the AXON context.
+    /// Initialise the plugin with the ZeroKV context.
     /// Called once, before any other method.
     virtual Status init(const Context::Ptr& ctx) = 0;
 
@@ -191,7 +191,7 @@ public:
 
     // --- Transport integration -----------------------------------------------
 
-    /// Register a AXON transport endpoint that the plugin can use for
+    /// Register a ZeroKV transport endpoint that the plugin can use for
     /// custom communication patterns (e.g., fallback or hybrid).
     virtual Status register_transport(int peer_rank,
                                       std::shared_ptr<Endpoint> ep) {

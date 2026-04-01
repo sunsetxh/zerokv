@@ -6,13 +6,13 @@
 
 **Architecture:** Keep all logic inside `KVNode` and reuse the existing lookup, subscription, event draining, and fetch paths. Do not add server protocol. Implement synchronous orchestration helpers with a small internal polling loop, first-success-wins semantics, and cleanup that preserves user-owned subscriptions.
 
-**Tech Stack:** C++17, existing AXON `KVNode`/`KVServer` APIs, GoogleTest integration tests.
+**Tech Stack:** C++17, existing ZeroKV `KVNode`/`KVServer` APIs, GoogleTest integration tests.
 
 ---
 
 ## File map
 
-- Modify: `include/axon/kv.h`
+- Modify: `include/zerokv/kv.h`
   - Add `WaitKeysResult`, `BatchFetchResult`, and the new synchronous `KVNode` helper methods.
 - Modify: `src/kv/node.cpp`
   - Implement the new helpers and small internal utility code for deduplication, lookup polling, subscription ownership tracking, and batch orchestration.
@@ -22,12 +22,12 @@
 ### Task 1: Public API and the first failing tests
 
 **Files:**
-- Modify: `include/axon/kv.h`
+- Modify: `include/zerokv/kv.h`
 - Test: `tests/integration/test_kv_node.cpp`
 
 - [ ] **Step 1: Add the new public API declarations**
 
-Add these declarations to `include/axon/kv.h` near the existing `FetchResult` and `KVNode` methods:
+Add these declarations to `include/zerokv/kv.h` near the existing `FetchResult` and `KVNode` methods:
 
 ```cpp
 struct WaitKeysResult {
@@ -65,7 +65,7 @@ Append these tests to `tests/integration/test_kv_node.cpp`:
 
 ```cpp
 TEST(KvNodeIntegrationTest, WaitForKeyReturnsWhenKeyAppears) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -93,7 +93,7 @@ TEST(KvNodeIntegrationTest, WaitForKeyReturnsWhenKeyAppears) {
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceFetchesPublishedKey) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
@@ -137,7 +137,7 @@ Expected:
 - [ ] **Step 4: Commit the API + failing tests**
 
 ```bash
-git add include/axon/kv.h tests/integration/test_kv_node.cpp
+git add include/zerokv/kv.h tests/integration/test_kv_node.cpp
 git commit -m "Add wait-and-fetch API declarations and tests"
 ```
 
@@ -262,7 +262,7 @@ Append these tests:
 
 ```cpp
 TEST(KvNodeIntegrationTest, WaitForKeysReturnsWhenAllKeysAppear) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
 
@@ -296,7 +296,7 @@ TEST(KvNodeIntegrationTest, WaitForKeysReturnsWhenAllKeysAppear) {
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyFetchesEachKeyWhenReady) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
 
@@ -449,7 +449,7 @@ Append these tests:
 
 ```cpp
 TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyReturnsPartialResultsOnTimeout) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
 
@@ -479,7 +479,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyReturnsPartialResultsOnTime
 }
 
 TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyDeduplicatesKeys) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
 
@@ -509,7 +509,7 @@ Append this test:
 
 ```cpp
 TEST(KvNodeIntegrationTest, SubscribeAndFetchOnceManyLocksFirstSuccessfulVersion) {
-    auto cfg = axon::Config::builder().set_transport("tcp").build();
+    auto cfg = zerokv::Config::builder().set_transport("tcp").build();
     auto server = KVServer::create(cfg);
     ASSERT_TRUE(server->start(ServerConfig{"127.0.0.1:0"}).ok());
 
@@ -571,11 +571,11 @@ git add src/kv/node.cpp tests/integration/test_kv_node.cpp
 ### Task 5: Final verification and documentation note
 
 **Files:**
-- Modify: `docs/reports/axon-rdma-kv-mvp.md`
+- Modify: `docs/reports/zerokv-rdma-kv-mvp.md`
 
 - [ ] **Step 1: Add a short MVP+1 note to the report**
 
-Append a brief note to `docs/reports/axon-rdma-kv-mvp.md` describing the new helpers:
+Append a brief note to `docs/reports/zerokv-rdma-kv-mvp.md` describing the new helpers:
 
 ```markdown
 ### Wait-and-fetch helpers
@@ -607,6 +607,6 @@ Expected:
 - [ ] **Step 3: Commit final polish**
 
 ```bash
-git add docs/reports/axon-rdma-kv-mvp.md
+git add docs/reports/zerokv-rdma-kv-mvp.md
  git commit -m "Document wait-and-fetch helpers"
 ```
