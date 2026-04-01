@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATE_TAG="$(date +%Y%m%d)"
 HEAD_SHA="$(git -C "${ROOT_DIR}" rev-parse --short HEAD)"
-PKG_NAME="axon-src-${DATE_TAG}-${HEAD_SHA}"
+PKG_NAME="zerokv-src-${DATE_TAG}-${HEAD_SHA}"
 OUT_DIR="${ROOT_DIR}"
 INCLUDE_THIRD_PARTY=1
 

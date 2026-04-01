@@ -27,9 +27,9 @@ KV cache inference transfer, and HPC scenarios.
 | C++ compiler | GCC >= 11 / Clang >= 14 | C++20 required |
 | CMake | >= 3.20 | |
 | UCX | >= 1.14 | `libucx-dev` (Debian) or `ucx-devel` (RHEL) |
-| Google Test | optional | for `AXON_BUILD_TESTS=ON` |
-| Google Benchmark | optional | for `AXON_BUILD_BENCHMARK=ON` |
-| nanobind | optional | for `AXON_BUILD_PYTHON=ON` |
+| Google Test | optional | for `ZEROKV_BUILD_TESTS=ON` |
+| Google Benchmark | optional | for `ZEROKV_BUILD_BENCHMARK=ON` |
+| nanobind | optional | for `ZEROKV_BUILD_PYTHON=ON` |
 
 ## Build
 
@@ -82,11 +82,11 @@ creating the archive.
 | Option | Default | Description |
 |---|---|---|
 | `UCX_ROOT` | "" | Path to custom UCX installation |
-| `AXON_BUILD_STATIC` | OFF | Build static library |
-| `AXON_BUILD_EXAMPLES` | ON | Build examples |
-| `AXON_BUILD_TESTS` | ON | Build tests |
-| `AXON_BUILD_BENCHMARK` | ON | Build benchmarks |
-| `AXON_BUILD_PYTHON` | ON | Build Python bindings |
+| `ZEROKV_BUILD_STATIC` | OFF | Build static library |
+| `ZEROKV_BUILD_EXAMPLES` | ON | Build examples |
+| `ZEROKV_BUILD_TESTS` | ON | Build tests |
+| `ZEROKV_BUILD_BENCHMARK` | ON | Build benchmarks |
+| `ZEROKV_BUILD_PYTHON` | ON | Build Python bindings |
 
 ## Quick Start
 
@@ -167,7 +167,7 @@ Accordingly:
 
 ### Python KV example
 
-After building with `-DAXON_BUILD_PYTHON=ON`, you can smoke-test the modern
+After building with `-DZEROKV_BUILD_PYTHON=ON`, you can smoke-test the modern
 Python API with the bundled example:
 
 ```bash

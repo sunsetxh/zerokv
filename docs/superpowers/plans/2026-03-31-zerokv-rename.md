@@ -326,7 +326,7 @@ git add CMakeLists.txt python examples tests src/python/bindings.cpp
 Run:
 
 ```bash
-rg -n 'AXON_BUILD_|AXON_TRANSPORT|AXON_NUM_WORKERS|AXON_MEM_POOL_SIZE|AXON_THIRD_PARTY_DIR|getenv\("AXON_' CMakeLists.txt src README.md scripts tests docs --glob '!docs/reports/report-*' --glob '!docs/meetings/**'
+rg -n 'ZEROKV_BUILD_|ZEROKV_TRANSPORT|ZEROKV_NUM_WORKERS|ZEROKV_MEM_POOL_SIZE|ZEROKV_THIRD_PARTY_DIR|getenv\("ZEROKV_' CMakeLists.txt src README.md scripts tests docs --glob '!docs/reports/report-*' --glob '!docs/meetings/**'
 ```
 
 Expected before implementation:
@@ -366,7 +366,7 @@ zerokv-src-$(date +%Y%m%d)-${short_sha}.tar.gz
 Run:
 
 ```bash
-rg -n 'AXON_BUILD_|AXON_TRANSPORT|AXON_NUM_WORKERS|AXON_MEM_POOL_SIZE|AXON_THIRD_PARTY_DIR|getenv\("AXON_' CMakeLists.txt src README.md scripts tests docs --glob '!docs/reports/report-*' --glob '!docs/meetings/**'
+rg -n 'ZEROKV_BUILD_|ZEROKV_TRANSPORT|ZEROKV_NUM_WORKERS|ZEROKV_MEM_POOL_SIZE|ZEROKV_THIRD_PARTY_DIR|getenv\("ZEROKV_' CMakeLists.txt src README.md scripts tests docs --glob '!docs/reports/report-*' --glob '!docs/meetings/**'
 ./scripts/package_source.sh
 ls -1 zerokv-src-*.tar.gz | tail -n 1
 ```

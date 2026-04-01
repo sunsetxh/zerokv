@@ -1,5 +1,5 @@
 #!/bin/bash
-# provision.sh - Install deps, load Soft-RoCE, compile axon in both VMs
+# provision.sh - Install deps, load Soft-RoCE, compile zerokv in both VMs
 #
 # Prerequisites: start_vms.sh has been run and both VMs have SSH ready
 # This script handles:
@@ -7,7 +7,7 @@
 #   - Installing all packages including linux-modules-extra (for rdma_rxe)
 #   - Loading Soft-RoCE and creating rxe0 on both VMs
 #   - Configuring static IPs for inter-VM communication
-#   - Transferring and compiling axon
+#   - Transferring and compiling zerokv
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -148,31 +148,31 @@ CREATE_RXE
     echo "    Configuring IP ${ip} on ${inter_vm_iface}..."
     vm_ssh "${port}" "sudo ip addr add ${ip}/24 dev ${inter_vm_iface} 2>/dev/null || true; sudo ip link set ${inter_vm_iface} up"
 
-    # 6. Transfer and compile axon
-    echo "    Transferring axon source code..."
-    vm_ssh "${port}" "rm -rf /tmp/axon && mkdir -p /tmp/axon"
+    # 6. Transfer and compile zerokv
+    echo "    Transferring zerokv source code..."
+    vm_ssh "${port}" "rm -rf /tmp/zerokv && mkdir -p /tmp/zerokv"
     tar -C "${PROJECT_ROOT}" \
         --exclude='.git' \
         --exclude='build' \
         --exclude='.vm_work' \
         --exclude='*.o' \
         --exclude='*.a' \
-        -czf /tmp/axon-src.tar.gz .
-    vm_scp "${port}" /tmp/axon-src.tar.gz /tmp/axon-src.tar.gz
-    rm -f /tmp/axon-src.tar.gz
+        -czf /tmp/zerokv-src.tar.gz .
+    vm_scp "${port}" /tmp/zerokv-src.tar.gz /tmp/zerokv-src.tar.gz
+    rm -f /tmp/zerokv-src.tar.gz
 
-    echo "    Compiling axon..."
+    echo "    Compiling zerokv..."
     vm_ssh "${port}" bash -s <<'COMPILE'
 #!/bin/bash
 set -e
-cd /tmp/axon
-tar xzf /tmp/axon-src.tar.gz
+cd /tmp/zerokv
+tar xzf /tmp/zerokv-src.tar.gz
 cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
-    -DAXON_BUILD_TESTS=OFF \
-    -DAXON_BUILD_EXAMPLES=ON \
-    -DAXON_BUILD_BENCHMARK=OFF \
-    -DAXON_BUILD_PYTHON=OFF
+    -DZEROKV_BUILD_TESTS=OFF \
+    -DZEROKV_BUILD_EXAMPLES=ON \
+    -DZEROKV_BUILD_BENCHMARK=OFF \
+    -DZEROKV_BUILD_PYTHON=OFF
 cmake --build build -j$(nproc)
 echo "Build complete!"
 ls -la build/ping_pong build/send_recv build/rdma_put_get 2>/dev/null || true

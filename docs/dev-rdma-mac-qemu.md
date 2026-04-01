@@ -157,12 +157,12 @@ lsmod | grep rxe
 ```bash
 cd /path/to/axon
 mkdir -p build && cd build
-cmake .. -DAXON_BUILD_TESTS=OFF -DAXON_BUILD_PYTHON=OFF
+cmake .. -DZEROKV_BUILD_TESTS=OFF -DZEROKV_BUILD_PYTHON=OFF
 make -j$(nproc)
 
 # 单机 loopback 测试（shmem 传输）
-AXON_TRANSPORTS=shmem ./ping_pong --listen :13337 &
-AXON_TRANSPORTS=shmem ./ping_pong --connect localhost:13337
+ZEROKV_TRANSPORTS=shmem ./ping_pong --listen :13337 &
+ZEROKV_TRANSPORTS=shmem ./ping_pong --connect localhost:13337
 ```
 
 ---

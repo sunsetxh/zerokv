@@ -91,14 +91,14 @@ Config::Builder& Config::Builder::set(std::string key, std::string value) {
 }
 
 Config::Builder& Config::Builder::from_env() {
-    // AXON-specific options
-    if (auto* val = std::getenv("AXON_TRANSPORT")) {
+    // ZEROKV-specific options
+    if (auto* val = std::getenv("ZEROKV_TRANSPORT")) {
         impl_->transport_ = val;
     }
-    if (auto* val = std::getenv("AXON_NUM_WORKERS")) {
+    if (auto* val = std::getenv("ZEROKV_NUM_WORKERS")) {
         impl_->num_workers_ = std::stoul(val);
     }
-    if (auto* val = std::getenv("AXON_MEM_POOL_SIZE")) {
+    if (auto* val = std::getenv("ZEROKV_MEM_POOL_SIZE")) {
         impl_->memory_pool_size_ = std::stoul(val);
     }
 

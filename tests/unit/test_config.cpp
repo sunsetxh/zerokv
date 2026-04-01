@@ -18,7 +18,7 @@ TEST(ConfigTest, BuilderPattern) {
 
 TEST(ConfigTest, FromEnv) {
     // Set environment variable
-    setenv("AXON_TRANSPORT", "tcp", 1);
+    setenv("ZEROKV_TRANSPORT", "tcp", 1);
     auto config = Config::builder()
         .from_env()
         .build();

@@ -20,10 +20,10 @@ rdma link add rxe0 type rxe netdev "$NET_DEV" || echo "Note: rxe0 might already 
 echo "Verifying RDMA devices:"
 ibv_devices
 
-# 5. Build axon
-echo "Building axon..."
+# 5. Build zerokv
+echo "Building zerokv..."
 mkdir -p build_docker && cd build_docker
-cmake .. -DAXON_BUILD_TESTS=ON -DAXON_BUILD_PYTHON=OFF
+cmake .. -DZEROKV_BUILD_TESTS=ON -DZEROKV_BUILD_PYTHON=OFF
 make -j$(nproc)
 
 # 6. Run RDMA validation tests

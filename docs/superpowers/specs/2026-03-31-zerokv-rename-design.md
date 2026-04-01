@@ -74,18 +74,13 @@ Out of scope:
 
 ### 4. Config and Environment
 - CMake options:
-  - `AXON_BUILD_STATIC` -> `ZEROKV_BUILD_STATIC`
-  - `AXON_BUILD_EXAMPLES` -> `ZEROKV_BUILD_EXAMPLES`
-  - `AXON_BUILD_TESTS` -> `ZEROKV_BUILD_TESTS`
-  - `AXON_BUILD_BENCHMARK` -> `ZEROKV_BUILD_BENCHMARK`
-  - `AXON_BUILD_PYTHON` -> `ZEROKV_BUILD_PYTHON`
-  - `AXON_THIRD_PARTY_DIR` -> `ZEROKV_THIRD_PARTY_DIR`
+  - `ZEROKV_BUILD_STATIC`, `ZEROKV_BUILD_EXAMPLES`, `ZEROKV_BUILD_TESTS`,
+    `ZEROKV_BUILD_BENCHMARK`, `ZEROKV_BUILD_PYTHON`, and
+    `ZEROKV_THIRD_PARTY_DIR`
 - Runtime env vars:
-  - `AXON_TRANSPORT` -> `ZEROKV_TRANSPORT`
-  - `AXON_NUM_WORKERS` -> `ZEROKV_NUM_WORKERS`
-  - `AXON_MEM_POOL_SIZE` -> `ZEROKV_MEM_POOL_SIZE`
-  - any other active `getenv("AXON_...")` site found by repo-wide grep must be renamed as part of the cut
-- No fallback support for old `AXON_*` names
+  - `ZEROKV_TRANSPORT`, `ZEROKV_NUM_WORKERS`, and `ZEROKV_MEM_POOL_SIZE`
+  - any other active `getenv("ZEROKV_...")` site found by repo-wide grep must be covered by the cut
+- No fallback support for legacy names
 
 ### 5. Docs and Scripts
 - Rename prose references from `axon` to `ZeroKV` where referring to the project/product
