@@ -4,7 +4,7 @@
 /// @brief KV node infrastructure API.
 
 #include "zerokv/config.h"
-#include "zerokv/core/kv_types.h"
+#include "zerokv/core/common_types.h"
 #include "zerokv/future.h"
 #include "zerokv/memory.h"
 
@@ -84,3 +84,11 @@ private:
 };
 
 }  // namespace zerokv::kv
+
+namespace zerokv {
+namespace core {
+
+using KVNode = ::zerokv::kv::KVNode;
+
+}  // namespace core
+}  // namespace zerokv

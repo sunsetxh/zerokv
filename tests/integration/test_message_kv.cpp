@@ -1,3 +1,5 @@
+#include "zerokv/core/kv_node.h"
+#include "zerokv/core/kv_server.h"
 #include "zerokv/message_kv.h"
 
 #include <algorithm>
@@ -54,6 +56,21 @@ TEST(MessageKvApiSurfaceTest, MessageKvCompatibilityAliasStillCompiles) {
 #endif
     item.key = "compat";
     EXPECT_EQ(item.key, "compat");
+}
+
+TEST(KvCoreApiSurfaceTest, CoreHeadersCompile) {
+    using zerokv::core::KVNode;
+    using zerokv::core::KVServer;
+    using zerokv::core::NodeConfig;
+    using zerokv::core::ServerConfig;
+
+    static_assert(std::is_same_v<KVNode, zerokv::kv::KVNode>);
+    static_assert(std::is_same_v<KVServer, zerokv::kv::KVServer>);
+
+    NodeConfig node_cfg;
+    ServerConfig server_cfg;
+    (void)node_cfg;
+    (void)server_cfg;
 }
 
 TEST_F(MessageKvIntegrationTest, AllocateSendRegionRequiresRunningNode) {

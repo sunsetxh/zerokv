@@ -4,7 +4,7 @@
 /// @brief KV metadata server infrastructure API.
 
 #include "zerokv/config.h"
-#include "zerokv/core/kv_types.h"
+#include "zerokv/core/common_types.h"
 
 #include <memory>
 #include <optional>
@@ -38,3 +38,11 @@ private:
 };
 
 }  // namespace zerokv::kv
+
+namespace zerokv {
+namespace core {
+
+using KVServer = ::zerokv::kv::KVServer;
+
+}  // namespace core
+}  // namespace zerokv
