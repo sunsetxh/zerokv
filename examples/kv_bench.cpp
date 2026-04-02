@@ -1,6 +1,6 @@
 #include "zerokv/config.h"
 #include "zerokv/kv.h"
-#include "kv/bench_utils.h"
+#include "core/bench_utils.h"
 
 #include <atomic>
 #include <chrono>

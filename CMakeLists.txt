@@ -130,12 +130,12 @@ set(ZEROKV_SOURCES
     src/future.cpp
     src/memory.cpp
     src/message_kv.cpp
-    src/kv/protocol.cpp
-    src/kv/metadata_store.cpp
-    src/kv/tcp_transport.cpp
-    src/kv/tcp_framing.cpp
-    src/kv/server.cpp
-    src/kv/node.cpp
+    src/core/protocol.cpp
+    src/core/metadata_store.cpp
+    src/core/tcp_transport.cpp
+    src/core/tcp_framing.cpp
+    src/core/server.cpp
+    src/core/node.cpp
 )
 
 add_library(zerokv SHARED ${ZEROKV_SOURCES})
@@ -183,7 +183,7 @@ if(ZEROKV_BUILD_EXAMPLES)
 
     add_executable(kv_bench
         examples/kv_bench.cpp
-        src/kv/bench_utils.cpp
+        src/core/bench_utils.cpp
     )
     target_link_libraries(kv_bench PRIVATE zerokv)
     target_include_directories(kv_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -229,7 +229,7 @@ if(ZEROKV_BUILD_TESTS)
 
     add_executable(test_kv_bench
         tests/unit/test_kv_bench.cpp
-        src/kv/bench_utils.cpp
+        src/core/bench_utils.cpp
     )
     target_link_libraries(test_kv_bench PRIVATE zerokv GTest::gtest GTest::gtest_main)
     target_include_directories(test_kv_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -267,7 +267,7 @@ if(ZEROKV_BUILD_TESTS)
 
     add_executable(test_kv_bench_integration
         tests/integration/test_kv_bench.cpp
-        src/kv/bench_utils.cpp
+        src/core/bench_utils.cpp
     )
     target_link_libraries(test_kv_bench_integration PRIVATE zerokv GTest::gtest GTest::gtest_main)
     target_include_directories(test_kv_bench_integration PRIVATE ${CMAKE_SOURCE_DIR}/src)

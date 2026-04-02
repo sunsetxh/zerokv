@@ -1,9 +1,9 @@
 #include "zerokv/core/kv_server.h"
 
-#include "kv/metadata_store.h"
-#include "kv/protocol.h"
-#include "kv/tcp_framing.h"
-#include "kv/tcp_transport.h"
+#include "core/metadata_store.h"
+#include "core/protocol.h"
+#include "core/tcp_framing.h"
+#include "core/tcp_transport.h"
 
 #include <atomic>
 #include <cstdint>

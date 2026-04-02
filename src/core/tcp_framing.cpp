@@ -1,6 +1,6 @@
-#include "kv/tcp_framing.h"
+#include "core/tcp_framing.h"
 
-#include "kv/tcp_transport.h"
+#include "core/tcp_transport.h"
 
 #include <array>
 
