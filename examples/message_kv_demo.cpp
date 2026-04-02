@@ -465,7 +465,7 @@ int run_rank1(const Args& args, const Config& cfg) {
                     send_us[static_cast<size_t>(i)] = elapsed_us(send_start, send_end);
                     if (print_summary) {
                         std::cout << "SEND_OK key=" << key
-                                  << " value=" << payload
+                                  << " bytes=" << size_bytes
                                   << " send_us=" << send_us[static_cast<size_t>(i)]
                                   << "\n";
                     }
