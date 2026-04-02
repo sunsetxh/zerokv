@@ -9,6 +9,7 @@ namespace zerokv::examples::message_kv_demo {
 std::vector<size_t> parse_sizes_csv(const std::string& csv);
 std::string make_round_key(size_t round_index, size_t size_bytes, size_t thread_index);
 std::string make_payload(size_t round_index, size_t size_bytes, size_t thread_index);
+size_t max_size_bytes_for_sizes(const std::vector<size_t>& sizes);
 std::string render_send_round_summary(size_t round_index,
                                       size_t size_bytes,
                                       size_t messages,
@@ -43,6 +44,12 @@ TEST(MessageKvDemoHelpersTest, PayloadHasExactRequestedLength) {
     auto payload = zerokv::examples::message_kv_demo::make_payload(1, 1024, 2);
     EXPECT_EQ(payload.size(), 1024u);
     EXPECT_TRUE(payload.rfind("round1-thread2-", 0) == 0);
+}
+
+TEST(MessageKvDemoHelpersTest, MaxSizeBytesUsesLargestConfiguredPayload) {
+    const std::vector<size_t> sizes = {1024u, 64u * 1024u, 1024u * 1024u};
+    EXPECT_EQ(zerokv::examples::message_kv_demo::max_size_bytes_for_sizes(sizes),
+              1024u * 1024u);
 }
 
 TEST(MessageKvDemoHelpersTest, SendRoundSummaryUsesConfiguredSizeAndCounts) {

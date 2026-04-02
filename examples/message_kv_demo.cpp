@@ -92,6 +92,10 @@ std::string make_payload(size_t round_index, size_t size_bytes, size_t thread_in
     return payload;
 }
 
+size_t max_size_bytes_for_sizes(const std::vector<size_t>& sizes) {
+    return *std::max_element(sizes.begin(), sizes.end());
+}
+
 double throughput_mib_per_sec(size_t bytes, uint64_t elapsed_us_value) {
     if (elapsed_us_value == 0) {
         return 0.0;
@@ -419,8 +423,15 @@ int run_rank1(const Args& args, const Config& cfg) {
         return 1;
     }
 
+    const auto max_size_bytes = zerokv::examples::message_kv_demo::max_size_bytes_for_sizes(sizes);
+
+    std::vector<Context::Ptr> workers_ctx(static_cast<size_t>(args.threads));
+    std::vector<MemoryRegion::Ptr> workers_region(static_cast<size_t>(args.threads));
     std::vector<MessageKV::Ptr> workers_mq(static_cast<size_t>(args.threads));
     for (int i = 0; i < args.threads; ++i) {
+        workers_ctx[static_cast<size_t>(i)] = Context::create(cfg);
+        workers_region[static_cast<size_t>(i)] =
+            workers_ctx[static_cast<size_t>(i)]->allocate_memory_region(max_size_bytes);
         workers_mq[static_cast<size_t>(i)] = MessageKV::create(cfg);
         workers_mq[static_cast<size_t>(i)]->start(NodeConfig{
             .server_addr = args.server_addr,
@@ -444,12 +455,14 @@ int run_rank1(const Args& args, const Config& cfg) {
             workers.emplace_back([&, i, protocol_round_index, size_bytes] {
                 try {
                     auto& mq = workers_mq[static_cast<size_t>(i)];
+                    auto& region = workers_region[static_cast<size_t>(i)];
                     const auto key = zerokv::examples::message_kv_demo::make_round_key(
                         protocol_round_index, size_bytes, static_cast<size_t>(i));
                     const auto payload = zerokv::examples::message_kv_demo::make_payload(
                         protocol_round_index, size_bytes, static_cast<size_t>(i));
+                    std::memcpy(region->address(), payload.data(), size_bytes);
                     const auto send_start = SteadyClock::now();
-                    mq->send(key, payload.data(), payload.size());
+                    mq->send_region(key, region, size_bytes);
                     const auto send_end = SteadyClock::now();
                     send_us[static_cast<size_t>(i)] = elapsed_us(send_start, send_end);
                     if (print_summary) {
