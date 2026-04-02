@@ -3,7 +3,8 @@
 /// @file zerokv/message_kv.h
 /// @brief Message-style wrapper API on top of ZeroKV KV primitives.
 
-#include "zerokv/kv.h"
+#include "zerokv/core/kv_node.h"
+#include "zerokv/core/kv_server.h"
 #include "zerokv/memory.h"
 
 #include <chrono>
