@@ -5,7 +5,7 @@
 
 #include "zerokv/core/kv_node.h"
 #include "zerokv/core/kv_server.h"
-#include "zerokv/memory.h"
+#include "zerokv/transport/memory.h"
 
 #include <chrono>
 #include <cstddef>
@@ -41,21 +41,21 @@ public:
     void start(const zerokv::core::NodeConfig& cfg);
     void stop();
 
-    [[nodiscard]] zerokv::MemoryRegion::Ptr allocate_send_region(size_t size);
+    [[nodiscard]] zerokv::transport::MemoryRegion::Ptr allocate_send_region(size_t size);
 
     void send(const std::string& key, const void* data, size_t size);
     void send_region(const std::string& key,
-                     const zerokv::MemoryRegion::Ptr& region,
+                     const zerokv::transport::MemoryRegion::Ptr& region,
                      size_t size);
 
     void recv(const std::string& key,
-              const zerokv::MemoryRegion::Ptr& region,
+              const zerokv::transport::MemoryRegion::Ptr& region,
               size_t length,
               size_t offset,
               std::chrono::milliseconds timeout);
 
     BatchRecvResult recv_batch(const std::vector<BatchRecvItem>& items,
-                               const zerokv::MemoryRegion::Ptr& region,
+                               const zerokv::transport::MemoryRegion::Ptr& region,
                                std::chrono::milliseconds timeout);
 
 private:

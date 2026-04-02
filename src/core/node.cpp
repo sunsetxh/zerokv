@@ -1,7 +1,7 @@
 #include "zerokv/core/kv_node.h"
 
-#include "zerokv/endpoint.h"
-#include "zerokv/worker.h"
+#include "zerokv/transport/endpoint.h"
+#include "zerokv/transport/worker.h"
 
 #include "core/protocol.h"
 #include "core/tcp_framing.h"
@@ -28,6 +28,13 @@
 namespace zerokv::core {
 
 namespace detail = ::zerokv::core::detail;
+template <typename T>
+using Future = ::zerokv::transport::Future<T>;
+using Endpoint = ::zerokv::transport::Endpoint;
+using Listener = ::zerokv::transport::Listener;
+using MemoryRegion = ::zerokv::transport::MemoryRegion;
+using RemoteKey = ::zerokv::transport::RemoteKey;
+using Worker = ::zerokv::transport::Worker;
 
 namespace {
 
@@ -99,7 +106,7 @@ struct FetchToRange {
 };
 
 Status validate_fetch_to_many_layout(const std::vector<FetchToItem>& items,
-                                     const zerokv::MemoryRegion::Ptr& region) {
+                                     const zerokv::transport::MemoryRegion::Ptr& region) {
     if (!region) {
         return Status(ErrorCode::kInvalidArgument, "local region is required");
     }
@@ -1219,7 +1226,7 @@ std::string KVNode::node_id() const {
     return impl_ ? impl_->node_id_ : std::string{};
 }
 
-zerokv::MemoryRegion::Ptr KVNode::allocate_region(size_t size) const {
+zerokv::transport::MemoryRegion::Ptr KVNode::allocate_region(size_t size) const {
     if (!impl_) {
         return nullptr;
     }
@@ -1672,7 +1679,7 @@ BatchFetchResult KVNode::subscribe_and_fetch_once_many(const std::vector<std::st
     return result;
 }
 
-Future<void> KVNode::publish(const std::string& key, const void* data, size_t size) {
+zerokv::transport::Future<void> KVNode::publish(const std::string& key, const void* data, size_t size) {
     if (!impl_) {
         return Future<void>::make_error(Status(ErrorCode::kInternalError, "KVNode not initialized"));
     }
@@ -1702,8 +1709,8 @@ Future<void> KVNode::publish(const std::string& key, const void* data, size_t si
     return publish;
 }
 
-Future<void> KVNode::publish_region(const std::string& key,
-                                    const zerokv::MemoryRegion::Ptr& region,
+zerokv::transport::Future<void> KVNode::publish_region(const std::string& key,
+                                    const zerokv::transport::MemoryRegion::Ptr& region,
                                     size_t size) {
     if (!impl_) {
         return Future<void>::make_error(Status(ErrorCode::kInternalError, "KVNode not initialized"));
@@ -1719,7 +1726,7 @@ Future<void> KVNode::publish_region(const std::string& key,
     return publish;
 }
 
-Future<FetchResult> KVNode::fetch(const std::string& key) {
+zerokv::transport::Future<FetchResult> KVNode::fetch(const std::string& key) {
     if (!impl_) {
         return Future<FetchResult>::make_error(Status(ErrorCode::kInternalError, "KVNode not initialized"));
     }
@@ -1775,8 +1782,8 @@ Future<FetchResult> KVNode::fetch(const std::string& key) {
     return Future<FetchResult>::make_ready(std::move(result));
 }
 
-Future<void> KVNode::fetch_to(const std::string& key,
-                              const zerokv::MemoryRegion::Ptr& local_region,
+zerokv::transport::Future<void> KVNode::fetch_to(const std::string& key,
+                              const zerokv::transport::MemoryRegion::Ptr& local_region,
                               size_t length,
                               size_t local_offset) {
     if (!impl_) {
@@ -1804,7 +1811,7 @@ Future<void> KVNode::fetch_to(const std::string& key,
 }
 
 FetchToManyResult KVNode::fetch_to_many(const std::vector<FetchToItem>& items,
-                                        const zerokv::MemoryRegion::Ptr& local_region) {
+                                        const zerokv::transport::MemoryRegion::Ptr& local_region) {
     FetchToManyResult result;
     auto status = validate_fetch_to_many_layout(items, local_region);
     status.throw_if_error();
@@ -1833,7 +1840,7 @@ FetchToManyResult KVNode::fetch_to_many(const std::vector<FetchToItem>& items,
 
 BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
     const std::vector<FetchToItem>& items,
-    const zerokv::MemoryRegion::Ptr& local_region,
+    const zerokv::transport::MemoryRegion::Ptr& local_region,
     std::chrono::milliseconds timeout) {
     BatchFetchToResult result;
     auto layout_status = validate_fetch_to_many_layout(items, local_region);
@@ -1995,7 +2002,7 @@ BatchFetchToResult KVNode::subscribe_and_fetch_to_once_many(
     return result;
 }
 
-Future<void> KVNode::push(const std::string& target_node_id,
+zerokv::transport::Future<void> KVNode::push(const std::string& target_node_id,
                           const std::string& key,
                           const void* data,
                           size_t size) {
@@ -2214,7 +2221,7 @@ Future<void> KVNode::push(const std::string& target_node_id,
     return Future<void>::make_ready();
 }
 
-Future<void> KVNode::subscribe(const std::string& key) {
+zerokv::transport::Future<void> KVNode::subscribe(const std::string& key) {
     if (!impl_ || !impl_->running_.load()) {
         return Future<void>::make_error(
             Status(ErrorCode::kInvalidArgument, "KVNode is not running"));
@@ -2245,7 +2252,7 @@ Future<void> KVNode::subscribe(const std::string& key) {
     return Future<void>::make_ready();
 }
 
-Future<void> KVNode::unsubscribe(const std::string& key) {
+zerokv::transport::Future<void> KVNode::unsubscribe(const std::string& key) {
     if (!impl_ || !impl_->running_.load()) {
         return Future<void>::make_error(
             Status(ErrorCode::kInvalidArgument, "KVNode is not running"));
@@ -2287,7 +2294,7 @@ Future<void> KVNode::unsubscribe(const std::string& key) {
     return Future<void>::make_ready();
 }
 
-Future<void> KVNode::unpublish(const std::string& key) {
+zerokv::transport::Future<void> KVNode::unpublish(const std::string& key) {
     if (!impl_) {
         return Future<void>::make_error(Status(ErrorCode::kInternalError, "KVNode not initialized"));
     }

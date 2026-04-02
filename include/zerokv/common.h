@@ -131,15 +131,18 @@ enum class MemoryType : uint8_t {
 
 class Config;
 class Context;
+class Cluster;
+namespace transport {
 class Worker;
 class Endpoint;
-class Cluster;
+class Listener;
 class MemoryRegion;
 class MemoryPool;
+class RegistrationCache;
 class Request;
-
 template <typename T> class Future;
 template <typename T> class Promise;
+}  // namespace transport
 
 }  // namespace zerokv
 

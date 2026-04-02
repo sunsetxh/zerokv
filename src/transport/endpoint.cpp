@@ -1,14 +1,14 @@
-#include "zerokv/endpoint.h"
+#include "zerokv/transport/endpoint.h"
 
-#include "zerokv/worker.h"
-#include "zerokv/memory.h"
-#include "zerokv/future.h"
+#include "zerokv/transport/worker.h"
+#include "zerokv/transport/memory.h"
+#include "zerokv/transport/future.h"
 #include "zerokv/common.h"
 
 #include <ucp/api/ucp.h>
 #include <memory>
 
-namespace zerokv {
+namespace zerokv::transport {
 
 namespace {
 
@@ -728,4 +728,4 @@ void* Endpoint::native_handle() const noexcept {
     return impl_ ? reinterpret_cast<void*>(impl_->handle_) : nullptr;
 }
 
-} // namespace zerokv
+} // namespace zerokv::transport

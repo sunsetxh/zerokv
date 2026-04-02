@@ -125,10 +125,10 @@ set(ZEROKV_SOURCES
     src/status.cpp
     src/cluster.cpp
     src/config.cpp
-    src/worker.cpp
-    src/endpoint.cpp
-    src/future.cpp
-    src/memory.cpp
+    src/transport/worker.cpp
+    src/transport/endpoint.cpp
+    src/transport/future.cpp
+    src/transport/memory.cpp
     src/message_kv.cpp
     src/core/protocol.cpp
     src/core/metadata_store.cpp

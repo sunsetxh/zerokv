@@ -1,4 +1,4 @@
-#include "zerokv/memory.h"
+#include "zerokv/transport/memory.h"
 
 #include "zerokv/config.h"
 #include "zerokv/common.h"
@@ -9,7 +9,7 @@
 #include <cstring>
 #include <vector>
 
-namespace zerokv {
+namespace zerokv::transport {
 
 // ============================================================================
 // MemoryRegion::Impl
@@ -164,4 +164,4 @@ void* MemoryRegion::native_handle() const noexcept {
     return impl_ ? reinterpret_cast<void*>(impl_->handle_) : nullptr;
 }
 
-} // namespace zerokv
+} // namespace zerokv::transport

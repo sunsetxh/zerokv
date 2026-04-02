@@ -1,7 +1,7 @@
-#include "zerokv/worker.h"
+#include "zerokv/transport/worker.h"
 
 #include "zerokv/config.h"
-#include "zerokv/endpoint.h"
+#include "zerokv/transport/endpoint.h"
 #include "zerokv/common.h"
 
 #include "internal/listener_addr.h"
@@ -22,7 +22,7 @@
 #include <condition_variable>
 #include <poll.h>
 
-namespace zerokv {
+namespace zerokv::transport {
 
 namespace {
 
@@ -568,4 +568,4 @@ void Listener::close() {
     }
 }
 
-} // namespace zerokv
+} // namespace zerokv::transport

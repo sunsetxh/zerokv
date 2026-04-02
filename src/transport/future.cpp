@@ -1,7 +1,7 @@
-#include "zerokv/future.h"
+#include "zerokv/transport/future.h"
 
 #include "zerokv/common.h"
-#include "zerokv/endpoint.h"
+#include "zerokv/transport/endpoint.h"
 
 #include <ucp/api/ucp.h>
 
@@ -9,7 +9,7 @@
 #include <functional>
 #include <vector>
 
-namespace zerokv {
+namespace zerokv::transport {
 
 // ============================================================================
 // Request
@@ -181,4 +181,4 @@ void Request::populate_recv_info() const {
     // Completion metadata is captured via per-operation callbacks.
 }
 
-} // namespace zerokv
+} // namespace zerokv::transport
