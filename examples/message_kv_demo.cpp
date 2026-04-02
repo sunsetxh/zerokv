@@ -425,19 +425,17 @@ int run_rank1(const Args& args, const Config& cfg) {
 
     const auto max_size_bytes = zerokv::examples::message_kv_demo::max_size_bytes_for_sizes(sizes);
 
-    std::vector<Context::Ptr> workers_ctx(static_cast<size_t>(args.threads));
     std::vector<MemoryRegion::Ptr> workers_region(static_cast<size_t>(args.threads));
     std::vector<MessageKV::Ptr> workers_mq(static_cast<size_t>(args.threads));
     for (int i = 0; i < args.threads; ++i) {
-        workers_ctx[static_cast<size_t>(i)] = Context::create(cfg);
-        workers_region[static_cast<size_t>(i)] = MemoryRegion::allocate(
-            workers_ctx[static_cast<size_t>(i)], max_size_bytes);
         workers_mq[static_cast<size_t>(i)] = MessageKV::create(cfg);
         workers_mq[static_cast<size_t>(i)]->start(NodeConfig{
             .server_addr = args.server_addr,
             .local_data_addr = args.data_addr,
             .node_id = make_sender_node_id(args.node_id, 0, i),
         });
+        workers_region[static_cast<size_t>(i)] =
+            workers_mq[static_cast<size_t>(i)]->allocate_send_region(max_size_bytes);
     }
 
     auto run_round = [&](size_t protocol_round_index,
