@@ -62,17 +62,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-rsync -a \
-    --exclude='.git/' \
-    --exclude='build/' \
-    --exclude='.ccb/' \
-    --exclude='.DS_Store' \
-    --exclude='__pycache__/' \
-    --exclude='*.pyc' \
-    --exclude='*.pyo' \
-    --exclude='*.tar.gz' \
-    --exclude='scripts/qemu_rdma/.vm_work/' \
-    "${ROOT_DIR}/" "${STAGE_DIR}/"
+# Package only tracked files from HEAD so local worktrees, VM artifacts,
+# editor state, and other untracked files never leak into the source archive.
+git -C "${ROOT_DIR}" archive HEAD | tar -x -C "${STAGE_DIR}"
 
 if [[ ${INCLUDE_THIRD_PARTY} -eq 0 ]]; then
     rm -rf "${STAGE_DIR}/third_party"
