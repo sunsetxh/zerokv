@@ -154,6 +154,7 @@ public:
 
     [[nodiscard]] bool is_running() const noexcept;
     [[nodiscard]] std::string node_id() const;
+    [[nodiscard]] zerokv::MemoryRegion::Ptr allocate_region(size_t size) const;
     [[nodiscard]] size_t published_count() const noexcept;
     [[nodiscard]] std::optional<PublishMetrics> last_publish_metrics() const;
     [[nodiscard]] std::optional<FetchMetrics> last_fetch_metrics() const;

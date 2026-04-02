@@ -40,6 +40,8 @@ public:
     void start(const zerokv::kv::NodeConfig& cfg);
     void stop();
 
+    [[nodiscard]] zerokv::MemoryRegion::Ptr allocate_send_region(size_t size);
+
     void send(const std::string& key, const void* data, size_t size);
     void send_region(const std::string& key,
                      const zerokv::MemoryRegion::Ptr& region,

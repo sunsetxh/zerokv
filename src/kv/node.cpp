@@ -1217,6 +1217,13 @@ std::string KVNode::node_id() const {
     return impl_ ? impl_->node_id_ : std::string{};
 }
 
+zerokv::MemoryRegion::Ptr KVNode::allocate_region(size_t size) const {
+    if (!impl_) {
+        return nullptr;
+    }
+    return MemoryRegion::allocate(impl_->context_, size);
+}
+
 size_t KVNode::published_count() const noexcept {
     if (!impl_) {
         return 0;

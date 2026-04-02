@@ -39,6 +39,26 @@ TEST(MessageKvApiSurfaceTest, PublicTypesExist) {
     EXPECT_FALSE(result.completed_all);
 }
 
+TEST_F(MessageKvIntegrationTest, AllocateSendRegionRequiresRunningNode) {
+    auto mq = zerokv::MessageKV::create(cfg);
+    expect_system_error_code([&] { (void)mq->allocate_send_region(1024); },
+                             zerokv::ErrorCode::kConnectionRefused);
+}
+
+TEST_F(MessageKvIntegrationTest, AllocateSendRegionSucceedsAfterStart) {
+    auto mq = zerokv::MessageKV::create(cfg);
+    auto server = zerokv::kv::KVServer::create(cfg);
+    ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
+
+    mq->start({server->address(), "127.0.0.1:0", "sender"});
+    auto region = mq->allocate_send_region(1024);
+    ASSERT_NE(region, nullptr);
+    EXPECT_GE(region->length(), 1024u);
+
+    mq->stop();
+    server->stop();
+}
+
 TEST_F(MessageKvIntegrationTest, SendRejectsEmptyKey) {
     auto mq = zerokv::MessageKV::create(cfg);
 

@@ -277,6 +277,18 @@ void MessageKV::stop() {
     impl_->owned_ack_keys.clear();
 }
 
+zerokv::MemoryRegion::Ptr MessageKV::allocate_send_region(size_t size) {
+    std::lock_guard<std::mutex> lock(impl_->mu);
+    if (!impl_->node_ready_locked()) {
+        throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
+    }
+    auto region = impl_->node->allocate_region(size);
+    if (!region) {
+        throw std::system_error(make_error_code(ErrorCode::kRegistrationFailed));
+    }
+    return region;
+}
+
 void MessageKV::send(const std::string& key, const void* data, size_t size) {
     std::lock_guard<std::mutex> lock(impl_->mu);
     impl_->sweep_cleanup_locked();
