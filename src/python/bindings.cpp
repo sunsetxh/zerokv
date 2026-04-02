@@ -415,107 +415,107 @@ NB_MODULE(_core, m) {
 
     // --- KV -----------------------------------------------------------------
 
-    nb::class_<zerokv::kv::KeyInfo>(m, "KeyInfo")
-        .def_prop_ro("key", [](const zerokv::kv::KeyInfo& v) { return v.key; })
-        .def_prop_ro("size", [](const zerokv::kv::KeyInfo& v) { return v.size; })
-        .def_prop_ro("version", [](const zerokv::kv::KeyInfo& v) { return v.version; });
+    nb::class_<zerokv::core::KeyInfo>(m, "KeyInfo")
+        .def_prop_ro("key", [](const zerokv::core::KeyInfo& v) { return v.key; })
+        .def_prop_ro("size", [](const zerokv::core::KeyInfo& v) { return v.size; })
+        .def_prop_ro("version", [](const zerokv::core::KeyInfo& v) { return v.version; });
 
-    nb::class_<zerokv::kv::FetchResult>(m, "FetchResult")
-        .def_prop_ro("data", [](const zerokv::kv::FetchResult& v) { return to_bytes(v.data); })
-        .def_prop_ro("owner_node_id", [](const zerokv::kv::FetchResult& v) { return v.owner_node_id; })
-        .def_prop_ro("version", [](const zerokv::kv::FetchResult& v) { return v.version; });
+    nb::class_<zerokv::core::FetchResult>(m, "FetchResult")
+        .def_prop_ro("data", [](const zerokv::core::FetchResult& v) { return to_bytes(v.data); })
+        .def_prop_ro("owner_node_id", [](const zerokv::core::FetchResult& v) { return v.owner_node_id; })
+        .def_prop_ro("version", [](const zerokv::core::FetchResult& v) { return v.version; });
 
-    nb::class_<zerokv::kv::PublishMetrics>(m, "PublishMetrics")
-        .def_prop_ro("total_us", [](const zerokv::kv::PublishMetrics& v) { return v.total_us; })
-        .def_prop_ro("prepare_region_us", [](const zerokv::kv::PublishMetrics& v) { return v.prepare_region_us; })
-        .def_prop_ro("pack_rkey_us", [](const zerokv::kv::PublishMetrics& v) { return v.pack_rkey_us; })
-        .def_prop_ro("put_meta_rpc_us", [](const zerokv::kv::PublishMetrics& v) { return v.put_meta_rpc_us; })
-        .def_prop_ro("ok", [](const zerokv::kv::PublishMetrics& v) { return v.ok; });
+    nb::class_<zerokv::core::PublishMetrics>(m, "PublishMetrics")
+        .def_prop_ro("total_us", [](const zerokv::core::PublishMetrics& v) { return v.total_us; })
+        .def_prop_ro("prepare_region_us", [](const zerokv::core::PublishMetrics& v) { return v.prepare_region_us; })
+        .def_prop_ro("pack_rkey_us", [](const zerokv::core::PublishMetrics& v) { return v.pack_rkey_us; })
+        .def_prop_ro("put_meta_rpc_us", [](const zerokv::core::PublishMetrics& v) { return v.put_meta_rpc_us; })
+        .def_prop_ro("ok", [](const zerokv::core::PublishMetrics& v) { return v.ok; });
 
-    nb::class_<zerokv::kv::FetchMetrics>(m, "FetchMetrics")
-        .def_prop_ro("total_us", [](const zerokv::kv::FetchMetrics& v) { return v.total_us; })
-        .def_prop_ro("local_buffer_prepare_us", [](const zerokv::kv::FetchMetrics& v) { return v.local_buffer_prepare_us; })
-        .def_prop_ro("get_meta_rpc_us", [](const zerokv::kv::FetchMetrics& v) { return v.get_meta_rpc_us; })
-        .def_prop_ro("peer_connect_us", [](const zerokv::kv::FetchMetrics& v) { return v.peer_connect_us; })
-        .def_prop_ro("rkey_prepare_us", [](const zerokv::kv::FetchMetrics& v) { return v.rkey_prepare_us; })
-        .def_prop_ro("get_submit_us", [](const zerokv::kv::FetchMetrics& v) { return v.get_submit_us; })
-        .def_prop_ro("rdma_prepare_us", [](const zerokv::kv::FetchMetrics& v) { return v.rdma_prepare_us; })
-        .def_prop_ro("rdma_get_us", [](const zerokv::kv::FetchMetrics& v) { return v.rdma_get_us; })
-        .def_prop_ro("result_copy_us", [](const zerokv::kv::FetchMetrics& v) { return v.result_copy_us; })
-        .def_prop_ro("ok", [](const zerokv::kv::FetchMetrics& v) { return v.ok; });
+    nb::class_<zerokv::core::FetchMetrics>(m, "FetchMetrics")
+        .def_prop_ro("total_us", [](const zerokv::core::FetchMetrics& v) { return v.total_us; })
+        .def_prop_ro("local_buffer_prepare_us", [](const zerokv::core::FetchMetrics& v) { return v.local_buffer_prepare_us; })
+        .def_prop_ro("get_meta_rpc_us", [](const zerokv::core::FetchMetrics& v) { return v.get_meta_rpc_us; })
+        .def_prop_ro("peer_connect_us", [](const zerokv::core::FetchMetrics& v) { return v.peer_connect_us; })
+        .def_prop_ro("rkey_prepare_us", [](const zerokv::core::FetchMetrics& v) { return v.rkey_prepare_us; })
+        .def_prop_ro("get_submit_us", [](const zerokv::core::FetchMetrics& v) { return v.get_submit_us; })
+        .def_prop_ro("rdma_prepare_us", [](const zerokv::core::FetchMetrics& v) { return v.rdma_prepare_us; })
+        .def_prop_ro("rdma_get_us", [](const zerokv::core::FetchMetrics& v) { return v.rdma_get_us; })
+        .def_prop_ro("result_copy_us", [](const zerokv::core::FetchMetrics& v) { return v.result_copy_us; })
+        .def_prop_ro("ok", [](const zerokv::core::FetchMetrics& v) { return v.ok; });
 
-    nb::class_<zerokv::kv::PushMetrics>(m, "PushMetrics")
-        .def_prop_ro("total_us", [](const zerokv::kv::PushMetrics& v) { return v.total_us; })
-        .def_prop_ro("get_target_rpc_us", [](const zerokv::kv::PushMetrics& v) { return v.get_target_rpc_us; })
-        .def_prop_ro("prepare_frame_us", [](const zerokv::kv::PushMetrics& v) { return v.prepare_frame_us; })
-        .def_prop_ro("rdma_put_flush_us", [](const zerokv::kv::PushMetrics& v) { return v.rdma_put_flush_us; })
-        .def_prop_ro("commit_rpc_us", [](const zerokv::kv::PushMetrics& v) { return v.commit_rpc_us; })
-        .def_prop_ro("ok", [](const zerokv::kv::PushMetrics& v) { return v.ok; });
+    nb::class_<zerokv::core::PushMetrics>(m, "PushMetrics")
+        .def_prop_ro("total_us", [](const zerokv::core::PushMetrics& v) { return v.total_us; })
+        .def_prop_ro("get_target_rpc_us", [](const zerokv::core::PushMetrics& v) { return v.get_target_rpc_us; })
+        .def_prop_ro("prepare_frame_us", [](const zerokv::core::PushMetrics& v) { return v.prepare_frame_us; })
+        .def_prop_ro("rdma_put_flush_us", [](const zerokv::core::PushMetrics& v) { return v.rdma_put_flush_us; })
+        .def_prop_ro("commit_rpc_us", [](const zerokv::core::PushMetrics& v) { return v.commit_rpc_us; })
+        .def_prop_ro("ok", [](const zerokv::core::PushMetrics& v) { return v.ok; });
 
-    nb::enum_<zerokv::kv::SubscriptionEventType>(m, "SubscriptionEventType")
-        .value("PUBLISHED", zerokv::kv::SubscriptionEventType::kPublished)
-        .value("UPDATED", zerokv::kv::SubscriptionEventType::kUpdated)
-        .value("UNPUBLISHED", zerokv::kv::SubscriptionEventType::kUnpublished)
-        .value("OWNER_LOST", zerokv::kv::SubscriptionEventType::kOwnerLost)
+    nb::enum_<zerokv::core::SubscriptionEventType>(m, "SubscriptionEventType")
+        .value("PUBLISHED", zerokv::core::SubscriptionEventType::kPublished)
+        .value("UPDATED", zerokv::core::SubscriptionEventType::kUpdated)
+        .value("UNPUBLISHED", zerokv::core::SubscriptionEventType::kUnpublished)
+        .value("OWNER_LOST", zerokv::core::SubscriptionEventType::kOwnerLost)
         .export_values();
 
-    nb::class_<zerokv::kv::SubscriptionEvent>(m, "SubscriptionEvent")
-        .def_prop_ro("type", [](const zerokv::kv::SubscriptionEvent& v) { return v.type; })
-        .def_prop_ro("key", [](const zerokv::kv::SubscriptionEvent& v) { return v.key; })
-        .def_prop_ro("owner_node_id", [](const zerokv::kv::SubscriptionEvent& v) { return v.owner_node_id; })
-        .def_prop_ro("version", [](const zerokv::kv::SubscriptionEvent& v) { return v.version; });
+    nb::class_<zerokv::core::SubscriptionEvent>(m, "SubscriptionEvent")
+        .def_prop_ro("type", [](const zerokv::core::SubscriptionEvent& v) { return v.type; })
+        .def_prop_ro("key", [](const zerokv::core::SubscriptionEvent& v) { return v.key; })
+        .def_prop_ro("owner_node_id", [](const zerokv::core::SubscriptionEvent& v) { return v.owner_node_id; })
+        .def_prop_ro("version", [](const zerokv::core::SubscriptionEvent& v) { return v.version; });
 
-    nb::class_<zerokv::kv::KVServer>(m, "KVServer")
+    nb::class_<zerokv::core::KVServer>(m, "KVServer")
         .def(nb::new_([](std::optional<zerokv::Config> config) {
-            return zerokv::kv::KVServer::create(config.value_or(zerokv::Config{}));
+            return zerokv::core::KVServer::create(config.value_or(zerokv::Config{}));
         }), "config"_a = nb::none())
-        .def("start", [](zerokv::kv::KVServer& self, const std::string& listen_addr) {
+        .def("start", [](zerokv::core::KVServer& self, const std::string& listen_addr) {
             nb::gil_scoped_release release;
-            return self.start(zerokv::kv::ServerConfig{listen_addr});
+            return self.start(zerokv::core::ServerConfig{listen_addr});
         }, "listen_addr"_a)
-        .def("stop", &zerokv::kv::KVServer::stop)
-        .def_prop_ro("is_running", &zerokv::kv::KVServer::is_running)
-        .def_prop_ro("address", &zerokv::kv::KVServer::address)
-        .def("lookup", &zerokv::kv::KVServer::lookup, "key"_a)
-        .def("list_keys", &zerokv::kv::KVServer::list_keys);
+        .def("stop", &zerokv::core::KVServer::stop)
+        .def_prop_ro("is_running", &zerokv::core::KVServer::is_running)
+        .def_prop_ro("address", &zerokv::core::KVServer::address)
+        .def("lookup", &zerokv::core::KVServer::lookup, "key"_a)
+        .def("list_keys", &zerokv::core::KVServer::list_keys);
 
-    nb::class_<zerokv::kv::KVNode>(m, "KVNode")
+    nb::class_<zerokv::core::KVNode>(m, "KVNode")
         .def(nb::new_([](std::optional<zerokv::Config> config) {
-            return zerokv::kv::KVNode::create(config.value_or(zerokv::Config{}));
+            return zerokv::core::KVNode::create(config.value_or(zerokv::Config{}));
         }), "config"_a = nb::none())
-        .def("start", [](zerokv::kv::KVNode& self,
+        .def("start", [](zerokv::core::KVNode& self,
                          const std::string& server_addr,
                          const std::string& local_data_addr,
                          const std::string& node_id) {
             nb::gil_scoped_release release;
-            return self.start(zerokv::kv::NodeConfig{server_addr, local_data_addr, node_id});
+            return self.start(zerokv::core::NodeConfig{server_addr, local_data_addr, node_id});
         }, "server_addr"_a, "local_data_addr"_a, "node_id"_a = "")
-        .def("stop", &zerokv::kv::KVNode::stop)
-        .def_prop_ro("is_running", &zerokv::kv::KVNode::is_running)
-        .def_prop_ro("node_id", &zerokv::kv::KVNode::node_id)
-        .def_prop_ro("published_count", &zerokv::kv::KVNode::published_count)
-        .def("last_publish_metrics", &zerokv::kv::KVNode::last_publish_metrics)
-        .def("last_fetch_metrics", &zerokv::kv::KVNode::last_fetch_metrics)
-        .def("last_push_metrics", &zerokv::kv::KVNode::last_push_metrics)
-        .def("drain_subscription_events", &zerokv::kv::KVNode::drain_subscription_events)
-        .def("publish", [](zerokv::kv::KVNode& self, const std::string& key, nb::handle buf) {
+        .def("stop", &zerokv::core::KVNode::stop)
+        .def_prop_ro("is_running", &zerokv::core::KVNode::is_running)
+        .def_prop_ro("node_id", &zerokv::core::KVNode::node_id)
+        .def_prop_ro("published_count", &zerokv::core::KVNode::published_count)
+        .def("last_publish_metrics", &zerokv::core::KVNode::last_publish_metrics)
+        .def("last_fetch_metrics", &zerokv::core::KVNode::last_fetch_metrics)
+        .def("last_push_metrics", &zerokv::core::KVNode::last_push_metrics)
+        .def("drain_subscription_events", &zerokv::core::KVNode::drain_subscription_events)
+        .def("publish", [](zerokv::core::KVNode& self, const std::string& key, nb::handle buf) {
             auto holder = BufferHolder::extract(buf);
             auto [ptr, len] = holder.get();
             nb::gil_scoped_release release;
             return self.publish(key, ptr, len);
         }, "key"_a, "buffer"_a)
-        .def("publish_region", [](zerokv::kv::KVNode& self,
+        .def("publish_region", [](zerokv::core::KVNode& self,
                                   const std::string& key,
                                   const std::shared_ptr<zerokv::MemoryRegion>& region,
                                   std::optional<size_t> size) {
             nb::gil_scoped_release release;
             return self.publish_region(key, region, size.value_or(region->length()));
         }, "key"_a, "region"_a, "size"_a = nb::none())
-        .def("fetch", [](zerokv::kv::KVNode& self, const std::string& key) {
+        .def("fetch", [](zerokv::core::KVNode& self, const std::string& key) {
             nb::gil_scoped_release release;
             return self.fetch(key);
         }, "key"_a)
-        .def("fetch_to", [](zerokv::kv::KVNode& self,
+        .def("fetch_to", [](zerokv::core::KVNode& self,
                             const std::string& key,
                             const std::shared_ptr<zerokv::MemoryRegion>& region,
                             size_t length,
@@ -523,7 +523,7 @@ NB_MODULE(_core, m) {
             nb::gil_scoped_release release;
             return self.fetch_to(key, region, length, local_offset);
         }, "key"_a, "region"_a, "length"_a, "local_offset"_a = 0)
-        .def("push", [](zerokv::kv::KVNode& self,
+        .def("push", [](zerokv::core::KVNode& self,
                         const std::string& target_node_id,
                         const std::string& key,
                         nb::handle buf) {
@@ -532,15 +532,15 @@ NB_MODULE(_core, m) {
             nb::gil_scoped_release release;
             return self.push(target_node_id, key, ptr, len);
         }, "target_node_id"_a, "key"_a, "buffer"_a)
-        .def("subscribe", [](zerokv::kv::KVNode& self, const std::string& key) {
+        .def("subscribe", [](zerokv::core::KVNode& self, const std::string& key) {
             nb::gil_scoped_release release;
             return self.subscribe(key);
         }, "key"_a)
-        .def("unsubscribe", [](zerokv::kv::KVNode& self, const std::string& key) {
+        .def("unsubscribe", [](zerokv::core::KVNode& self, const std::string& key) {
             nb::gil_scoped_release release;
             return self.unsubscribe(key);
         }, "key"_a)
-        .def("unpublish", [](zerokv::kv::KVNode& self, const std::string& key) {
+        .def("unpublish", [](zerokv::core::KVNode& self, const std::string& key) {
             nb::gil_scoped_release release;
             return self.unpublish(key);
         }, "key"_a);
@@ -598,14 +598,14 @@ NB_MODULE(_core, m) {
         .def("cancel", &zerokv::Future<std::shared_ptr<zerokv::Endpoint>>::cancel)
         .def_prop_ro("status", &zerokv::Future<std::shared_ptr<zerokv::Endpoint>>::status);
 
-    nb::class_<zerokv::Future<zerokv::kv::FetchResult>>(m, "FutureFetch")
-        .def("ready", &zerokv::Future<zerokv::kv::FetchResult>::ready)
-        .def("get", [](zerokv::Future<zerokv::kv::FetchResult>& self) {
+    nb::class_<zerokv::Future<zerokv::core::FetchResult>>(m, "FutureFetch")
+        .def("ready", &zerokv::Future<zerokv::core::FetchResult>::ready)
+        .def("get", [](zerokv::Future<zerokv::core::FetchResult>& self) {
             nb::gil_scoped_release release;
             return self.get();
         })
-        .def("cancel", &zerokv::Future<zerokv::kv::FetchResult>::cancel)
-        .def_prop_ro("status", &zerokv::Future<zerokv::kv::FetchResult>::status);
+        .def("cancel", &zerokv::Future<zerokv::core::FetchResult>::cancel)
+        .def_prop_ro("status", &zerokv::Future<zerokv::core::FetchResult>::status);
 
     // Note: MemoryPool, RegistrationCache, PluginRegistry bindings
     // will be added when the implementations are complete

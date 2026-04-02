@@ -64,13 +64,35 @@ TEST(KvCoreApiSurfaceTest, CoreHeadersCompile) {
     using zerokv::core::NodeConfig;
     using zerokv::core::ServerConfig;
 
-    static_assert(std::is_same_v<KVNode, zerokv::kv::KVNode>);
-    static_assert(std::is_same_v<KVServer, zerokv::kv::KVServer>);
+    static_assert(std::is_same_v<KVNode, zerokv::core::KVNode>);
+    static_assert(std::is_same_v<KVServer, zerokv::core::KVServer>);
 
     NodeConfig node_cfg;
     ServerConfig server_cfg;
     (void)node_cfg;
     (void)server_cfg;
+}
+
+TEST(KvCoreApiSurfaceTest, KvCompatibilityAliasStillCompiles) {
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    using zerokv::kv::KVNode;
+    using zerokv::kv::KVServer;
+    using zerokv::kv::NodeConfig;
+    using zerokv::kv::ServerConfig;
+
+    static_assert(std::is_same_v<KVNode, zerokv::core::KVNode>);
+    static_assert(std::is_same_v<KVServer, zerokv::core::KVServer>);
+
+    NodeConfig node_cfg;
+    ServerConfig server_cfg;
+    (void)node_cfg;
+    (void)server_cfg;
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 }
 
 TEST_F(MessageKvIntegrationTest, AllocateSendRegionRequiresRunningNode) {
@@ -81,7 +103,7 @@ TEST_F(MessageKvIntegrationTest, AllocateSendRegionRequiresRunningNode) {
 
 TEST_F(MessageKvIntegrationTest, AllocateSendRegionSucceedsAfterStart) {
     auto mq = zerokv::KV::create(cfg);
-    auto server = zerokv::kv::KVServer::create(cfg);
+    auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
     mq->start({server->address(), "127.0.0.1:0", "sender"});
@@ -122,7 +144,7 @@ TEST_F(MessageKvIntegrationTest, RecvRejectsEmptyKey) {
 
 TEST_F(MessageKvIntegrationTest, RecvBatchRejectsInvalidLayoutBeforeWaiting) {
     auto mq = zerokv::KV::create(cfg);
-    auto server = zerokv::kv::KVServer::create(cfg);
+    auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
     mq->start({server->address(), "127.0.0.1:0", "receiver"});
 
@@ -150,7 +172,7 @@ TEST_F(MessageKvIntegrationTest, StopBeforeStartIsSafe) {
 }
 
 TEST_F(MessageKvIntegrationTest, StartAndStopAreIdempotentEnoughForSingleLifecycle) {
-    auto server = zerokv::kv::KVServer::create(cfg);
+    auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
     auto mq = zerokv::KV::create(cfg);
@@ -161,7 +183,7 @@ TEST_F(MessageKvIntegrationTest, StartAndStopAreIdempotentEnoughForSingleLifecyc
 }
 
 TEST_F(MessageKvIntegrationTest, SenderCleanupRunsOnSubsequentSend) {
-    auto server = zerokv::kv::KVServer::create(cfg);
+    auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
     auto sender = zerokv::KV::create(cfg);
@@ -197,7 +219,7 @@ TEST_F(MessageKvIntegrationTest, SenderCleanupRunsOnSubsequentSend) {
 }
 
 TEST_F(MessageKvIntegrationTest, RecvCopiesSingleMessageIntoRegion) {
-    auto server = zerokv::kv::KVServer::create(cfg);
+    auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
     auto sender = zerokv::KV::create(cfg);
@@ -224,7 +246,7 @@ TEST_F(MessageKvIntegrationTest, RecvCopiesSingleMessageIntoRegion) {
 }
 
 TEST_F(MessageKvIntegrationTest, RecvBatchReturnsPartialTimeout) {
-    auto server = zerokv::kv::KVServer::create(cfg);
+    auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
     auto sender = zerokv::KV::create(cfg);
@@ -262,7 +284,7 @@ TEST_F(MessageKvIntegrationTest, RecvBatchAcknowledgesCompletedKeyBeforeBatchFin
                            .set_transport("tcp")
                            .set_connect_timeout(std::chrono::milliseconds(1000))
                            .build();
-    auto server = zerokv::kv::KVServer::create(timeout_cfg);
+    auto server = zerokv::core::KVServer::create(timeout_cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
     auto sender_a = zerokv::KV::create(timeout_cfg);
@@ -308,7 +330,7 @@ TEST_F(MessageKvIntegrationTest, RecvBatchAcknowledgesCompletedKeyBeforeBatchFin
 }
 
 TEST_F(MessageKvIntegrationTest, SendUnpublishesMessageKeyAfterAck) {
-    auto server = zerokv::kv::KVServer::create(cfg);
+    auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
     auto sender = zerokv::KV::create(cfg);
@@ -336,7 +358,7 @@ TEST_F(MessageKvIntegrationTest, SendUnpublishesMessageKeyAfterAck) {
 }
 
 TEST_F(MessageKvIntegrationTest, SendRegionUnpublishesMessageKeyAfterAck) {
-    auto server = zerokv::kv::KVServer::create(cfg);
+    auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
     auto sender = zerokv::KV::create(cfg);
@@ -372,7 +394,7 @@ TEST_F(MessageKvIntegrationTest, SendRequiresRunningNodeAndValidatesInputs) {
     expect_system_error_code([&] { mq->send("key", "x", 1); },
                              zerokv::ErrorCode::kConnectionRefused);
 
-    auto server = zerokv::kv::KVServer::create(cfg);
+    auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
     mq->start({server->address(), "127.0.0.1:0", "sender"});
 
@@ -388,7 +410,7 @@ TEST_F(MessageKvIntegrationTest, SendTimesOutWithoutAckAndCleansUpMessageKey) {
                                  .set_transport("tcp")
                                  .set_connect_timeout(std::chrono::milliseconds(50))
                                  .build();
-    auto server = zerokv::kv::KVServer::create(timeout_cfg);
+    auto server = zerokv::core::KVServer::create(timeout_cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
     auto sender = zerokv::KV::create(timeout_cfg);
@@ -414,7 +436,7 @@ TEST_F(MessageKvIntegrationTest, SendRegionRequiresRunningNodeAndValidatesInputs
     expect_system_error_code([&] { mq->send_region("key", region, 1); },
                              zerokv::ErrorCode::kConnectionRefused);
 
-    auto server = zerokv::kv::KVServer::create(cfg);
+    auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
     mq->start({server->address(), "127.0.0.1:0", "sender"});
 

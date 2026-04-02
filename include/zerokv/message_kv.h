@@ -38,7 +38,7 @@ public:
     KV(const KV&) = delete;
     KV& operator=(const KV&) = delete;
 
-    void start(const zerokv::kv::NodeConfig& cfg);
+    void start(const zerokv::core::NodeConfig& cfg);
     void stop();
 
     [[nodiscard]] zerokv::MemoryRegion::Ptr allocate_send_region(size_t size);

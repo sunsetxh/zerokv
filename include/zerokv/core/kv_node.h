@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-namespace zerokv::kv {
+namespace zerokv::core {
 
 class KVNode {
 public:
@@ -83,12 +83,12 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace zerokv::kv
+}  // namespace zerokv::core
 
 namespace zerokv {
-namespace core {
+namespace kv {
 
-using KVNode = ::zerokv::kv::KVNode;
+using KVNode [[deprecated("use zerokv::core::KVNode")]] = ::zerokv::core::KVNode;
 
-}  // namespace core
+}  // namespace kv
 }  // namespace zerokv

@@ -92,7 +92,7 @@ struct KV::Impl {
     explicit Impl(const zerokv::Config& config) : cfg(config) {}
 
     zerokv::Config cfg;
-    zerokv::kv::KVNode::Ptr node;
+    zerokv::core::KVNode::Ptr node;
     std::mutex mu;
     bool running = false;
     std::vector<std::string> owned_ack_keys;
@@ -252,13 +252,13 @@ KV::Ptr KV::create(const zerokv::Config& cfg) {
     return Ptr(new KV(cfg));
 }
 
-void KV::start(const zerokv::kv::NodeConfig& cfg) {
+void KV::start(const zerokv::core::NodeConfig& cfg) {
     std::lock_guard<std::mutex> lock(impl_->mu);
     if (impl_->running) {
         return;
     }
 
-    impl_->node = zerokv::kv::KVNode::create(impl_->cfg);
+    impl_->node = zerokv::core::KVNode::create(impl_->cfg);
     auto status = impl_->node->start(cfg);
     status.throw_if_error();
     impl_->running = true;

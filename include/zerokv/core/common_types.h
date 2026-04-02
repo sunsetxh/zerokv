@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace zerokv::kv {
+namespace zerokv::core {
 
 struct KeyInfo {
     std::string key;
@@ -110,23 +110,32 @@ struct NodeConfig {
     std::string node_id;
 };
 
-}  // namespace zerokv::kv
-
-namespace zerokv::core {
-
-using KeyInfo = ::zerokv::kv::KeyInfo;
-using FetchResult = ::zerokv::kv::FetchResult;
-using FetchToItem = ::zerokv::kv::FetchToItem;
-using FetchToManyResult = ::zerokv::kv::FetchToManyResult;
-using WaitKeysResult = ::zerokv::kv::WaitKeysResult;
-using BatchFetchResult = ::zerokv::kv::BatchFetchResult;
-using BatchFetchToResult = ::zerokv::kv::BatchFetchToResult;
-using PublishMetrics = ::zerokv::kv::PublishMetrics;
-using FetchMetrics = ::zerokv::kv::FetchMetrics;
-using PushMetrics = ::zerokv::kv::PushMetrics;
-using SubscriptionEventType = ::zerokv::kv::SubscriptionEventType;
-using SubscriptionEvent = ::zerokv::kv::SubscriptionEvent;
-using ServerConfig = ::zerokv::kv::ServerConfig;
-using NodeConfig = ::zerokv::kv::NodeConfig;
-
 }  // namespace zerokv::core
+
+namespace zerokv {
+namespace kv {
+
+using KeyInfo [[deprecated("use zerokv::core::KeyInfo")]] = ::zerokv::core::KeyInfo;
+using FetchResult [[deprecated("use zerokv::core::FetchResult")]] = ::zerokv::core::FetchResult;
+using FetchToItem [[deprecated("use zerokv::core::FetchToItem")]] = ::zerokv::core::FetchToItem;
+using FetchToManyResult [[deprecated("use zerokv::core::FetchToManyResult")]] =
+    ::zerokv::core::FetchToManyResult;
+using WaitKeysResult [[deprecated("use zerokv::core::WaitKeysResult")]] =
+    ::zerokv::core::WaitKeysResult;
+using BatchFetchResult [[deprecated("use zerokv::core::BatchFetchResult")]] =
+    ::zerokv::core::BatchFetchResult;
+using BatchFetchToResult [[deprecated("use zerokv::core::BatchFetchToResult")]] =
+    ::zerokv::core::BatchFetchToResult;
+using PublishMetrics [[deprecated("use zerokv::core::PublishMetrics")]] =
+    ::zerokv::core::PublishMetrics;
+using FetchMetrics [[deprecated("use zerokv::core::FetchMetrics")]] = ::zerokv::core::FetchMetrics;
+using PushMetrics [[deprecated("use zerokv::core::PushMetrics")]] = ::zerokv::core::PushMetrics;
+using SubscriptionEventType [[deprecated("use zerokv::core::SubscriptionEventType")]] =
+    ::zerokv::core::SubscriptionEventType;
+using SubscriptionEvent [[deprecated("use zerokv::core::SubscriptionEvent")]] =
+    ::zerokv::core::SubscriptionEvent;
+using ServerConfig [[deprecated("use zerokv::core::ServerConfig")]] = ::zerokv::core::ServerConfig;
+using NodeConfig [[deprecated("use zerokv::core::NodeConfig")]] = ::zerokv::core::NodeConfig;
+
+}  // namespace kv
+}  // namespace zerokv

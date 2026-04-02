@@ -10,9 +10,9 @@
 
 namespace {
 
-using zerokv::kv::KVServer;
-using zerokv::kv::ServerConfig;
-namespace proto = zerokv::kv::detail;
+using zerokv::core::KVServer;
+using zerokv::core::ServerConfig;
+namespace proto = zerokv::core::detail;
 
 template <typename Request>
 std::vector<uint8_t> make_frame(proto::MsgType type, uint64_t request_id, const Request& req) {

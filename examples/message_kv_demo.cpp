@@ -17,7 +17,7 @@
 #include <vector>
 
 using namespace zerokv;
-using namespace zerokv::kv;
+using namespace zerokv::core;
 
 namespace zerokv::examples::message_kv_demo {
 
@@ -283,7 +283,7 @@ int run_rank0(const Args& args, const Config& cfg) {
         return 1;
     }
 
-    auto mq = MessageKV::create(cfg);
+    auto mq = KV::create(cfg);
     try {
         mq->start(NodeConfig{
             .server_addr = server->address(),
@@ -302,7 +302,7 @@ int run_rank0(const Args& args, const Config& cfg) {
                          bool print_summary) -> bool {
         const size_t total_bytes = size_bytes * static_cast<size_t>(args.messages);
 
-        std::vector<MessageKV::BatchRecvItem> items;
+        std::vector<KV::BatchRecvItem> items;
         std::vector<std::string> keys;
         std::vector<std::string> payloads;
         items.reserve(static_cast<size_t>(args.messages));
@@ -316,7 +316,7 @@ int run_rank0(const Args& args, const Config& cfg) {
                 protocol_round_index, size_bytes, static_cast<size_t>(i));
             keys.push_back(key);
             payloads.push_back(payload);
-            items.push_back(MessageKV::BatchRecvItem{
+            items.push_back(KV::BatchRecvItem{
                 .key = key,
                 .length = size_bytes,
                 .offset = static_cast<size_t>(i) * size_bytes,
@@ -426,9 +426,9 @@ int run_rank1(const Args& args, const Config& cfg) {
     const auto max_size_bytes = zerokv::examples::message_kv_demo::max_size_bytes_for_sizes(sizes);
 
     std::vector<MemoryRegion::Ptr> workers_region(static_cast<size_t>(args.threads));
-    std::vector<MessageKV::Ptr> workers_mq(static_cast<size_t>(args.threads));
+    std::vector<KV::Ptr> workers_mq(static_cast<size_t>(args.threads));
     for (int i = 0; i < args.threads; ++i) {
-        workers_mq[static_cast<size_t>(i)] = MessageKV::create(cfg);
+        workers_mq[static_cast<size_t>(i)] = KV::create(cfg);
         workers_mq[static_cast<size_t>(i)]->start(NodeConfig{
             .server_addr = args.server_addr,
             .local_data_addr = args.data_addr,

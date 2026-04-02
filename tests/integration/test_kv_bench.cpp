@@ -8,11 +8,11 @@
 TEST(KvBenchIntegrationTest, HoldOwnerPublishesStableKeys) {
     const auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
-    auto server = zerokv::kv::KVServer::create(cfg);
-    ASSERT_TRUE(server->start(zerokv::kv::ServerConfig{"127.0.0.1:0"}).ok());
+    auto server = zerokv::core::KVServer::create(cfg);
+    ASSERT_TRUE(server->start(zerokv::core::ServerConfig{"127.0.0.1:0"}).ok());
 
-    auto owner = zerokv::kv::KVNode::create(cfg);
-    ASSERT_TRUE(owner->start(zerokv::kv::NodeConfig{
+    auto owner = zerokv::core::KVNode::create(cfg);
+    ASSERT_TRUE(owner->start(zerokv::core::NodeConfig{
         .server_addr = server->address(),
         .local_data_addr = "127.0.0.1:0",
         .node_id = "bench-owner",
@@ -33,11 +33,11 @@ TEST(KvBenchIntegrationTest, HoldOwnerPublishesStableKeys) {
 TEST(KvBenchIntegrationTest, PublishBenchmarkCompletesSingleSizeSweep) {
     const auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
-    auto server = zerokv::kv::KVServer::create(cfg);
-    ASSERT_TRUE(server->start(zerokv::kv::ServerConfig{"127.0.0.1:0"}).ok());
+    auto server = zerokv::core::KVServer::create(cfg);
+    ASSERT_TRUE(server->start(zerokv::core::ServerConfig{"127.0.0.1:0"}).ok());
 
-    auto node = zerokv::kv::KVNode::create(cfg);
-    ASSERT_TRUE(node->start(zerokv::kv::NodeConfig{
+    auto node = zerokv::core::KVNode::create(cfg);
+    ASSERT_TRUE(node->start(zerokv::core::NodeConfig{
         .server_addr = server->address(),
         .local_data_addr = "127.0.0.1:0",
         .node_id = "bench-publish-node",
@@ -64,11 +64,11 @@ TEST(KvBenchIntegrationTest, PublishBenchmarkCompletesSingleSizeSweep) {
 TEST(KvBenchIntegrationTest, PublishRegionBenchmarkPathCompletesSingleSizeSweep) {
     const auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
-    auto server = zerokv::kv::KVServer::create(cfg);
-    ASSERT_TRUE(server->start(zerokv::kv::ServerConfig{"127.0.0.1:0"}).ok());
+    auto server = zerokv::core::KVServer::create(cfg);
+    ASSERT_TRUE(server->start(zerokv::core::ServerConfig{"127.0.0.1:0"}).ok());
 
-    auto node = zerokv::kv::KVNode::create(cfg);
-    ASSERT_TRUE(node->start(zerokv::kv::NodeConfig{
+    auto node = zerokv::core::KVNode::create(cfg);
+    ASSERT_TRUE(node->start(zerokv::core::NodeConfig{
         .server_addr = server->address(),
         .local_data_addr = "127.0.0.1:0",
         .node_id = "bench-publish-region-node",
@@ -99,15 +99,15 @@ TEST(KvBenchIntegrationTest, PublishRegionBenchmarkPathCompletesSingleSizeSweep)
 }
 
 TEST(KvBenchIntegrationTest, RenderedTablesUseMiBpsHeader) {
-    std::vector<zerokv::kv::detail::PublishBenchRow> publish_rows{
+    std::vector<zerokv::core::detail::PublishBenchRow> publish_rows{
         {.size_bytes = 4096, .iterations = 1, .avg_total_us = 1.0, .throughput_MiBps = 1.0},
     };
-    std::vector<zerokv::kv::detail::FetchBenchRow> fetch_rows{
+    std::vector<zerokv::core::detail::FetchBenchRow> fetch_rows{
         {.size_bytes = 4096, .iterations = 1, .avg_total_us = 1.0, .throughput_MiBps = 1.0},
     };
 
-    const auto publish_table = zerokv::kv::detail::render_publish_rows(publish_rows);
-    const auto fetch_table = zerokv::kv::detail::render_fetch_rows(fetch_rows);
+    const auto publish_table = zerokv::core::detail::render_publish_rows(publish_rows);
+    const auto fetch_table = zerokv::core::detail::render_fetch_rows(fetch_rows);
 
     EXPECT_NE(publish_table.find("throughput_MiBps"), std::string::npos);
     EXPECT_NE(fetch_table.find("throughput_MiBps"), std::string::npos);
@@ -118,17 +118,17 @@ TEST(KvBenchIntegrationTest, RenderedTablesUseMiBpsHeader) {
 TEST(KvBenchIntegrationTest, FetchToSmoke) {
     const auto cfg = zerokv::Config::builder().set_transport("tcp").build();
 
-    auto server = zerokv::kv::KVServer::create(cfg);
-    ASSERT_TRUE(server->start(zerokv::kv::ServerConfig{"127.0.0.1:0"}).ok());
+    auto server = zerokv::core::KVServer::create(cfg);
+    ASSERT_TRUE(server->start(zerokv::core::ServerConfig{"127.0.0.1:0"}).ok());
 
-    auto owner = zerokv::kv::KVNode::create(cfg);
-    auto reader = zerokv::kv::KVNode::create(cfg);
-    ASSERT_TRUE(owner->start(zerokv::kv::NodeConfig{
+    auto owner = zerokv::core::KVNode::create(cfg);
+    auto reader = zerokv::core::KVNode::create(cfg);
+    ASSERT_TRUE(owner->start(zerokv::core::NodeConfig{
         .server_addr = server->address(),
         .local_data_addr = "127.0.0.1:0",
         .node_id = "bench-owner-fetch-to",
     }).ok());
-    ASSERT_TRUE(reader->start(zerokv::kv::NodeConfig{
+    ASSERT_TRUE(reader->start(zerokv::core::NodeConfig{
         .server_addr = server->address(),
         .local_data_addr = "127.0.0.1:0",
         .node_id = "bench-reader-fetch-to",

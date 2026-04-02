@@ -35,7 +35,7 @@
 #include <thread>
 
 using namespace zerokv;
-using namespace zerokv::kv;
+using namespace zerokv::core;
 
 namespace {
 

@@ -13,11 +13,11 @@
 
 namespace {
 
-using zerokv::kv::KVNode;
-using zerokv::kv::KVServer;
-using zerokv::kv::NodeConfig;
-using zerokv::kv::ServerConfig;
-namespace proto = zerokv::kv::detail;
+using zerokv::core::KVNode;
+using zerokv::core::KVServer;
+using zerokv::core::NodeConfig;
+using zerokv::core::ServerConfig;
+namespace proto = zerokv::core::detail;
 
 std::optional<proto::GetMetaResponse> get_meta(const std::string& server_addr,
                                                const std::string& key,
@@ -79,11 +79,11 @@ std::optional<proto::GetPushTargetResponse> get_push_target(const std::string& s
     return proto::decode_get_push_target_response(payload);
 }
 
-std::vector<zerokv::kv::SubscriptionEvent> drain_until_count(const KVNode::Ptr& node,
+std::vector<zerokv::core::SubscriptionEvent> drain_until_count(const KVNode::Ptr& node,
                                                            size_t expected_count,
                                                            std::chrono::milliseconds timeout = std::chrono::milliseconds(1000)) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
-    std::vector<zerokv::kv::SubscriptionEvent> all;
+    std::vector<zerokv::core::SubscriptionEvent> all;
     while (std::chrono::steady_clock::now() < deadline) {
         auto drained = node->drain_subscription_events();
         all.insert(all.end(), drained.begin(), drained.end());
@@ -642,11 +642,11 @@ TEST(KvNodeIntegrationTest, SubscriptionReceivesPublishedAndUpdatedEvents) {
 
     auto events = drain_until_count(subscriber, 2);
     ASSERT_EQ(events.size(), 2u);
-    EXPECT_EQ(events[0].type, zerokv::kv::SubscriptionEventType::kPublished);
+    EXPECT_EQ(events[0].type, zerokv::core::SubscriptionEventType::kPublished);
     EXPECT_EQ(events[0].key, "alpha");
     EXPECT_EQ(events[0].owner_node_id, "sub-publisher-a");
     EXPECT_EQ(events[0].version, 1u);
-    EXPECT_EQ(events[1].type, zerokv::kv::SubscriptionEventType::kUpdated);
+    EXPECT_EQ(events[1].type, zerokv::core::SubscriptionEventType::kUpdated);
     EXPECT_EQ(events[1].version, 2u);
 
     subscriber->stop();
@@ -688,8 +688,8 @@ TEST(KvNodeIntegrationTest, SubscriptionReceivesUnpublishedEvent) {
 
     auto events = drain_until_count(subscriber, 2);
     ASSERT_EQ(events.size(), 2u);
-    EXPECT_EQ(events[0].type, zerokv::kv::SubscriptionEventType::kPublished);
-    EXPECT_EQ(events[1].type, zerokv::kv::SubscriptionEventType::kUnpublished);
+    EXPECT_EQ(events[0].type, zerokv::core::SubscriptionEventType::kPublished);
+    EXPECT_EQ(events[1].type, zerokv::core::SubscriptionEventType::kUnpublished);
     EXPECT_EQ(events[1].key, "beta");
     EXPECT_EQ(events[1].owner_node_id, "sub-publisher-b");
 
@@ -731,8 +731,8 @@ TEST(KvNodeIntegrationTest, SubscriptionReceivesOwnerLostEvent) {
 
     auto events = drain_until_count(subscriber, 2);
     ASSERT_EQ(events.size(), 2u);
-    EXPECT_EQ(events[0].type, zerokv::kv::SubscriptionEventType::kPublished);
-    EXPECT_EQ(events[1].type, zerokv::kv::SubscriptionEventType::kOwnerLost);
+    EXPECT_EQ(events[0].type, zerokv::core::SubscriptionEventType::kPublished);
+    EXPECT_EQ(events[1].type, zerokv::core::SubscriptionEventType::kOwnerLost);
     EXPECT_EQ(events[1].key, "gamma");
     EXPECT_EQ(events[1].owner_node_id, "sub-publisher-c");
 
@@ -771,7 +771,7 @@ TEST(KvNodeIntegrationTest, UnsubscribeStopsFutureSubscriptionEvents) {
 
     auto first_events = drain_until_count(subscriber, 1);
     ASSERT_EQ(first_events.size(), 1u);
-    EXPECT_EQ(first_events[0].type, zerokv::kv::SubscriptionEventType::kPublished);
+    EXPECT_EQ(first_events[0].type, zerokv::core::SubscriptionEventType::kPublished);
 
     auto unsubscribe = subscriber->unsubscribe("delta");
     ASSERT_TRUE(unsubscribe.status().ok());
@@ -1244,7 +1244,7 @@ TEST(KvNodeIntegrationTest, WaitForAnySubscriptionEventReturnsMatchingKey) {
     sub_a.get();
     sub_b.get();
 
-    std::optional<zerokv::kv::SubscriptionEvent> observed;
+    std::optional<zerokv::core::SubscriptionEvent> observed;
     std::thread waiter([&] {
         observed = reader->wait_for_any_subscription_event(
             {"any-a", "any-b"}, std::chrono::milliseconds(1000));
@@ -1258,7 +1258,7 @@ TEST(KvNodeIntegrationTest, WaitForAnySubscriptionEventReturnsMatchingKey) {
 
     ASSERT_TRUE(observed.has_value());
     EXPECT_EQ(observed->key, "any-b");
-    EXPECT_EQ(observed->type, zerokv::kv::SubscriptionEventType::kPublished);
+    EXPECT_EQ(observed->type, zerokv::core::SubscriptionEventType::kPublished);
 
     auto unsub_a = reader->unsubscribe("any-a");
     auto unsub_b = reader->unsubscribe("any-b");
@@ -1582,7 +1582,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyPreservesPreExistingSubsc
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     auto events = drain_until_count(reader, 1, std::chrono::milliseconds(500));
     ASSERT_FALSE(events.empty());
-    EXPECT_EQ(events.back().type, zerokv::kv::SubscriptionEventType::kUnpublished);
+    EXPECT_EQ(events.back().type, zerokv::core::SubscriptionEventType::kUnpublished);
     EXPECT_EQ(events.back().key, "sft-preserve");
 
     auto unsubscribe_future = reader->unsubscribe("sft-preserve");
