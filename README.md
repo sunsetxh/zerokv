@@ -182,7 +182,7 @@ the application already owns unique keys.
 scenario. The default sweep list is `1K,64K,1M,4M,16M,32M,64M,128M`.
 
 - `RANK0` runs `KVServer + MessageKV receiver` in one process
-- `RANK1` sends 4 messages per round from 4 threads
+- `RANK1` sends one message per round from 4 threads, reusing a preallocated send buffer per thread
 - both sides default to `--warmup-rounds 1`, reusing MessageKV instances across
   rounds so the measured rounds are closer to steady-state behavior
 - the last round allocates about `4 * 128MiB = 512MiB` of receive region in total
@@ -253,7 +253,7 @@ Implementation note:
 - `MessageKV` Phase 1 serializes public calls inside one wrapper instance.
 - To stay close to the real multi-threaded sender pattern, the demo gives each
   sender thread its own `MessageKV` instance and node id.
-- `send()` is synchronous with receiver acknowledgement:
+- `send_region()` is synchronous with receiver acknowledgement:
   the sender publishes the message key, waits for the receiver's internal ack
   key, then unpublishes the message key before returning.
 
