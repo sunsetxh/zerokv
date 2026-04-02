@@ -213,6 +213,42 @@ Present in the repository:
 - Python bindings [src/python/bindings.cpp](/Users/wangyuchao/code/axon/src/python/bindings.cpp)
 - plugin integrations under [src/plugin](/Users/wangyuchao/code/axon/src/plugin)
 
+### MessageKV Steady-State Notes
+
+Recent MessageKV tuning confirmed two practical points for the current large-message
+path:
+
+- `send_region()` plus preallocated send buffers is the intended steady-state sender path
+- the two-node `message_kv_demo` should also reuse one receive region across
+  measured rounds on `RANK0`
+
+That second point matters because re-registering a large receive region every
+round can dominate the sender-observed latency even when the receiver's
+`recv_batch()` itself is already fast. In real-environment measurements, a
+per-round receive-region allocation on `RANK0` produced an artificial fixed
+delay of about 2 seconds for `1MiB+` sender rounds. Reusing the receive region
+across rounds removed that false bottleneck.
+
+After the fix, the latest real-environment `message_kv_demo` numbers show:
+
+| size | sender throughput (`SEND_ROUND`) | receiver throughput (`RECV_ROUND`) |
+|---|---:|---:|
+| 64K | 201.776 MiB/s | 211.685 MiB/s |
+| 1M | 982.56 MiB/s | 3189.79 MiB/s |
+| 4M | 1634.32 MiB/s | 5710.21 MiB/s |
+| 16M | 3204.97 MiB/s | 8116.68 MiB/s |
+| 32M | 3607.56 MiB/s | 8607.36 MiB/s |
+| 64M | 3966.05 MiB/s | 8932.62 MiB/s |
+| 128M | 3851.74 MiB/s | 9183.2 MiB/s |
+
+Interpretation:
+
+- the receiver side is no longer showing an obvious steady-state anomaly for `1MiB+`
+- the sender side is still slower than pure `fetch_to` benchmarks because
+  `send_region()` remains synchronous with ack and cleanup semantics
+- current large-payload optimization work should therefore focus more on sender
+  control-path cost than on receiver data-path correctness
+
 ## Known Gaps and Unimplemented Items
 
 ### Public API Present but Not Implemented

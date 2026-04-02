@@ -185,9 +185,13 @@ scenario. The default sweep list is `1K,64K,1M,4M,16M,32M,64M,128M`.
 - `RANK1` sends one message per round from 4 threads, reusing a preallocated send buffer per thread
 - both sides default to `--warmup-rounds 1`, reusing MessageKV instances across
   rounds so the measured rounds are closer to steady-state behavior
-- the last round allocates about `4 * 128MiB = 512MiB` of receive region in total
+- `RANK0` preallocates one receive region sized to `messages * max(--sizes)` and
+  reuses it across measured rounds; `RANK1` does the same for per-thread send buffers
+- the last round still needs about `4 * 128MiB = 512MiB` of receive payload space
 - the warmup rounds use the first size in `--sizes` and do not print
   `SEND_ROUND` / `RECV_ROUND`
+- `--post-recv-wait-ms` is applied once after the measured sweep completes; it is
+  not inserted between measured rounds
 - if you want raw cold-start behavior, set `--warmup-rounds 0`
 
 Build:
@@ -243,9 +247,9 @@ Expected sender output per round also includes per-thread send latency and one
 aggregate summary:
 
 ```text
-SEND_OK key=msg-round0-size1024-thread0 value=<1024-byte payload> send_us=...
+SEND_OK key=msg-round0-size1024-thread0 bytes=1024 send_us=...
 ...
-SEND_ROUND round=0 size=1024 messages=4 send_total_us=... max_thread_send_us=... total_bytes=4096 throughput_MiBps=...
+SEND_ROUND round=0 protocol_round=1 size=1024 messages=4 send_total_us=... max_thread_send_us=... total_bytes=4096 throughput_MiBps=...
 ```
 
 Implementation note:
