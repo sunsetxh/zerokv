@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <system_error>
 #include <thread>
+#include <type_traits>
 
 class MessageKvIntegrationTest : public ::testing::Test {
 protected:
@@ -27,26 +28,42 @@ void expect_system_error_code(const std::function<void()>& fn, zerokv::ErrorCode
 }  // namespace
 
 TEST(MessageKvApiSurfaceTest, PublicTypesExist) {
-    using zerokv::MessageKV;
+    using zerokv::KV;
 
-    MessageKV::BatchRecvItem item;
+    KV::BatchRecvItem item;
     item.key = "k";
     item.length = 16;
     item.offset = 0;
 
-    MessageKV::BatchRecvResult result;
+    KV::BatchRecvResult result;
     EXPECT_TRUE(result.completed.empty());
     EXPECT_FALSE(result.completed_all);
 }
 
+TEST(MessageKvApiSurfaceTest, MessageKvCompatibilityAliasStillCompiles) {
+    using zerokv::KV;
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    using zerokv::MessageKV;
+    static_assert(std::is_same_v<MessageKV, KV>);
+    MessageKV::BatchRecvItem item;
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+    item.key = "compat";
+    EXPECT_EQ(item.key, "compat");
+}
+
 TEST_F(MessageKvIntegrationTest, AllocateSendRegionRequiresRunningNode) {
-    auto mq = zerokv::MessageKV::create(cfg);
+    auto mq = zerokv::KV::create(cfg);
     expect_system_error_code([&] { (void)mq->allocate_send_region(1024); },
                              zerokv::ErrorCode::kConnectionRefused);
 }
 
 TEST_F(MessageKvIntegrationTest, AllocateSendRegionSucceedsAfterStart) {
-    auto mq = zerokv::MessageKV::create(cfg);
+    auto mq = zerokv::KV::create(cfg);
     auto server = zerokv::kv::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
@@ -60,7 +77,7 @@ TEST_F(MessageKvIntegrationTest, AllocateSendRegionSucceedsAfterStart) {
 }
 
 TEST_F(MessageKvIntegrationTest, SendRejectsEmptyKey) {
-    auto mq = zerokv::MessageKV::create(cfg);
+    auto mq = zerokv::KV::create(cfg);
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
@@ -74,7 +91,7 @@ TEST_F(MessageKvIntegrationTest, SendRejectsEmptyKey) {
 }
 
 TEST_F(MessageKvIntegrationTest, RecvRejectsEmptyKey) {
-    auto mq = zerokv::MessageKV::create(cfg);
+    auto mq = zerokv::KV::create(cfg);
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
@@ -87,7 +104,7 @@ TEST_F(MessageKvIntegrationTest, RecvRejectsEmptyKey) {
 }
 
 TEST_F(MessageKvIntegrationTest, RecvBatchRejectsInvalidLayoutBeforeWaiting) {
-    auto mq = zerokv::MessageKV::create(cfg);
+    auto mq = zerokv::KV::create(cfg);
     auto server = zerokv::kv::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
     mq->start({server->address(), "127.0.0.1:0", "receiver"});
@@ -111,7 +128,7 @@ TEST_F(MessageKvIntegrationTest, RecvBatchRejectsInvalidLayoutBeforeWaiting) {
 }
 
 TEST_F(MessageKvIntegrationTest, StopBeforeStartIsSafe) {
-    auto mq = zerokv::MessageKV::create(cfg);
+    auto mq = zerokv::KV::create(cfg);
     EXPECT_NO_THROW(mq->stop());
 }
 
@@ -119,7 +136,7 @@ TEST_F(MessageKvIntegrationTest, StartAndStopAreIdempotentEnoughForSingleLifecyc
     auto server = zerokv::kv::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
-    auto mq = zerokv::MessageKV::create(cfg);
+    auto mq = zerokv::KV::create(cfg);
     EXPECT_NO_THROW(mq->start({server->address(), "127.0.0.1:0", "mq-node"}));
     EXPECT_NO_THROW(mq->stop());
 
@@ -130,8 +147,8 @@ TEST_F(MessageKvIntegrationTest, SenderCleanupRunsOnSubsequentSend) {
     auto server = zerokv::kv::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
-    auto sender = zerokv::MessageKV::create(cfg);
-    auto receiver = zerokv::MessageKV::create(cfg);
+    auto sender = zerokv::KV::create(cfg);
+    auto receiver = zerokv::KV::create(cfg);
     sender->start({server->address(), "127.0.0.1:0", "sender"});
     receiver->start({server->address(), "127.0.0.1:0", "receiver"});
 
@@ -166,8 +183,8 @@ TEST_F(MessageKvIntegrationTest, RecvCopiesSingleMessageIntoRegion) {
     auto server = zerokv::kv::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
-    auto sender = zerokv::MessageKV::create(cfg);
-    auto receiver = zerokv::MessageKV::create(cfg);
+    auto sender = zerokv::KV::create(cfg);
+    auto receiver = zerokv::KV::create(cfg);
     sender->start({server->address(), "127.0.0.1:0", "sender"});
     receiver->start({server->address(), "127.0.0.1:0", "receiver"});
 
@@ -193,8 +210,8 @@ TEST_F(MessageKvIntegrationTest, RecvBatchReturnsPartialTimeout) {
     auto server = zerokv::kv::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
-    auto sender = zerokv::MessageKV::create(cfg);
-    auto receiver = zerokv::MessageKV::create(cfg);
+    auto sender = zerokv::KV::create(cfg);
+    auto receiver = zerokv::KV::create(cfg);
     sender->start({server->address(), "127.0.0.1:0", "sender"});
     receiver->start({server->address(), "127.0.0.1:0", "receiver"});
 
@@ -231,9 +248,9 @@ TEST_F(MessageKvIntegrationTest, RecvBatchAcknowledgesCompletedKeyBeforeBatchFin
     auto server = zerokv::kv::KVServer::create(timeout_cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
-    auto sender_a = zerokv::MessageKV::create(timeout_cfg);
-    auto sender_b = zerokv::MessageKV::create(timeout_cfg);
-    auto receiver = zerokv::MessageKV::create(timeout_cfg);
+    auto sender_a = zerokv::KV::create(timeout_cfg);
+    auto sender_b = zerokv::KV::create(timeout_cfg);
+    auto receiver = zerokv::KV::create(timeout_cfg);
     sender_a->start({server->address(), "127.0.0.1:0", "sender-a"});
     sender_b->start({server->address(), "127.0.0.1:0", "sender-b"});
     receiver->start({server->address(), "127.0.0.1:0", "receiver"});
@@ -277,8 +294,8 @@ TEST_F(MessageKvIntegrationTest, SendUnpublishesMessageKeyAfterAck) {
     auto server = zerokv::kv::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
-    auto sender = zerokv::MessageKV::create(cfg);
-    auto receiver = zerokv::MessageKV::create(cfg);
+    auto sender = zerokv::KV::create(cfg);
+    auto receiver = zerokv::KV::create(cfg);
     sender->start({server->address(), "127.0.0.1:0", "sender"});
     receiver->start({server->address(), "127.0.0.1:0", "receiver"});
 
@@ -305,8 +322,8 @@ TEST_F(MessageKvIntegrationTest, SendRegionUnpublishesMessageKeyAfterAck) {
     auto server = zerokv::kv::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
-    auto sender = zerokv::MessageKV::create(cfg);
-    auto receiver = zerokv::MessageKV::create(cfg);
+    auto sender = zerokv::KV::create(cfg);
+    auto receiver = zerokv::KV::create(cfg);
     sender->start({server->address(), "127.0.0.1:0", "sender"});
     receiver->start({server->address(), "127.0.0.1:0", "receiver"});
 
@@ -334,7 +351,7 @@ TEST_F(MessageKvIntegrationTest, SendRegionUnpublishesMessageKeyAfterAck) {
 }
 
 TEST_F(MessageKvIntegrationTest, SendRequiresRunningNodeAndValidatesInputs) {
-    auto mq = zerokv::MessageKV::create(cfg);
+    auto mq = zerokv::KV::create(cfg);
     expect_system_error_code([&] { mq->send("key", "x", 1); },
                              zerokv::ErrorCode::kConnectionRefused);
 
@@ -357,7 +374,7 @@ TEST_F(MessageKvIntegrationTest, SendTimesOutWithoutAckAndCleansUpMessageKey) {
     auto server = zerokv::kv::KVServer::create(timeout_cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
-    auto sender = zerokv::MessageKV::create(timeout_cfg);
+    auto sender = zerokv::KV::create(timeout_cfg);
     sender->start({server->address(), "127.0.0.1:0", "sender"});
 
     expect_system_error_code([&] { sender->send("timeout-key", "x", 1); },
@@ -371,7 +388,7 @@ TEST_F(MessageKvIntegrationTest, SendTimesOutWithoutAckAndCleansUpMessageKey) {
 }
 
 TEST_F(MessageKvIntegrationTest, SendRegionRequiresRunningNodeAndValidatesInputs) {
-    auto mq = zerokv::MessageKV::create(cfg);
+    auto mq = zerokv::KV::create(cfg);
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
     auto region = zerokv::MemoryRegion::allocate(ctx, 8);

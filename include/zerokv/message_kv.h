@@ -14,9 +14,9 @@
 
 namespace zerokv {
 
-class MessageKV {
+class KV {
 public:
-    using Ptr = std::shared_ptr<MessageKV>;
+    using Ptr = std::shared_ptr<KV>;
 
     struct BatchRecvItem {
         std::string key;
@@ -33,9 +33,9 @@ public:
 
     static Ptr create(const zerokv::Config& cfg = {});
 
-    ~MessageKV();
-    MessageKV(const MessageKV&) = delete;
-    MessageKV& operator=(const MessageKV&) = delete;
+    ~KV();
+    KV(const KV&) = delete;
+    KV& operator=(const KV&) = delete;
 
     void start(const zerokv::kv::NodeConfig& cfg);
     void stop();
@@ -58,9 +58,11 @@ public:
                                std::chrono::milliseconds timeout);
 
 private:
-    explicit MessageKV(const zerokv::Config& cfg);
+    explicit KV(const zerokv::Config& cfg);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+using MessageKV [[deprecated("use zerokv::KV")]] = KV;
 
 }  // namespace zerokv

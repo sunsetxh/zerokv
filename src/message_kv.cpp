@@ -45,7 +45,7 @@ struct RecvRange {
     size_t end = 0;
 };
 
-void validate_recv_batch_layout(const std::vector<MessageKV::BatchRecvItem>& items,
+void validate_recv_batch_layout(const std::vector<KV::BatchRecvItem>& items,
                                 const zerokv::MemoryRegion::Ptr& region) {
     if (!region) {
         Status(ErrorCode::kInvalidArgument, "local region is required").throw_if_error();
@@ -88,7 +88,7 @@ void validate_recv_batch_layout(const std::vector<MessageKV::BatchRecvItem>& ite
 
 }  // namespace
 
-struct MessageKV::Impl {
+struct KV::Impl {
     explicit Impl(const zerokv::Config& config) : cfg(config) {}
 
     zerokv::Config cfg;
@@ -245,14 +245,14 @@ struct MessageKV::Impl {
     }
 };
 
-MessageKV::MessageKV(const zerokv::Config& cfg) : impl_(std::make_unique<Impl>(cfg)) {}
-MessageKV::~MessageKV() = default;
+KV::KV(const zerokv::Config& cfg) : impl_(std::make_unique<Impl>(cfg)) {}
+KV::~KV() = default;
 
-MessageKV::Ptr MessageKV::create(const zerokv::Config& cfg) {
-    return Ptr(new MessageKV(cfg));
+KV::Ptr KV::create(const zerokv::Config& cfg) {
+    return Ptr(new KV(cfg));
 }
 
-void MessageKV::start(const zerokv::kv::NodeConfig& cfg) {
+void KV::start(const zerokv::kv::NodeConfig& cfg) {
     std::lock_guard<std::mutex> lock(impl_->mu);
     if (impl_->running) {
         return;
@@ -264,7 +264,7 @@ void MessageKV::start(const zerokv::kv::NodeConfig& cfg) {
     impl_->running = true;
 }
 
-void MessageKV::stop() {
+void KV::stop() {
     std::lock_guard<std::mutex> lock(impl_->mu);
     if (!impl_->running) {
         return;
@@ -277,7 +277,7 @@ void MessageKV::stop() {
     impl_->owned_ack_keys.clear();
 }
 
-zerokv::MemoryRegion::Ptr MessageKV::allocate_send_region(size_t size) {
+zerokv::MemoryRegion::Ptr KV::allocate_send_region(size_t size) {
     std::lock_guard<std::mutex> lock(impl_->mu);
     if (!impl_->node_ready_locked()) {
         throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
@@ -289,7 +289,7 @@ zerokv::MemoryRegion::Ptr MessageKV::allocate_send_region(size_t size) {
     return region;
 }
 
-void MessageKV::send(const std::string& key, const void* data, size_t size) {
+void KV::send(const std::string& key, const void* data, size_t size) {
     std::lock_guard<std::mutex> lock(impl_->mu);
     impl_->sweep_cleanup_locked();
     if (key.empty()) {
@@ -319,9 +319,9 @@ void MessageKV::send(const std::string& key, const void* data, size_t size) {
                      " total_us=" + std::to_string(elapsed_us(publish_start, send_end)));
 }
 
-void MessageKV::send_region(const std::string& key,
-                            const zerokv::MemoryRegion::Ptr& region,
-                            size_t size) {
+void KV::send_region(const std::string& key,
+                     const zerokv::MemoryRegion::Ptr& region,
+                     size_t size) {
     std::lock_guard<std::mutex> lock(impl_->mu);
     impl_->sweep_cleanup_locked();
     if (key.empty()) {
@@ -354,11 +354,11 @@ void MessageKV::send_region(const std::string& key,
                      " total_us=" + std::to_string(elapsed_us(publish_start, send_end)));
 }
 
-void MessageKV::recv(const std::string& key,
-                     const zerokv::MemoryRegion::Ptr& region,
-                     size_t length,
-                     size_t offset,
-                     std::chrono::milliseconds timeout) {
+void KV::recv(const std::string& key,
+              const zerokv::MemoryRegion::Ptr& region,
+              size_t length,
+              size_t offset,
+              std::chrono::milliseconds timeout) {
     std::lock_guard<std::mutex> lock(impl_->mu);
     impl_->sweep_cleanup_locked();
     if (key.empty()) {
@@ -371,9 +371,9 @@ void MessageKV::recv(const std::string& key,
     impl_->sweep_cleanup_locked();
 }
 
-MessageKV::BatchRecvResult MessageKV::recv_batch(const std::vector<BatchRecvItem>& items,
-                                                 const zerokv::MemoryRegion::Ptr& region,
-                                                 std::chrono::milliseconds timeout) {
+KV::BatchRecvResult KV::recv_batch(const std::vector<BatchRecvItem>& items,
+                                   const zerokv::MemoryRegion::Ptr& region,
+                                   std::chrono::milliseconds timeout) {
     std::lock_guard<std::mutex> lock(impl_->mu);
     validate_recv_batch_layout(items, region);
     if (!impl_->node_ready_locked()) {
