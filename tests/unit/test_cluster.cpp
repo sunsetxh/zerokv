@@ -2,9 +2,10 @@
 
 #include "zerokv/cluster.h"
 #include "zerokv/config.h"
-#include "zerokv/worker.h"
+#include "zerokv/transport/worker.h"
 
 using namespace zerokv;
+using namespace zerokv::transport;
 
 TEST(ClusterTypesTest, RankAliasRoundTrip) {
     EXPECT_EQ(rank_alias(0), "RANK0");

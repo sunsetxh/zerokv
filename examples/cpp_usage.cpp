@@ -26,7 +26,7 @@ void example_tag_messaging() {
     auto ctx = zerokv::Context::create(cfg);
 
     // --- Sender side ---
-    auto sender_worker = zerokv::Worker::create(ctx, /*index=*/0);
+    auto sender_worker = zerokv::transport::Worker::create(ctx, /*index=*/0);
     auto send_ep_future = sender_worker->connect("192.168.1.2:13337");
 
     // Drive progress while connecting
@@ -54,11 +54,11 @@ void example_tag_messaging() {
 // ============================================================================
 void example_zero_copy_large() {
     auto ctx = zerokv::Context::create();
-    auto worker = zerokv::Worker::create(ctx);
+    auto worker = zerokv::transport::Worker::create(ctx);
 
     // Pre-allocate and register a 1 GB buffer
     constexpr size_t kSize = 1ULL << 30;  // 1 GiB
-    auto region = zerokv::MemoryRegion::allocate(ctx, kSize, zerokv::MemoryType::kHost);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, kSize, zerokv::MemoryType::kHost);
 
     // Fill data (cast to typed span)
     auto span = region->as_span<double>();
@@ -85,15 +85,15 @@ void example_zero_copy_large() {
 // ============================================================================
 void example_rdma() {
     auto ctx = zerokv::Context::create();
-    auto worker = zerokv::Worker::create(ctx);
+    auto worker = zerokv::transport::Worker::create(ctx);
 
     // --- Local memory ---
-    auto local_region = zerokv::MemoryRegion::allocate(ctx, 4096);
+    auto local_region = zerokv::transport::MemoryRegion::allocate(ctx, 4096);
 
     // --- Exchange rkeys out-of-band (e.g. via tag_send/tag_recv) ---
     // Assume we received:  remote_addr (uint64_t) + remote_rkey (RemoteKey)
     uint64_t       remote_addr = 0;  // placeholder
-    zerokv::RemoteKey remote_rkey;      // placeholder
+    zerokv::transport::RemoteKey remote_rkey;      // placeholder
 
     auto ep_future = worker->connect("10.0.0.1:13337");
     worker->run_until([&] { return ep_future.ready(); });
@@ -119,10 +119,10 @@ void example_rdma() {
 // ============================================================================
 void example_memory_pool_and_callbacks() {
     auto ctx = zerokv::Context::create();
-    auto worker = zerokv::Worker::create(ctx);
+    auto worker = zerokv::transport::Worker::create(ctx);
 
     // Create a pool: avoids repeated registration on the hot path
-    auto pool = zerokv::MemoryPool::create(ctx, 64 * 1024 * 1024);
+    auto pool = zerokv::transport::MemoryPool::create(ctx, 64 * 1024 * 1024);
 
     auto ep_future = worker->connect("10.0.0.1:13337");
     worker->run_until([&] { return ep_future.ready(); });
@@ -155,9 +155,9 @@ void example_memory_pool_and_callbacks() {
 // ============================================================================
 void example_server() {
     auto ctx = zerokv::Context::create();
-    auto worker = zerokv::Worker::create(ctx);
+    auto worker = zerokv::transport::Worker::create(ctx);
 
-    auto listener = worker->listen(":13337", [&](zerokv::Endpoint::Ptr ep) {
+    auto listener = worker->listen(":13337", [&](zerokv::transport::Endpoint::Ptr ep) {
         std::cout << "Accepted connection from " << ep->remote_address() << "\n";
 
         // Post a recv for each new connection
@@ -182,14 +182,14 @@ void example_server() {
 // ============================================================================
 void example_batch() {
     auto ctx = zerokv::Context::create();
-    auto worker = zerokv::Worker::create(ctx);
+    auto worker = zerokv::transport::Worker::create(ctx);
 
     auto ep_future = worker->connect("10.0.0.1:13337");
     worker->run_until([&] { return ep_future.ready(); });
     auto ep = ep_future.get();
 
     // Send many small messages in parallel
-    std::vector<zerokv::Future<void>> futures;
+    std::vector<zerokv::transport::Future<void>> futures;
     futures.reserve(100);
 
     for (int i = 0; i < 100; ++i) {

@@ -38,11 +38,3 @@ private:
 };
 
 }  // namespace zerokv::core
-
-namespace zerokv {
-namespace kv {
-
-using KVServer [[deprecated("use zerokv::core::KVServer")]] = ::zerokv::core::KVServer;
-
-}  // namespace kv
-}  // namespace zerokv

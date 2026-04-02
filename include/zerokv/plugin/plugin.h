@@ -16,7 +16,7 @@
 ///   ->  allreduce / broadcast / ...  ->  destroy_comm()  ->  shutdown()
 
 #include "zerokv/common.h"
-#include "zerokv/memory.h"
+#include "zerokv/transport/memory.h"
 
 #include <functional>
 #include <memory>
@@ -194,7 +194,7 @@ public:
     /// Register a ZeroKV transport endpoint that the plugin can use for
     /// custom communication patterns (e.g., fallback or hybrid).
     virtual Status register_transport(int peer_rank,
-                                      std::shared_ptr<Endpoint> ep) {
+                                      std::shared_ptr<transport::Endpoint> ep) {
         (void)peer_rank; (void)ep;
         return ErrorCode::kSuccess;  // optional
     }

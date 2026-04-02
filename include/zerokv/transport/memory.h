@@ -9,8 +9,8 @@
 ///   - MemoryPool provides slab-based allocation of registered buffers.
 ///
 /// Usage:
-///   auto region = zerokv::MemoryRegion::register_mem(ctx, ptr, len, zerokv::MemoryType::kHost);
-///   auto pool   = zerokv::MemoryPool::create(ctx, 64 * 1024 * 1024);
+///   auto region = zerokv::transport::MemoryRegion::register_mem(ctx, ptr, len, zerokv::MemoryType::kHost);
+///   auto pool   = zerokv::transport::MemoryPool::create(ctx, 64 * 1024 * 1024);
 ///   auto buf    = pool->allocate(4096);
 
 #include "zerokv/common.h"

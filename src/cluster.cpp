@@ -1,7 +1,7 @@
 #include "zerokv/cluster.h"
 
-#include "zerokv/endpoint.h"
-#include "zerokv/worker.h"
+#include "zerokv/transport/endpoint.h"
+#include "zerokv/transport/worker.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -22,6 +22,12 @@
 namespace zerokv {
 
 namespace {
+
+using transport::Endpoint;
+using transport::Worker;
+
+template <typename T>
+using Future = transport::Future<T>;
 
 constexpr uint32_t kControlMagic = 0x50325031U;  // "AXON1"
 constexpr uint16_t kControlHeaderVersion = 1;

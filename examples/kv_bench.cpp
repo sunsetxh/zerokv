@@ -239,9 +239,9 @@ int main(int argc, char** argv) {
         for (const auto size_bytes : sizes) {
             const auto iterations = detail::derive_iterations(size_bytes, explicit_iters, total_bytes);
             auto payload = make_payload(size_bytes);
-            zerokv::MemoryRegion::Ptr bench_region;
+            zerokv::transport::MemoryRegion::Ptr bench_region;
             if (publish_api == "region") {
-                bench_region = zerokv::MemoryRegion::allocate(benchmark_ctx, payload.size());
+                bench_region = zerokv::transport::MemoryRegion::allocate(benchmark_ctx, payload.size());
                 if (!bench_region) {
                     std::cerr << "publish-region benchmark failed to allocate region for size="
                               << size_bytes << "\n";
@@ -378,9 +378,9 @@ int main(int argc, char** argv) {
         for (const auto size_bytes : sizes) {
             const auto iterations = detail::derive_iterations(size_bytes, explicit_iters, total_bytes);
             const auto key = "bench-fetch-" + std::to_string(size_bytes);
-            zerokv::MemoryRegion::Ptr local_region;
+            zerokv::transport::MemoryRegion::Ptr local_region;
             if (mode == "bench-fetch-to") {
-                local_region = zerokv::MemoryRegion::allocate(benchmark_ctx, size_bytes);
+                local_region = zerokv::transport::MemoryRegion::allocate(benchmark_ctx, size_bytes);
                 if (!local_region) {
                     std::cerr << "fetch-to benchmark failed to allocate local region for size="
                               << size_bytes << "\n";

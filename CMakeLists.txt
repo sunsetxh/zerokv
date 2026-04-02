@@ -129,7 +129,7 @@ set(ZEROKV_SOURCES
     src/transport/endpoint.cpp
     src/transport/future.cpp
     src/transport/memory.cpp
-    src/message_kv.cpp
+    src/kv.cpp
     src/core/protocol.cpp
     src/core/metadata_store.cpp
     src/core/tcp_transport.cpp

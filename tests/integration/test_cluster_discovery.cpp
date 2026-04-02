@@ -2,7 +2,7 @@
 
 #include "zerokv/cluster.h"
 #include "zerokv/config.h"
-#include "zerokv/worker.h"
+#include "zerokv/transport/worker.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -14,6 +14,7 @@
 #include <thread>
 
 using namespace zerokv;
+using namespace zerokv::transport;
 
 namespace {
 

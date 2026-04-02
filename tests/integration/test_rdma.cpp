@@ -1,13 +1,14 @@
 #include <gtest/gtest.h>
 #include "zerokv/config.h"
-#include "zerokv/worker.h"
-#include "zerokv/endpoint.h"
-#include "zerokv/memory.h"
+#include "zerokv/transport/worker.h"
+#include "zerokv/transport/endpoint.h"
+#include "zerokv/transport/memory.h"
 
 #include <vector>
 #include <cstring>
 
 using namespace zerokv;
+using namespace zerokv::transport;
 
 class RdmaTest : public ::testing::Test {
 protected:

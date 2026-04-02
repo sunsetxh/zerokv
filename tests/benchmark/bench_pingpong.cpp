@@ -1,12 +1,13 @@
 #include <benchmark/benchmark.h>
 #include "zerokv/config.h"
-#include "zerokv/worker.h"
-#include "zerokv/endpoint.h"
+#include "zerokv/transport/worker.h"
+#include "zerokv/transport/endpoint.h"
 
 #include <vector>
 #include <cstring>
 
 using namespace zerokv;
+using namespace zerokv::transport;
 
 static void BenchmarkCreateContext(benchmark::State& state) {
     auto config = Config::builder()

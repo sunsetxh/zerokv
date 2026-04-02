@@ -1,8 +1,9 @@
 #include <gtest/gtest.h>
 #include "zerokv/config.h"
-#include "zerokv/memory.h"
+#include "zerokv/transport/memory.h"
 
 using namespace zerokv;
+using namespace zerokv::transport;
 
 class MemoryTest : public ::testing::Test {
 protected:

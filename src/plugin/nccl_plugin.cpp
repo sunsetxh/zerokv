@@ -200,7 +200,7 @@ public:
     // --- Transport integration -----------------------------------------------
 
     Status register_transport(int peer_rank,
-                              std::shared_ptr<Endpoint> ep) override {
+                              std::shared_ptr<transport::Endpoint> ep) override {
         // Store the ZeroKV endpoint for hybrid communication patterns.
         // For example, NCCL can fall back to ZeroKV transport for cross-network
         // communication or when direct GPU-GPU paths are unavailable.
@@ -213,7 +213,7 @@ private:
     Context::Ptr ctx_;
     std::mutex   mu_;
     std::unordered_map<Communicator*, Communicator::Ptr> comms_;
-    std::unordered_map<int, std::shared_ptr<Endpoint>> transport_eps_;
+    std::unordered_map<int, std::shared_ptr<transport::Endpoint>> transport_eps_;
 };
 
 }  // namespace plugin

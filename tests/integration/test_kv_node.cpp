@@ -973,7 +973,7 @@ TEST(KvNodeIntegrationTest, PublishRegionUsesCallerRegionAddress) {
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 256);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 256);
     ASSERT_NE(region, nullptr);
 
     auto publish = node->publish_region("beta", region, 128);
@@ -1082,7 +1082,7 @@ TEST(KvNodeIntegrationTest, FetchToWritesIntoCallerRegion) {
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     auto fetch = reader->fetch_to("fetch-to-key", region, region->length(), 8);
@@ -1137,7 +1137,7 @@ TEST(KvNodeIntegrationTest, FetchToManyWritesMultipleKeysIntoSharedRegion) {
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     auto result = reader->fetch_to_many({
@@ -1184,7 +1184,7 @@ TEST(KvNodeIntegrationTest, FetchToManyReturnsPartialProgressOnPerKeyFailure) {
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     auto result = reader->fetch_to_many({
@@ -1209,7 +1209,7 @@ TEST(KvNodeIntegrationTest, FetchToManyRejectsOverlappingRanges) {
     auto node = KVNode::create(cfg);
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 64);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 64);
     ASSERT_NE(region, nullptr);
 
     EXPECT_THROW((void)node->fetch_to_many({
@@ -1274,7 +1274,7 @@ TEST(KvNodeIntegrationTest, FetchToManyRejectsOutOfBoundsRanges) {
     auto node = KVNode::create(cfg);
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 32);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 32);
     ASSERT_NE(region, nullptr);
 
     EXPECT_THROW((void)node->fetch_to_many({
@@ -1308,7 +1308,7 @@ TEST(KvNodeIntegrationTest, FetchToManyAllowsDuplicateKeysAtDistinctOffsets) {
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     auto result = reader->fetch_to_many({
@@ -1333,7 +1333,7 @@ TEST(KvNodeIntegrationTest, FetchToManyRejectsEmptyItems) {
     auto node = KVNode::create(cfg);
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 32);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 32);
     ASSERT_NE(region, nullptr);
 
     EXPECT_THROW((void)node->fetch_to_many({}, region), std::system_error);
@@ -1368,7 +1368,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyReturnsImmediatelyForExis
     publish_b.get();
 
     auto ctx = zerokv::Context::create(cfg);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     auto result = reader->subscribe_and_fetch_to_once_many({
@@ -1409,7 +1409,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyWaitsForMissingKey) {
     }).ok());
 
     auto ctx = zerokv::Context::create(cfg);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     const std::string value = "waited-zero-copy";
@@ -1462,7 +1462,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyReturnsPartialTimeout) {
     publish.get();
 
     auto ctx = zerokv::Context::create(cfg);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     auto result = reader->subscribe_and_fetch_to_once_many({
@@ -1502,7 +1502,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyWritesDuplicateKeyToMulti
     }).ok());
 
     auto ctx = zerokv::Context::create(cfg);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     const std::string value = "dup-zero-copy";
@@ -1557,7 +1557,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyPreservesPreExistingSubsc
     subscribe_future.get();
 
     auto ctx = zerokv::Context::create(cfg);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 128);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 128);
     ASSERT_NE(region, nullptr);
 
     const std::string value = "preserve-subscription";
@@ -1599,7 +1599,7 @@ TEST(KvNodeIntegrationTest, SubscribeAndFetchToOnceManyRejectsInvalidLayoutBefor
     auto node = KVNode::create(cfg);
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 64);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 64);
     ASSERT_NE(region, nullptr);
 
     EXPECT_THROW((void)node->subscribe_and_fetch_to_once_many({

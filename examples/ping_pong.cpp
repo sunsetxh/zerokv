@@ -9,8 +9,8 @@
 /// For RDMA: ./ping_pong --transport rdma --connect 10.0.0.1:13337
 
 #include <zerokv/config.h>
-#include <zerokv/worker.h>
-#include <zerokv/endpoint.h>
+#include <zerokv/transport/worker.h>
+#include <zerokv/transport/endpoint.h>
 
 #include <iostream>
 #include <vector>
@@ -21,6 +21,7 @@
 #include <condition_variable>
 
 using namespace zerokv;
+using namespace zerokv::transport;
 
 constexpr size_t kMessageSize = 4096;
 constexpr int kNumIterations = 1000;

@@ -5,8 +5,8 @@
 
 #include "zerokv/common.h"
 #include "zerokv/config.h"
-#include "zerokv/future.h"
-#include "zerokv/worker.h"
+#include "zerokv/transport/future.h"
+#include "zerokv/transport/worker.h"
 
 #include <chrono>
 #include <memory>
@@ -83,9 +83,9 @@ class Cluster : public std::enable_shared_from_this<Cluster> {
 public:
     using Ptr = std::shared_ptr<Cluster>;
 
-    static Ptr create_master(Context::Ptr ctx, Worker::Ptr worker,
+    static Ptr create_master(Context::Ptr ctx, transport::Worker::Ptr worker,
                              MasterClusterConfig cfg);
-    static Ptr create_slave(Context::Ptr ctx, Worker::Ptr worker,
+    static Ptr create_slave(Context::Ptr ctx, transport::Worker::Ptr worker,
                             SlaveClusterConfig cfg);
 
     ~Cluster();
@@ -104,17 +104,17 @@ public:
     [[nodiscard]] MembershipSnapshotPtr membership() const;
     [[nodiscard]] std::optional<RouteHandle> route(std::string_view alias) const;
 
-    Future<void> wait_ready();
-    Future<void> wait_ready(std::chrono::milliseconds timeout);
+    transport::Future<void> wait_ready();
+    transport::Future<void> wait_ready(std::chrono::milliseconds timeout);
 
-    Future<void> send(std::string_view alias, const void* buffer, size_t length, Tag tag);
-    Future<void> send(uint32_t rank, const void* buffer, size_t length, Tag tag);
+    transport::Future<void> send(std::string_view alias, const void* buffer, size_t length, Tag tag);
+    transport::Future<void> send(uint32_t rank, const void* buffer, size_t length, Tag tag);
 
-    Future<std::pair<size_t, Tag>>
+    transport::Future<std::pair<size_t, Tag>>
     recv_any(void* buffer, size_t length, Tag tag, Tag tag_mask = kTagMaskAll);
 
 private:
-    Cluster(Context::Ptr ctx, Worker::Ptr worker, bool is_master);
+    Cluster(Context::Ptr ctx, transport::Worker::Ptr worker, bool is_master);
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

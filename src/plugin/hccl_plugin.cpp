@@ -522,7 +522,7 @@ public:
     // --- Transport integration -----------------------------------------------
 
     Status register_transport(int peer_rank,
-                              std::shared_ptr<Endpoint> ep) override {
+                              std::shared_ptr<transport::Endpoint> ep) override {
         std::lock_guard lock(mu_);
         transport_eps_[peer_rank] = std::move(ep);
         return Status::OK();
@@ -533,7 +533,7 @@ private:
     std::mutex   mu_;
     bool         acl_inited_ = false;
     std::unordered_map<Communicator*, Communicator::Ptr> comms_;
-    std::unordered_map<int, std::shared_ptr<Endpoint>> transport_eps_;
+    std::unordered_map<int, std::shared_ptr<transport::Endpoint>> transport_eps_;
 };
 
 }  // namespace plugin

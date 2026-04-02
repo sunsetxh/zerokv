@@ -8,7 +8,7 @@
 /// lifecycle control as coordinated operations.
 ///
 /// Usage:
-///   auto worker = zerokv::Worker::create(ctx);
+///   auto worker = zerokv::transport::Worker::create(ctx);
 ///   auto ep     = worker->connect("192.168.1.2:13337");
 
 #include "zerokv/common.h"

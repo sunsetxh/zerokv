@@ -6,8 +6,8 @@
 ///   Full two-process test requires bootstrap mechanism.
 
 #include <zerokv/config.h>
-#include <zerokv/worker.h>
-#include <zerokv/endpoint.h>
+#include <zerokv/transport/worker.h>
+#include <zerokv/transport/endpoint.h>
 
 #include <iostream>
 #include <vector>
@@ -15,6 +15,7 @@
 #include <thread>
 
 using namespace zerokv;
+using namespace zerokv::transport;
 
 int main() {
     // Create config - use TCP or shmem

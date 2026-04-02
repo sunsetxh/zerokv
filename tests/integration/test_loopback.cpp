@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "zerokv/config.h"
-#include "zerokv/worker.h"
-#include "zerokv/endpoint.h"
+#include "zerokv/transport/worker.h"
+#include "zerokv/transport/endpoint.h"
 
 #include <arpa/inet.h>
 #include <ifaddrs.h>
@@ -12,6 +12,7 @@
 #include <atomic>
 
 using namespace zerokv;
+using namespace zerokv::transport;
 
 namespace {
 

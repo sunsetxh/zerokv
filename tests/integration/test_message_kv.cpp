@@ -1,6 +1,6 @@
 #include "zerokv/core/kv_node.h"
 #include "zerokv/core/kv_server.h"
-#include "zerokv/message_kv.h"
+#include "zerokv/kv.h"
 
 #include <algorithm>
 #include <future>
@@ -9,9 +9,8 @@
 #include <gtest/gtest.h>
 #include <system_error>
 #include <thread>
-#include <type_traits>
 
-class MessageKvIntegrationTest : public ::testing::Test {
+class KvIntegrationTest : public ::testing::Test {
 protected:
     zerokv::Config cfg = zerokv::Config::builder().set_transport("tcp").build();
 };
@@ -29,7 +28,7 @@ void expect_system_error_code(const std::function<void()>& fn, zerokv::ErrorCode
 
 }  // namespace
 
-TEST(MessageKvApiSurfaceTest, PublicTypesExist) {
+TEST(KvApiSurfaceTest, PublicTypesExist) {
     using zerokv::KV;
 
     KV::BatchRecvItem item;
@@ -42,66 +41,25 @@ TEST(MessageKvApiSurfaceTest, PublicTypesExist) {
     EXPECT_FALSE(result.completed_all);
 }
 
-TEST(MessageKvApiSurfaceTest, MessageKvCompatibilityAliasStillCompiles) {
-    using zerokv::KV;
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-    using zerokv::MessageKV;
-    static_assert(std::is_same_v<MessageKV, KV>);
-    MessageKV::BatchRecvItem item;
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-    item.key = "compat";
-    EXPECT_EQ(item.key, "compat");
-}
-
 TEST(KvCoreApiSurfaceTest, CoreHeadersCompile) {
     using zerokv::core::KVNode;
     using zerokv::core::KVServer;
     using zerokv::core::NodeConfig;
     using zerokv::core::ServerConfig;
 
-    static_assert(std::is_same_v<KVNode, zerokv::core::KVNode>);
-    static_assert(std::is_same_v<KVServer, zerokv::core::KVServer>);
-
     NodeConfig node_cfg;
     ServerConfig server_cfg;
     (void)node_cfg;
     (void)server_cfg;
 }
 
-TEST(KvCoreApiSurfaceTest, KvCompatibilityAliasStillCompiles) {
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-    using zerokv::kv::KVNode;
-    using zerokv::kv::KVServer;
-    using zerokv::kv::NodeConfig;
-    using zerokv::kv::ServerConfig;
-
-    static_assert(std::is_same_v<KVNode, zerokv::core::KVNode>);
-    static_assert(std::is_same_v<KVServer, zerokv::core::KVServer>);
-
-    NodeConfig node_cfg;
-    ServerConfig server_cfg;
-    (void)node_cfg;
-    (void)server_cfg;
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-}
-
-TEST_F(MessageKvIntegrationTest, AllocateSendRegionRequiresRunningNode) {
+TEST_F(KvIntegrationTest, AllocateSendRegionRequiresRunningNode) {
     auto mq = zerokv::KV::create(cfg);
     expect_system_error_code([&] { (void)mq->allocate_send_region(1024); },
                              zerokv::ErrorCode::kConnectionRefused);
 }
 
-TEST_F(MessageKvIntegrationTest, AllocateSendRegionSucceedsAfterStart) {
+TEST_F(KvIntegrationTest, AllocateSendRegionSucceedsAfterStart) {
     auto mq = zerokv::KV::create(cfg);
     auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
@@ -115,12 +73,12 @@ TEST_F(MessageKvIntegrationTest, AllocateSendRegionSucceedsAfterStart) {
     server->stop();
 }
 
-TEST_F(MessageKvIntegrationTest, SendRejectsEmptyKey) {
+TEST_F(KvIntegrationTest, SendRejectsEmptyKey) {
     auto mq = zerokv::KV::create(cfg);
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 8);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 8);
     ASSERT_NE(region, nullptr);
 
     expect_system_error_code([&] { mq->send("", "x", 1); },
@@ -129,12 +87,12 @@ TEST_F(MessageKvIntegrationTest, SendRejectsEmptyKey) {
                              zerokv::ErrorCode::kInvalidArgument);
 }
 
-TEST_F(MessageKvIntegrationTest, RecvRejectsEmptyKey) {
+TEST_F(KvIntegrationTest, RecvRejectsEmptyKey) {
     auto mq = zerokv::KV::create(cfg);
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 8);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 8);
     ASSERT_NE(region, nullptr);
 
     expect_system_error_code(
@@ -142,7 +100,7 @@ TEST_F(MessageKvIntegrationTest, RecvRejectsEmptyKey) {
         zerokv::ErrorCode::kInvalidArgument);
 }
 
-TEST_F(MessageKvIntegrationTest, RecvBatchRejectsInvalidLayoutBeforeWaiting) {
+TEST_F(KvIntegrationTest, RecvBatchRejectsInvalidLayoutBeforeWaiting) {
     auto mq = zerokv::KV::create(cfg);
     auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
@@ -150,7 +108,7 @@ TEST_F(MessageKvIntegrationTest, RecvBatchRejectsInvalidLayoutBeforeWaiting) {
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 16);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 16);
     ASSERT_NE(region, nullptr);
 
     expect_system_error_code(
@@ -166,12 +124,12 @@ TEST_F(MessageKvIntegrationTest, RecvBatchRejectsInvalidLayoutBeforeWaiting) {
     server->stop();
 }
 
-TEST_F(MessageKvIntegrationTest, StopBeforeStartIsSafe) {
+TEST_F(KvIntegrationTest, StopBeforeStartIsSafe) {
     auto mq = zerokv::KV::create(cfg);
     EXPECT_NO_THROW(mq->stop());
 }
 
-TEST_F(MessageKvIntegrationTest, StartAndStopAreIdempotentEnoughForSingleLifecycle) {
+TEST_F(KvIntegrationTest, StartAndStopAreIdempotentEnoughForSingleLifecycle) {
     auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
@@ -182,7 +140,7 @@ TEST_F(MessageKvIntegrationTest, StartAndStopAreIdempotentEnoughForSingleLifecyc
     server->stop();
 }
 
-TEST_F(MessageKvIntegrationTest, SenderCleanupRunsOnSubsequentSend) {
+TEST_F(KvIntegrationTest, SenderCleanupRunsOnSubsequentSend) {
     auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
@@ -193,7 +151,7 @@ TEST_F(MessageKvIntegrationTest, SenderCleanupRunsOnSubsequentSend) {
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto rx_region = zerokv::MemoryRegion::allocate(ctx, 16);
+    auto rx_region = zerokv::transport::MemoryRegion::allocate(ctx, 16);
     ASSERT_NE(rx_region, nullptr);
 
     std::thread recv_thread([&] {
@@ -218,7 +176,7 @@ TEST_F(MessageKvIntegrationTest, SenderCleanupRunsOnSubsequentSend) {
     server->stop();
 }
 
-TEST_F(MessageKvIntegrationTest, RecvCopiesSingleMessageIntoRegion) {
+TEST_F(KvIntegrationTest, RecvCopiesSingleMessageIntoRegion) {
     auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
@@ -229,7 +187,7 @@ TEST_F(MessageKvIntegrationTest, RecvCopiesSingleMessageIntoRegion) {
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 8);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 8);
     ASSERT_NE(region, nullptr);
 
     std::thread recv_thread([&] {
@@ -245,7 +203,7 @@ TEST_F(MessageKvIntegrationTest, RecvCopiesSingleMessageIntoRegion) {
     server->stop();
 }
 
-TEST_F(MessageKvIntegrationTest, RecvBatchReturnsPartialTimeout) {
+TEST_F(KvIntegrationTest, RecvBatchReturnsPartialTimeout) {
     auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
@@ -256,7 +214,7 @@ TEST_F(MessageKvIntegrationTest, RecvBatchReturnsPartialTimeout) {
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 16);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 16);
     ASSERT_NE(region, nullptr);
 
     std::thread sender_thread([&] {
@@ -279,7 +237,7 @@ TEST_F(MessageKvIntegrationTest, RecvBatchReturnsPartialTimeout) {
     server->stop();
 }
 
-TEST_F(MessageKvIntegrationTest, RecvBatchAcknowledgesCompletedKeyBeforeBatchFinishes) {
+TEST_F(KvIntegrationTest, RecvBatchAcknowledgesCompletedKeyBeforeBatchFinishes) {
     auto timeout_cfg = zerokv::Config::builder()
                            .set_transport("tcp")
                            .set_connect_timeout(std::chrono::milliseconds(1000))
@@ -296,7 +254,7 @@ TEST_F(MessageKvIntegrationTest, RecvBatchAcknowledgesCompletedKeyBeforeBatchFin
 
     auto ctx = zerokv::Context::create(timeout_cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 16);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 16);
     ASSERT_NE(region, nullptr);
 
     std::promise<void> recv_started;
@@ -329,7 +287,7 @@ TEST_F(MessageKvIntegrationTest, RecvBatchAcknowledgesCompletedKeyBeforeBatchFin
     server->stop();
 }
 
-TEST_F(MessageKvIntegrationTest, SendUnpublishesMessageKeyAfterAck) {
+TEST_F(KvIntegrationTest, SendUnpublishesMessageKeyAfterAck) {
     auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
@@ -340,7 +298,7 @@ TEST_F(MessageKvIntegrationTest, SendUnpublishesMessageKeyAfterAck) {
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 8);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 8);
     ASSERT_NE(region, nullptr);
 
     std::thread recv_thread([&] {
@@ -357,7 +315,7 @@ TEST_F(MessageKvIntegrationTest, SendUnpublishesMessageKeyAfterAck) {
     server->stop();
 }
 
-TEST_F(MessageKvIntegrationTest, SendRegionUnpublishesMessageKeyAfterAck) {
+TEST_F(KvIntegrationTest, SendRegionUnpublishesMessageKeyAfterAck) {
     auto server = zerokv::core::KVServer::create(cfg);
     ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
 
@@ -368,11 +326,11 @@ TEST_F(MessageKvIntegrationTest, SendRegionUnpublishesMessageKeyAfterAck) {
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 16);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 16);
     ASSERT_NE(region, nullptr);
     std::memcpy(region->address(), "region-payload", 15);
 
-    auto rx_region = zerokv::MemoryRegion::allocate(ctx, 16);
+    auto rx_region = zerokv::transport::MemoryRegion::allocate(ctx, 16);
     ASSERT_NE(rx_region, nullptr);
 
     std::thread recv_thread([&] {
@@ -389,7 +347,7 @@ TEST_F(MessageKvIntegrationTest, SendRegionUnpublishesMessageKeyAfterAck) {
     server->stop();
 }
 
-TEST_F(MessageKvIntegrationTest, SendRequiresRunningNodeAndValidatesInputs) {
+TEST_F(KvIntegrationTest, SendRequiresRunningNodeAndValidatesInputs) {
     auto mq = zerokv::KV::create(cfg);
     expect_system_error_code([&] { mq->send("key", "x", 1); },
                              zerokv::ErrorCode::kConnectionRefused);
@@ -405,7 +363,7 @@ TEST_F(MessageKvIntegrationTest, SendRequiresRunningNodeAndValidatesInputs) {
     server->stop();
 }
 
-TEST_F(MessageKvIntegrationTest, SendTimesOutWithoutAckAndCleansUpMessageKey) {
+TEST_F(KvIntegrationTest, SendTimesOutWithoutAckAndCleansUpMessageKey) {
     const auto timeout_cfg = zerokv::Config::builder()
                                  .set_transport("tcp")
                                  .set_connect_timeout(std::chrono::milliseconds(50))
@@ -426,11 +384,11 @@ TEST_F(MessageKvIntegrationTest, SendTimesOutWithoutAckAndCleansUpMessageKey) {
     server->stop();
 }
 
-TEST_F(MessageKvIntegrationTest, SendRegionRequiresRunningNodeAndValidatesInputs) {
+TEST_F(KvIntegrationTest, SendRegionRequiresRunningNodeAndValidatesInputs) {
     auto mq = zerokv::KV::create(cfg);
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 8);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 8);
     ASSERT_NE(region, nullptr);
 
     expect_system_error_code([&] { mq->send_region("key", region, 1); },

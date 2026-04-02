@@ -1,6 +1,5 @@
 #include <zerokv/config.h>
 #include <zerokv/kv.h>
-#include <zerokv/message_kv.h>
 
 #include <chrono>
 #include <algorithm>
@@ -18,6 +17,7 @@
 
 using namespace zerokv;
 using namespace zerokv::core;
+using namespace zerokv::transport;
 
 namespace zerokv::examples::message_kv_demo {
 

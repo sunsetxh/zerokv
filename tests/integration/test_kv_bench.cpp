@@ -76,7 +76,7 @@ TEST(KvBenchIntegrationTest, PublishRegionBenchmarkPathCompletesSingleSizeSweep)
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, 4096);
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, 4096);
     ASSERT_NE(region, nullptr);
     std::memset(region->address(), 0x5a, region->length());
 
@@ -141,7 +141,7 @@ TEST(KvBenchIntegrationTest, FetchToSmoke) {
 
     auto ctx = zerokv::Context::create(cfg);
     ASSERT_NE(ctx, nullptr);
-    auto region = zerokv::MemoryRegion::allocate(ctx, payload.size());
+    auto region = zerokv::transport::MemoryRegion::allocate(ctx, payload.size());
     ASSERT_NE(region, nullptr);
 
     auto fetch = reader->fetch_to("bench-fetch-4096", region, payload.size(), 0);

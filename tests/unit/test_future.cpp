@@ -1,8 +1,9 @@
 #include <gtest/gtest.h>
-#include "zerokv/future.h"
-#include "zerokv/endpoint.h"
+#include "zerokv/transport/future.h"
+#include "zerokv/transport/endpoint.h"
 
 using namespace zerokv;
+using namespace zerokv::transport;
 
 TEST(FutureVoidTest, Ready) {
     auto f = Future<void>::make_ready();

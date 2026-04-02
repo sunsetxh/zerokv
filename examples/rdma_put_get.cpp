@@ -9,9 +9,9 @@
 /// The client performs RDMA put, then RDMA get to verify, then atomic ops.
 
 #include <zerokv/config.h>
-#include <zerokv/worker.h>
-#include <zerokv/endpoint.h>
-#include <zerokv/memory.h>
+#include <zerokv/transport/worker.h>
+#include <zerokv/transport/endpoint.h>
+#include <zerokv/transport/memory.h>
 
 #include <iostream>
 #include <vector>
@@ -22,6 +22,7 @@
 #include <condition_variable>
 
 using namespace zerokv;
+using namespace zerokv::transport;
 
 constexpr size_t kDefaultBufferSize = 4096;
 constexpr Tag kRkeyTag = make_tag(1, 100);   // tag for rkey exchange

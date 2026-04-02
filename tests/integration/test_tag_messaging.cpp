@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "zerokv/config.h"
-#include "zerokv/worker.h"
-#include "zerokv/endpoint.h"
+#include "zerokv/transport/worker.h"
+#include "zerokv/transport/endpoint.h"
 
 #include <thread>
 #include <chrono>
@@ -9,6 +9,7 @@
 #include <cstring>
 
 using namespace zerokv;
+using namespace zerokv::transport;
 
 // Test fixture for messaging tests
 class TagMessagingTest : public ::testing::Test {
