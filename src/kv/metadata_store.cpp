@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace zerokv::kv::detail {
+namespace zerokv::core::detail {
 
 bool MetadataStore::register_node(NodeInfo node) {
     if (node.node_id.empty()) {
@@ -190,4 +190,4 @@ std::vector<KeyMetadata> MetadataStore::list_by_owner(const std::string& node_id
     return result;
 }
 
-}  // namespace zerokv::kv::detail
+}  // namespace zerokv::core::detail

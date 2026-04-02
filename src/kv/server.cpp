@@ -1,4 +1,4 @@
-#include "zerokv/kv.h"
+#include "zerokv/core/kv_server.h"
 
 #include "kv/metadata_store.h"
 #include "kv/protocol.h"
@@ -14,7 +14,9 @@
 #include <utility>
 #include <vector>
 
-namespace zerokv::kv {
+namespace zerokv::core {
+
+namespace detail = ::zerokv::core::detail;
 
 namespace {
 
@@ -527,4 +529,4 @@ std::vector<std::string> KVServer::list_keys() const {
     return impl_ ? impl_->store_.list_keys() : std::vector<std::string>{};
 }
 
-}  // namespace zerokv::kv
+}  // namespace zerokv::core

@@ -4,9 +4,9 @@
 
 namespace {
 
-using zerokv::kv::detail::KeyMetadata;
-using zerokv::kv::detail::MetadataStore;
-using zerokv::kv::detail::NodeInfo;
+using zerokv::core::detail::KeyMetadata;
+using zerokv::core::detail::MetadataStore;
+using zerokv::core::detail::NodeInfo;
 
 NodeInfo make_node(std::string id, std::string data_addr = "10.0.0.1:14000") {
     NodeInfo node;

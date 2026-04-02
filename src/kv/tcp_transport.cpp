@@ -10,7 +10,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-namespace zerokv::kv::detail {
+namespace zerokv::core::detail {
 
 namespace {
 
@@ -290,4 +290,4 @@ void TcpTransport::close_fd(int* fd) {
     *fd = -1;
 }
 
-}  // namespace zerokv::kv::detail
+}  // namespace zerokv::core::detail

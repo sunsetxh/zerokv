@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace zerokv::kv::detail {
+namespace zerokv::core::detail {
 
 constexpr uint32_t kProtocolMagic = 0x4E4F5841;  // "AXON" in little-endian memory order.
 constexpr uint32_t kMaxFieldSize = 16 * 1024 * 1024;
@@ -262,4 +262,4 @@ decode_message(std::span<const uint8_t> data);
 [[nodiscard]] std::vector<uint8_t> encode(const ErrorResponse& msg);
 [[nodiscard]] std::optional<ErrorResponse> decode_error_response(std::span<const uint8_t> data);
 
-}  // namespace zerokv::kv::detail
+}  // namespace zerokv::core::detail

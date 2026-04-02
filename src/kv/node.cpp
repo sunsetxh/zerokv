@@ -1,4 +1,4 @@
-#include "zerokv/kv.h"
+#include "zerokv/core/kv_node.h"
 
 #include "zerokv/endpoint.h"
 #include "zerokv/worker.h"
@@ -25,7 +25,9 @@
 #include <utility>
 #include <vector>
 
-namespace zerokv::kv {
+namespace zerokv::core {
+
+namespace detail = ::zerokv::core::detail;
 
 namespace {
 
@@ -2312,4 +2314,4 @@ Future<void> KVNode::unpublish(const std::string& key) {
     return Future<void>::make_ready();
 }
 
-}  // namespace zerokv::kv
+}  // namespace zerokv::core

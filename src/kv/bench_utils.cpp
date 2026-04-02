@@ -4,7 +4,7 @@
 #include <cctype>
 #include <sstream>
 
-namespace zerokv::kv::detail {
+namespace zerokv::core::detail {
 namespace {
 
 uint64_t parse_size_token(std::string token, Status* status) {
@@ -166,4 +166,4 @@ std::string render_fetch_rows(const std::vector<FetchBenchRow>& rows) {
     return out.str();
 }
 
-}  // namespace zerokv::kv::detail
+}  // namespace zerokv::core::detail
