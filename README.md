@@ -14,8 +14,8 @@ KV cache inference transfer, and HPC scenarios.
   unpublished, owner lost) with polling API
 - **Wait-and-fetch** — synchronous helpers to wait for keys then fetch them:
   single-key and batch, partial results on timeout, first-success-wins
-- **MessageKV** — message-style wrapper for applications that already manage
-  unique keys and want bounded ack-based cleanup
+- **KV** — top-level distributed KV/cache API for publish/fetch/push/message-style
+  workflows with bounded ack-based cleanup
 - **Metrics** — per-operation latency breakdown (publish, fetch, push)
 - **Benchmark** — size-sweep publish/fetch benchmark (`kv_bench`)
 - **Python bindings** — nanobind-based Python API for KV operations
@@ -167,23 +167,24 @@ Accordingly:
   - `copy` uses `publish()`
   - `region` uses `publish_region()` and is the zero-copy publish path
 
-## MessageKV
+## KV
 
-`zerokv::MessageKV` is a scenario-oriented wrapper for message workflows where
-the application already owns unique keys.
+`zerokv::KV` is the primary user-facing distributed KV/cache interface. It
+wraps the lower-level `zerokv::core::KVNode` primitives for message-style and
+object-style workflows where the application already owns unique keys.
 
 - `send()` / `send_region()` publish message keys and record them for bounded cleanup
 - `recv()` / `recv_batch()` wait for message keys and fetch into caller-owned memory
 - internal ack markers stay hidden from callers
 
-### MessageKV two-node demo
+### KV two-node demo
 
 `message_kv_demo` sweeps message sizes with `--sizes` across the two-node
 scenario. The default sweep list is `1K,64K,1M,4M,16M,32M,64M,128M`.
 
-- `RANK0` runs `KVServer + MessageKV receiver` in one process
+- `RANK0` runs `KVServer + KV receiver` in one process
 - `RANK1` sends one message per round from 4 threads, reusing a preallocated send buffer per thread
-- both sides default to `--warmup-rounds 1`, reusing MessageKV instances across
+- both sides default to `--warmup-rounds 1`, reusing `KV` instances across
   rounds so the measured rounds are closer to steady-state behavior
 - `RANK0` preallocates one receive region sized to `messages * max(--sizes)` and
   reuses it across measured rounds; `RANK1` does the same for per-thread send buffers
@@ -254,9 +255,9 @@ SEND_ROUND round=0 protocol_round=1 size=1024 messages=4 send_total_us=... max_t
 
 Implementation note:
 
-- `MessageKV` Phase 1 serializes public calls inside one wrapper instance.
+- `KV` Phase 1 serializes public calls inside one wrapper instance.
 - To stay close to the real multi-threaded sender pattern, the demo gives each
-  sender thread its own `MessageKV` instance and node id.
+  sender thread its own `KV` instance and node id.
 - `send_region()` is synchronous with receiver acknowledgement:
   the sender publishes the message key, waits for the receiver's internal ack
   key, then unpublishes the message key before returning.

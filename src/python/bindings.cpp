@@ -100,10 +100,10 @@ struct BufferHolder {
     }
 };
 
-static zerokv::RemoteKey extract_remote_key(nb::handle buf) {
+static zerokv::transport::RemoteKey extract_remote_key(nb::handle buf) {
     auto holder = BufferHolder::extract(buf);
     auto [ptr, len] = holder.get();
-    zerokv::RemoteKey rkey;
+    zerokv::transport::RemoteKey rkey;
     auto* bytes = static_cast<const uint8_t*>(ptr);
     rkey.data.assign(bytes, bytes + len);
     return rkey;
@@ -247,7 +247,7 @@ NB_MODULE(_core, m) {
             "num_workers"_a = nb::none(),
             "memory_pool_size"_a = nb::none())
         .def("create_worker", [](std::shared_ptr<zerokv::Context>& self, size_t index) {
-            return zerokv::Worker::create(self, index);
+            return zerokv::transport::Worker::create(self, index);
         }, "index"_a = 0)
         .def("supports_memory_type", &zerokv::Context::supports_memory_type)
         .def("supports_rma", &zerokv::Context::supports_rma)
@@ -256,26 +256,26 @@ NB_MODULE(_core, m) {
 
     // --- MemoryRegion --------------------------------------------------------
 
-    nb::class_<zerokv::MemoryRegion>(m, "MemoryRegion")
+    nb::class_<zerokv::transport::MemoryRegion>(m, "MemoryRegion")
         .def_static("register_", [](std::shared_ptr<zerokv::Context>& ctx, nb::handle buf,
                                     zerokv::MemoryType type) {
             auto holder = BufferHolder::extract(buf);
             auto [ptr, len] = holder.get();
-            return zerokv::MemoryRegion::register_mem(ctx, ptr, len, type);
+            return zerokv::transport::MemoryRegion::register_mem(ctx, ptr, len, type);
         }, "ctx"_a, "buffer"_a, "memory_type"_a = zerokv::MemoryType::kHost)
-        .def_static("allocate", &zerokv::MemoryRegion::allocate,
+        .def_static("allocate", &zerokv::transport::MemoryRegion::allocate,
             "ctx"_a, "size"_a, "memory_type"_a = zerokv::MemoryType::kHost)
-        .def_prop_ro("address", [](const zerokv::MemoryRegion& r) {
+        .def_prop_ro("address", [](const zerokv::transport::MemoryRegion& r) {
             return reinterpret_cast<uintptr_t>(r.address());
         })
-        .def_prop_ro("length", &zerokv::MemoryRegion::length)
-        .def_prop_ro("memory_type", &zerokv::MemoryRegion::memory_type)
-        .def_prop_ro("remote_key", [](const zerokv::MemoryRegion& r) {
+        .def_prop_ro("length", &zerokv::transport::MemoryRegion::length)
+        .def_prop_ro("memory_type", &zerokv::transport::MemoryRegion::memory_type)
+        .def_prop_ro("remote_key", [](const zerokv::transport::MemoryRegion& r) {
             auto rk = r.remote_key();
             return nb::bytes(reinterpret_cast<const char*>(rk.bytes()), rk.size());
         })
-        .def("__len__", &zerokv::MemoryRegion::length)
-        .def("to_numpy", [](zerokv::MemoryRegion& r) {
+        .def("__len__", &zerokv::transport::MemoryRegion::length)
+        .def("to_numpy", [](zerokv::transport::MemoryRegion& r) {
             size_t shape[1] = {r.length()};
             return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(
                 r.address(), 1, shape
@@ -284,27 +284,27 @@ NB_MODULE(_core, m) {
 
     // --- Endpoint ------------------------------------------------------------
 
-    nb::class_<zerokv::Endpoint>(m, "Endpoint")
-        .def("tag_send", [](zerokv::Endpoint& self, nb::handle buf, zerokv::Tag tag) {
+    nb::class_<zerokv::transport::Endpoint>(m, "Endpoint")
+        .def("tag_send", [](zerokv::transport::Endpoint& self, nb::handle buf, zerokv::Tag tag) {
             auto holder = BufferHolder::extract(buf);
             auto [ptr, len] = holder.get();
             nb::gil_scoped_release release;
             return self.tag_send(ptr, len, tag);
         }, "buffer"_a, "tag"_a)
-        .def("tag_send_region", [](zerokv::Endpoint& self, std::shared_ptr<zerokv::MemoryRegion> region,
+        .def("tag_send_region", [](zerokv::transport::Endpoint& self, std::shared_ptr<zerokv::transport::MemoryRegion> region,
                             zerokv::Tag tag) {
             nb::gil_scoped_release release;
             return self.tag_send(region, 0, region->length(), tag);
         }, "region"_a, "tag"_a)
-        .def("tag_recv", [](zerokv::Endpoint& self, nb::handle buf,
+        .def("tag_recv", [](zerokv::transport::Endpoint& self, nb::handle buf,
                             zerokv::Tag tag, zerokv::Tag tag_mask) {
             auto holder = BufferHolder::extract(buf);
             auto [ptr, len] = holder.get();
             nb::gil_scoped_release release;
             return self.tag_recv(ptr, len, tag, tag_mask);
         }, "buffer"_a, "tag"_a, "tag_mask"_a = zerokv::kTagMaskAll)
-        .def("put", [](zerokv::Endpoint& self,
-                       const std::shared_ptr<zerokv::MemoryRegion>& region,
+        .def("put", [](zerokv::transport::Endpoint& self,
+                       const std::shared_ptr<zerokv::transport::MemoryRegion>& region,
                        uint64_t remote_addr,
                        nb::handle remote_key,
                        std::optional<size_t> length,
@@ -317,8 +317,8 @@ NB_MODULE(_core, m) {
             return self.put(region, remote_addr, rkey);
         }, "region"_a, "remote_addr"_a, "remote_key"_a,
            "length"_a = nb::none(), "local_offset"_a = 0)
-        .def("get", [](zerokv::Endpoint& self,
-                       const std::shared_ptr<zerokv::MemoryRegion>& region,
+        .def("get", [](zerokv::transport::Endpoint& self,
+                       const std::shared_ptr<zerokv::transport::MemoryRegion>& region,
                        uint64_t remote_addr,
                        nb::handle remote_key,
                        std::optional<size_t> length,
@@ -331,63 +331,63 @@ NB_MODULE(_core, m) {
             return self.get(region, remote_addr, rkey);
         }, "region"_a, "remote_addr"_a, "remote_key"_a,
            "length"_a = nb::none(), "local_offset"_a = 0)
-        .def("stream_send", [](zerokv::Endpoint& self, nb::handle buf) {
+        .def("stream_send", [](zerokv::transport::Endpoint& self, nb::handle buf) {
             auto holder = BufferHolder::extract(buf);
             auto [ptr, len] = holder.get();
             nb::gil_scoped_release release;
             return self.stream_send(ptr, len);
         }, "buffer"_a)
-        .def("stream_send_region", [](zerokv::Endpoint& self,
-                                      const std::shared_ptr<zerokv::MemoryRegion>& region) {
+        .def("stream_send_region", [](zerokv::transport::Endpoint& self,
+                                      const std::shared_ptr<zerokv::transport::MemoryRegion>& region) {
             nb::gil_scoped_release release;
             return self.stream_send(region);
         }, "region"_a)
-        .def("stream_recv", [](zerokv::Endpoint& self, nb::handle buf) {
+        .def("stream_recv", [](zerokv::transport::Endpoint& self, nb::handle buf) {
             auto holder = BufferHolder::extract(buf);
             auto [ptr, len] = holder.get();
             nb::gil_scoped_release release;
             return self.stream_recv(ptr, len);
         }, "buffer"_a)
-        .def("stream_recv_region", [](zerokv::Endpoint& self,
-                                      const std::shared_ptr<zerokv::MemoryRegion>& region) {
+        .def("stream_recv_region", [](zerokv::transport::Endpoint& self,
+                                      const std::shared_ptr<zerokv::transport::MemoryRegion>& region) {
             nb::gil_scoped_release release;
             return self.stream_recv(region);
         }, "region"_a)
-        .def("flush", [](zerokv::Endpoint& self) {
+        .def("flush", [](zerokv::transport::Endpoint& self) {
             nb::gil_scoped_release release;
             return self.flush();
         })
-        .def("close", [](zerokv::Endpoint& self) {
+        .def("close", [](zerokv::transport::Endpoint& self) {
             nb::gil_scoped_release release;
             return self.close();
         })
-        .def_prop_ro("is_connected", &zerokv::Endpoint::is_connected)
-        .def_prop_ro("remote_address", &zerokv::Endpoint::remote_address);
+        .def_prop_ro("is_connected", &zerokv::transport::Endpoint::is_connected)
+        .def_prop_ro("remote_address", &zerokv::transport::Endpoint::remote_address);
 
     // --- Worker --------------------------------------------------------------
 
-    nb::class_<zerokv::Worker>(m, "Worker")
-        .def("connect", [](zerokv::Worker& self, const std::string& addr) {
+    nb::class_<zerokv::transport::Worker>(m, "Worker")
+        .def("connect", [](zerokv::transport::Worker& self, const std::string& addr) {
             nb::gil_scoped_release release;
             return self.connect(addr);
         }, "address"_a)
-        .def("connect_blob", [](zerokv::Worker& self, const std::vector<uint8_t>& addr) {
+        .def("connect_blob", [](zerokv::transport::Worker& self, const std::vector<uint8_t>& addr) {
             nb::gil_scoped_release release;
             return self.connect(addr);
         }, "address"_a)
-        .def("listen", &zerokv::Worker::listen,
+        .def("listen", &zerokv::transport::Worker::listen,
              "bind_address"_a, "on_accept"_a)
-        .def("progress", [](zerokv::Worker& self) {
+        .def("progress", [](zerokv::transport::Worker& self) {
             nb::gil_scoped_release release;
             return self.progress();
         })
-        .def("address", [](zerokv::Worker& self) {
+        .def("address", [](zerokv::transport::Worker& self) {
             nb::gil_scoped_release release;
             return self.address();
         })
-        .def_prop_ro("event_fd", &zerokv::Worker::event_fd)
-        .def_prop_ro("index", &zerokv::Worker::index)
-        .def("attach_to_event_loop", [](zerokv::Worker& self, nb::handle loop) {
+        .def_prop_ro("event_fd", &zerokv::transport::Worker::event_fd)
+        .def_prop_ro("index", &zerokv::transport::Worker::index)
+        .def("attach_to_event_loop", [](zerokv::transport::Worker& self, nb::handle loop) {
             nb::object asyncio = nb::module_::import_("asyncio");
             if (loop.is_none()) {
                 loop = asyncio.attr("get_running_loop")();
@@ -401,7 +401,7 @@ NB_MODULE(_core, m) {
             });
             loop.attr("add_reader")(fd, progress_fn);
         }, "loop"_a = nb::none())
-        .def("detach_from_event_loop", [](zerokv::Worker& self, nb::handle loop) {
+        .def("detach_from_event_loop", [](zerokv::transport::Worker& self, nb::handle loop) {
             nb::object asyncio = nb::module_::import_("asyncio");
             if (loop.is_none()) {
                 loop = asyncio.attr("get_running_loop")();
@@ -409,9 +409,9 @@ NB_MODULE(_core, m) {
             loop.attr("remove_reader")(self.event_fd());
         }, "loop"_a = nb::none())
         // Background progress thread for true async operation
-        .def("start_progress_thread", &zerokv::Worker::start_progress_thread)
-        .def("stop_progress_thread", &zerokv::Worker::stop_progress_thread)
-        .def_prop_ro("progress_thread_running", &zerokv::Worker::is_progress_thread_running);
+        .def("start_progress_thread", &zerokv::transport::Worker::start_progress_thread)
+        .def("stop_progress_thread", &zerokv::transport::Worker::stop_progress_thread)
+        .def_prop_ro("progress_thread_running", &zerokv::transport::Worker::is_progress_thread_running);
 
     // --- KV -----------------------------------------------------------------
 
@@ -506,7 +506,7 @@ NB_MODULE(_core, m) {
         }, "key"_a, "buffer"_a)
         .def("publish_region", [](zerokv::core::KVNode& self,
                                   const std::string& key,
-                                  const std::shared_ptr<zerokv::MemoryRegion>& region,
+                                  const std::shared_ptr<zerokv::transport::MemoryRegion>& region,
                                   std::optional<size_t> size) {
             nb::gil_scoped_release release;
             return self.publish_region(key, region, size.value_or(region->length()));
@@ -517,7 +517,7 @@ NB_MODULE(_core, m) {
         }, "key"_a)
         .def("fetch_to", [](zerokv::core::KVNode& self,
                             const std::string& key,
-                            const std::shared_ptr<zerokv::MemoryRegion>& region,
+                            const std::shared_ptr<zerokv::transport::MemoryRegion>& region,
                             size_t length,
                             size_t local_offset) {
             nb::gil_scoped_release release;
@@ -547,65 +547,65 @@ NB_MODULE(_core, m) {
 
     // --- Listener ------------------------------------------------------------
 
-    nb::class_<zerokv::Listener>(m, "Listener")
-        .def_prop_ro("address", &zerokv::Listener::address)
-        .def("close", &zerokv::Listener::close);
+    nb::class_<zerokv::transport::Listener>(m, "Listener")
+        .def_prop_ro("address", &zerokv::transport::Listener::address)
+        .def("close", &zerokv::transport::Listener::close);
 
     // --- Future --------------------------------------------------------------
 
-    nb::class_<zerokv::Future<void>>(m, "FutureVoid")
-        .def("ready", &zerokv::Future<void>::ready)
-        .def("get", [](zerokv::Future<void>& self) {
+    nb::class_<zerokv::transport::Future<void>>(m, "FutureVoid")
+        .def("ready", &zerokv::transport::Future<void>::ready)
+        .def("get", [](zerokv::transport::Future<void>& self) {
             nb::gil_scoped_release release;
             return self.get();
         })
-        .def("cancel", &zerokv::Future<void>::cancel)
-        .def_prop_ro("status", &zerokv::Future<void>::status);
+        .def("cancel", &zerokv::transport::Future<void>::cancel)
+        .def_prop_ro("status", &zerokv::transport::Future<void>::status);
 
-    nb::class_<zerokv::Future<size_t>>(m, "FutureSize")
-        .def("ready", &zerokv::Future<size_t>::ready)
-        .def("get", [](zerokv::Future<size_t>& self) {
+    nb::class_<zerokv::transport::Future<size_t>>(m, "FutureSize")
+        .def("ready", &zerokv::transport::Future<size_t>::ready)
+        .def("get", [](zerokv::transport::Future<size_t>& self) {
             nb::gil_scoped_release release;
             return self.get();
         })
-        .def("cancel", &zerokv::Future<size_t>::cancel)
-        .def_prop_ro("status", &zerokv::Future<size_t>::status);
+        .def("cancel", &zerokv::transport::Future<size_t>::cancel)
+        .def_prop_ro("status", &zerokv::transport::Future<size_t>::status);
 
-    nb::class_<zerokv::Future<std::pair<size_t, zerokv::Tag>>>(m, "FutureRecv")
-        .def("ready", &zerokv::Future<std::pair<size_t, zerokv::Tag>>::ready)
-        .def("get", [](zerokv::Future<std::pair<size_t, zerokv::Tag>>& self) {
+    nb::class_<zerokv::transport::Future<std::pair<size_t, zerokv::Tag>>>(m, "FutureRecv")
+        .def("ready", &zerokv::transport::Future<std::pair<size_t, zerokv::Tag>>::ready)
+        .def("get", [](zerokv::transport::Future<std::pair<size_t, zerokv::Tag>>& self) {
             nb::gil_scoped_release release;
             return self.get();
         })
-        .def("cancel", &zerokv::Future<std::pair<size_t, zerokv::Tag>>::cancel)
-        .def_prop_ro("status", &zerokv::Future<std::pair<size_t, zerokv::Tag>>::status);
+        .def("cancel", &zerokv::transport::Future<std::pair<size_t, zerokv::Tag>>::cancel)
+        .def_prop_ro("status", &zerokv::transport::Future<std::pair<size_t, zerokv::Tag>>::status);
 
-    nb::class_<zerokv::Future<uint64_t>>(m, "FutureU64")
-        .def("ready", &zerokv::Future<uint64_t>::ready)
-        .def("get", [](zerokv::Future<uint64_t>& self) {
+    nb::class_<zerokv::transport::Future<uint64_t>>(m, "FutureU64")
+        .def("ready", &zerokv::transport::Future<uint64_t>::ready)
+        .def("get", [](zerokv::transport::Future<uint64_t>& self) {
             nb::gil_scoped_release release;
             return self.get();
         })
-        .def("cancel", &zerokv::Future<uint64_t>::cancel)
-        .def_prop_ro("status", &zerokv::Future<uint64_t>::status);
+        .def("cancel", &zerokv::transport::Future<uint64_t>::cancel)
+        .def_prop_ro("status", &zerokv::transport::Future<uint64_t>::status);
 
-    nb::class_<zerokv::Future<std::shared_ptr<zerokv::Endpoint>>>(m, "FutureEndpoint")
-        .def("ready", &zerokv::Future<std::shared_ptr<zerokv::Endpoint>>::ready)
-        .def("get", [](zerokv::Future<std::shared_ptr<zerokv::Endpoint>>& self) {
+    nb::class_<zerokv::transport::Future<std::shared_ptr<zerokv::transport::Endpoint>>>(m, "FutureEndpoint")
+        .def("ready", &zerokv::transport::Future<std::shared_ptr<zerokv::transport::Endpoint>>::ready)
+        .def("get", [](zerokv::transport::Future<std::shared_ptr<zerokv::transport::Endpoint>>& self) {
             nb::gil_scoped_release release;
             return self.get();
         })
-        .def("cancel", &zerokv::Future<std::shared_ptr<zerokv::Endpoint>>::cancel)
-        .def_prop_ro("status", &zerokv::Future<std::shared_ptr<zerokv::Endpoint>>::status);
+        .def("cancel", &zerokv::transport::Future<std::shared_ptr<zerokv::transport::Endpoint>>::cancel)
+        .def_prop_ro("status", &zerokv::transport::Future<std::shared_ptr<zerokv::transport::Endpoint>>::status);
 
-    nb::class_<zerokv::Future<zerokv::core::FetchResult>>(m, "FutureFetch")
-        .def("ready", &zerokv::Future<zerokv::core::FetchResult>::ready)
-        .def("get", [](zerokv::Future<zerokv::core::FetchResult>& self) {
+    nb::class_<zerokv::transport::Future<zerokv::core::FetchResult>>(m, "FutureFetch")
+        .def("ready", &zerokv::transport::Future<zerokv::core::FetchResult>::ready)
+        .def("get", [](zerokv::transport::Future<zerokv::core::FetchResult>& self) {
             nb::gil_scoped_release release;
             return self.get();
         })
-        .def("cancel", &zerokv::Future<zerokv::core::FetchResult>::cancel)
-        .def_prop_ro("status", &zerokv::Future<zerokv::core::FetchResult>::status);
+        .def("cancel", &zerokv::transport::Future<zerokv::core::FetchResult>::cancel)
+        .def_prop_ro("status", &zerokv::transport::Future<zerokv::core::FetchResult>::status);
 
     // Note: MemoryPool, RegistrationCache, PluginRegistry bindings
     // will be added when the implementations are complete

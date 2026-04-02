@@ -299,9 +299,9 @@ Public API note:
 - `fetch(key)` is the convenience API and includes a final copy into `FetchResult::data`
 - `fetch_to(key, local_region, length, local_offset)` is the primary zero-copy public fetch API
 
-### MessageKV Phase 1
+### KV Phase 1
 
-- `MessageKV` Phase 1 wraps `publish` / `publish_region` and
+- `KV` Phase 1 wraps `publish` / `publish_region` and
   `subscribe_and_fetch_to_once_many`.
 - Internal ack markers provide bounded, best-effort sender-side cleanup without
   a background thread.

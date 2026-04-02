@@ -200,7 +200,7 @@ API exists:
 
 Current status:
 
-- code path exists in `src/endpoint.cpp`
+- code path exists in `src/transport/endpoint.cpp`
 - not validated as working in the current Soft-RoCE environment
 - should be treated as experimental
 
@@ -213,9 +213,9 @@ Present in the repository:
 - Python bindings [src/python/bindings.cpp](/Users/wangyuchao/code/axon/src/python/bindings.cpp)
 - plugin integrations under [src/plugin](/Users/wangyuchao/code/axon/src/plugin)
 
-### MessageKV Steady-State Notes
+### KV Steady-State Notes
 
-Recent MessageKV tuning confirmed two practical points for the current large-message
+Recent `KV` tuning confirmed two practical points for the current large-message
 path:
 
 - `send_region()` plus preallocated send buffers is the intended steady-state sender path
