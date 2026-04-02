@@ -430,8 +430,8 @@ int run_rank1(const Args& args, const Config& cfg) {
     std::vector<MessageKV::Ptr> workers_mq(static_cast<size_t>(args.threads));
     for (int i = 0; i < args.threads; ++i) {
         workers_ctx[static_cast<size_t>(i)] = Context::create(cfg);
-        workers_region[static_cast<size_t>(i)] =
-            workers_ctx[static_cast<size_t>(i)]->allocate_memory_region(max_size_bytes);
+        workers_region[static_cast<size_t>(i)] = MemoryRegion::allocate(
+            workers_ctx[static_cast<size_t>(i)], max_size_bytes);
         workers_mq[static_cast<size_t>(i)] = MessageKV::create(cfg);
         workers_mq[static_cast<size_t>(i)]->start(NodeConfig{
             .server_addr = args.server_addr,
