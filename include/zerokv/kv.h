@@ -5,6 +5,7 @@
 
 #include "zerokv/core/kv_node.h"
 #include "zerokv/core/kv_server.h"
+#include "zerokv/transport/future.h"
 #include "zerokv/transport/memory.h"
 
 #include <chrono>
@@ -42,6 +43,14 @@ public:
     void stop();
 
     [[nodiscard]] zerokv::transport::MemoryRegion::Ptr allocate_send_region(size_t size);
+
+    [[nodiscard]] zerokv::transport::Future<void> send_async(const std::string& key,
+                                                              const void* data,
+                                                              size_t size);
+    [[nodiscard]] zerokv::transport::Future<void> send_region_async(
+        const std::string& key,
+        const zerokv::transport::MemoryRegion::Ptr& region,
+        size_t size);
 
     void send(const std::string& key, const void* data, size_t size);
     void send_region(const std::string& key,

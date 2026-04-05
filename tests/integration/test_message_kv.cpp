@@ -9,6 +9,8 @@
 #include <gtest/gtest.h>
 #include <system_error>
 #include <thread>
+#include <type_traits>
+#include <utility>
 
 class KvIntegrationTest : public ::testing::Test {
 protected:
@@ -39,6 +41,20 @@ TEST(KvApiSurfaceTest, PublicTypesExist) {
     KV::BatchRecvResult result;
     EXPECT_TRUE(result.completed.empty());
     EXPECT_FALSE(result.completed_all);
+}
+
+TEST(KvApiSurfaceTest, AsyncSenderMethodsExist) {
+    using FutureType = zerokv::transport::Future<void>;
+    static_assert(std::is_same_v<decltype(std::declval<zerokv::KV&>().send_async(
+                      std::declval<const std::string&>(),
+                      std::declval<const void*>(),
+                      std::declval<size_t>())),
+                  FutureType>);
+    static_assert(std::is_same_v<decltype(std::declval<zerokv::KV&>().send_region_async(
+                      std::declval<const std::string&>(),
+                      std::declval<const zerokv::transport::MemoryRegion::Ptr&>(),
+                      std::declval<size_t>())),
+                  FutureType>);
 }
 
 TEST(KvCoreApiSurfaceTest, CoreHeadersCompile) {
