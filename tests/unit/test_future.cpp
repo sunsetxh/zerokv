@@ -23,6 +23,38 @@ TEST(FutureVoidTest, MakeError) {
     EXPECT_EQ(f.status().code(), ErrorCode::kInvalidArgument);
 }
 
+TEST(FutureVoidTest, PromiseCompletesFutureSuccessfully) {
+    Promise<void> promise;
+    auto future = promise.get_future();
+    EXPECT_FALSE(future.ready());
+    EXPECT_EQ(future.status().code(), ErrorCode::kInProgress);
+
+    promise.set_value();
+
+    EXPECT_TRUE(future.ready());
+    EXPECT_NO_THROW(future.get());
+    EXPECT_TRUE(future.status().ok());
+}
+
+TEST(FutureVoidTest, PromisePropagatesError) {
+    Promise<void> promise;
+    auto future = promise.get_future();
+    promise.set_error(Status(ErrorCode::kConnectionReset, "cleanup failed"));
+
+    EXPECT_TRUE(future.ready());
+    future.get();
+    EXPECT_EQ(future.status().code(), ErrorCode::kConnectionReset);
+}
+
+TEST(FutureVoidTest, PromiseFutureTimesOutBeforeCompletion) {
+    Promise<void> promise;
+    auto future = promise.get_future();
+
+    auto result = future.get(std::chrono::milliseconds(1));
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(future.status().code(), ErrorCode::kInProgress);
+}
+
 TEST(FutureSizeTTest, Ready) {
     auto f = Future<size_t>::make_ready(42);
     EXPECT_TRUE(f.ready());

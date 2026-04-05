@@ -14,7 +14,9 @@
 #include <ucp/api/ucp.h>
 
 #include <chrono>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
 #include <memory>
 #include <optional>
 #include <variant>
@@ -257,6 +259,13 @@ private:
 template<>
 class Future<void> {
 public:
+    struct SharedState {
+        mutable std::mutex mu;
+        std::condition_variable cv;
+        zerokv::Status status_{zerokv::Status(ErrorCode::kInProgress)};
+        bool ready_ = false;
+    };
+
     Future() = default;
     ~Future() = default;
 
@@ -266,18 +275,36 @@ public:
     Future& operator=(Future&&) = default;
 
     [[nodiscard]] bool ready() const noexcept { 
+        if (shared_state_) {
+            std::lock_guard<std::mutex> lock(shared_state_->mu);
+            return shared_state_->ready_;
+        }
         if (request_ && !ready_) {
             ready_ = request_->is_complete();
         }
         return ready_; 
     }
     void get() {
+        if (shared_state_) {
+            std::unique_lock<std::mutex> lock(shared_state_->mu);
+            shared_state_->cv.wait(lock, [&] { return shared_state_->ready_; });
+            ready_ = true;
+            return;
+        }
         if (!ready_ && request_) {
             request_->wait();
             ready_ = true;
         }
     }
     std::optional<std::nullptr_t> get(std::chrono::milliseconds timeout) { 
+        if (shared_state_) {
+            std::unique_lock<std::mutex> lock(shared_state_->mu);
+            if (!shared_state_->cv.wait_for(lock, timeout, [&] { return shared_state_->ready_; })) {
+                return std::nullopt;
+            }
+            ready_ = true;
+            return nullptr;
+        }
         if (!ready_) {
             if (request_) {
                 auto st = request_->wait(timeout);
@@ -294,6 +321,11 @@ public:
         return nullptr; 
     }
     [[nodiscard]] zerokv::Status status() const noexcept { 
+        if (shared_state_) {
+            std::lock_guard<std::mutex> lock(shared_state_->mu);
+            return shared_state_->ready_ ? shared_state_->status_
+                                         : zerokv::Status(ErrorCode::kInProgress);
+        }
         if (request_) {
             return request_->status();
         }
@@ -324,9 +356,17 @@ public:
         return f;
     }
 
+    static Future make_shared_state(const std::shared_ptr<SharedState>& state) {
+        Future f;
+        f.shared_state_ = state;
+        f.ready_ = false;
+        return f;
+    }
+
 private:
     friend class Worker;
     friend class Endpoint;
+    friend class Promise<void>;
     explicit Future(Request::Ptr req) : request_(std::move(req)), ready_(false) {}
     struct Impl {
         zerokv::Status status_{zerokv::Status::OK()};
@@ -334,7 +374,40 @@ private:
     };
     std::unique_ptr<Impl> impl_;
     Request::Ptr request_;
+    std::shared_ptr<SharedState> shared_state_;
     mutable bool ready_ = true;
+};
+
+template<>
+class Promise<void> {
+public:
+    Promise() : state_(std::make_shared<Future<void>::SharedState>()) {}
+
+    Promise(const Promise&) = delete;
+    Promise& operator=(const Promise&) = delete;
+    Promise(Promise&&) noexcept = default;
+    Promise& operator=(Promise&&) noexcept = default;
+
+    [[nodiscard]] Future<void> get_future() const {
+        return Future<void>::make_shared_state(state_);
+    }
+
+    void set_value() {
+        std::lock_guard<std::mutex> lock(state_->mu);
+        state_->status_ = zerokv::Status::OK();
+        state_->ready_ = true;
+        state_->cv.notify_all();
+    }
+
+    void set_error(zerokv::Status status) {
+        std::lock_guard<std::mutex> lock(state_->mu);
+        state_->status_ = std::move(status);
+        state_->ready_ = true;
+        state_->cv.notify_all();
+    }
+
+private:
+    std::shared_ptr<Future<void>::SharedState> state_;
 };
 
 // Forward declare Endpoint (included via zerokv/endpoint.h in user code)
