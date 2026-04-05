@@ -96,6 +96,14 @@ size_t max_size_bytes_for_sizes(const std::vector<size_t>& sizes) {
     return *std::max_element(sizes.begin(), sizes.end());
 }
 
+size_t max_total_recv_bytes_for_sizes(size_t messages, const std::vector<size_t>& sizes) {
+    return messages * max_size_bytes_for_sizes(sizes);
+}
+
+bool should_sleep_after_round(size_t round_index, size_t total_rounds) {
+    return total_rounds > 0 && round_index + 1 == total_rounds;
+}
+
 double throughput_mib_per_sec(size_t bytes, uint64_t elapsed_us_value) {
     if (elapsed_us_value == 0) {
         return 0.0;
@@ -296,6 +304,16 @@ int run_rank0(const Args& args, const Config& cfg) {
         return 1;
     }
 
+    const auto recv_region_bytes = zerokv::examples::message_kv_demo::max_total_recv_bytes_for_sizes(
+        static_cast<size_t>(args.messages), sizes);
+    auto region = MemoryRegion::allocate(ctx, recv_region_bytes);
+    if (!region) {
+        std::cerr << "failed to allocate receive region\n";
+        mq->stop();
+        server->stop();
+        return 1;
+    }
+
     auto run_round = [&](size_t protocol_round_index,
                          size_t report_round_index,
                          size_t size_bytes,
@@ -321,14 +339,6 @@ int run_rank0(const Args& args, const Config& cfg) {
                 .length = size_bytes,
                 .offset = static_cast<size_t>(i) * size_bytes,
             });
-        }
-
-        auto region = MemoryRegion::allocate(ctx, total_bytes);
-        if (!region) {
-            std::cerr << "failed to allocate receive region\n";
-            mq->stop();
-            server->stop();
-            return 1;
         }
 
         try {
@@ -394,7 +404,9 @@ int run_rank0(const Args& args, const Config& cfg) {
             server->stop();
             return 1;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(args.post_recv_wait_ms));
+        if (zerokv::examples::message_kv_demo::should_sleep_after_round(round_index, sizes.size())) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(args.post_recv_wait_ms));
+        }
     }
 
     mq->stop();

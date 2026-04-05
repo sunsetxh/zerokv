@@ -10,6 +10,8 @@ std::vector<size_t> parse_sizes_csv(const std::string& csv);
 std::string make_round_key(size_t round_index, size_t size_bytes, size_t thread_index);
 std::string make_payload(size_t round_index, size_t size_bytes, size_t thread_index);
 size_t max_size_bytes_for_sizes(const std::vector<size_t>& sizes);
+size_t max_total_recv_bytes_for_sizes(size_t messages, const std::vector<size_t>& sizes);
+bool should_sleep_after_round(size_t round_index, size_t total_rounds);
 std::string render_send_round_summary(size_t round_index,
                                       size_t size_bytes,
                                       size_t messages,
@@ -50,6 +52,19 @@ TEST(MessageKvDemoHelpersTest, MaxSizeBytesUsesLargestConfiguredPayload) {
     const std::vector<size_t> sizes = {1024u, 64u * 1024u, 1024u * 1024u};
     EXPECT_EQ(zerokv::examples::message_kv_demo::max_size_bytes_for_sizes(sizes),
               1024u * 1024u);
+}
+
+TEST(MessageKvDemoHelpersTest, MaxTotalRecvBytesUsesLargestConfiguredPayloadAndMessageCount) {
+    const std::vector<size_t> sizes = {1024u, 64u * 1024u, 1024u * 1024u};
+    EXPECT_EQ(
+        zerokv::examples::message_kv_demo::max_total_recv_bytes_for_sizes(4, sizes),
+        4u * 1024u * 1024u);
+}
+
+TEST(MessageKvDemoHelpersTest, PostRecvWaitOnlyRunsAfterFinalMeasuredRound) {
+    EXPECT_FALSE(zerokv::examples::message_kv_demo::should_sleep_after_round(0, 3));
+    EXPECT_FALSE(zerokv::examples::message_kv_demo::should_sleep_after_round(1, 3));
+    EXPECT_TRUE(zerokv::examples::message_kv_demo::should_sleep_after_round(2, 3));
 }
 
 TEST(MessageKvDemoHelpersTest, SendRoundSummaryUsesConfiguredSizeAndCounts) {

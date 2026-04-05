@@ -249,6 +249,49 @@ Interpretation:
 - current large-payload optimization work should therefore focus more on sender
   control-path cost than on receiver data-path correctness
 
+### VM1/VM2 Validation Snapshot
+
+The current `afcdf6c` layering/rename state was revalidated on the local QEMU
+Soft-RoCE pair (`VM1=10.0.0.1`, `VM2=10.0.0.2`, `UCX_NET_DEVICES=rxe0:1`):
+
+- `test_message_kv` focused suite: 7/7 passed on VM1
+- `test_kv_node` wait-any subscription test: passed on VM1
+- `test_kv_server`: 4/4 passed on VM1
+- dual-node `message_kv_demo`:
+  - TCP `1K,1M`: passed
+  - RDMA `1K,1M,16M,64M`: passed
+- `kv_bench` RDMA smoke (`hold-owner` + `bench-fetch-to`, `1MiB`, warmup 1):
+  - passed
+  - `fetch_to` throughput: `295.51 MiB/s`
+
+Representative VM receiver numbers from `message_kv_demo` were:
+
+| transport | size | receiver throughput (`RECV_ROUND`) |
+|---|---:|---:|
+| tcp | 1K | 0.756 MiB/s |
+| tcp | 1M | 172.824 MiB/s |
+| rdma (`rxe0`) | 1K | 1.228 MiB/s |
+| rdma (`rxe0`) | 1M | 220.034 MiB/s |
+| rdma (`rxe0`) | 16M | 356.127 MiB/s |
+| rdma (`rxe0`) | 64M | 369.973 MiB/s |
+
+That VM pass also exposed and explained a sender-side anomaly: `1MiB+`
+`SEND_ROUND` timings could jump to a fixed delay of about 2 seconds even while
+the paired receiver round still completed in milliseconds. Trace data showed
+that the slow path was not in ack propagation itself. The actual root cause was
+demo-local:
+
+- `RANK0` re-allocated and re-registered a fresh receive region every measured
+  round
+- `--post-recv-wait-ms` was also being applied after every measured round,
+  rather than only after the final one
+
+After switching `RANK0` back to one preallocated `messages * max(size)` receive
+region and applying the post-receive wait only after the last measured round,
+the VM sender trace returned to normal. In the same `64K,1MiB` TCP check, the
+`1MiB` sender `event_wait_us` dropped from roughly `2,009,614~2,031,509 us` to
+roughly `5,091~18,001 us`.
+
 ## Known Gaps and Unimplemented Items
 
 ### Public API Present but Not Implemented
