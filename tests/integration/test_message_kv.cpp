@@ -424,3 +424,53 @@ TEST_F(KvIntegrationTest, SendRegionRequiresRunningNodeAndValidatesInputs) {
     mq->stop();
     server->stop();
 }
+
+TEST_F(KvIntegrationTest, SendRegionAsyncCompletesAfterAckAndCleanup) {
+    auto server = zerokv::core::KVServer::create(cfg);
+    ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
+
+    auto sender = zerokv::KV::create(cfg);
+    auto receiver = zerokv::KV::create(cfg);
+    sender->start({server->address(), "127.0.0.1:0", "sender"});
+    receiver->start({server->address(), "127.0.0.1:0", "receiver"});
+
+    auto region = sender->allocate_send_region(8);
+    ASSERT_NE(region, nullptr);
+    std::memcpy(region->address(), "payload", 7);
+
+    auto recv_region = zerokv::transport::MemoryRegion::allocate(
+        zerokv::Context::create(cfg), 8);
+    ASSERT_NE(recv_region, nullptr);
+
+    auto future = sender->send_region_async("async-key", region, 7);
+    EXPECT_FALSE(future.ready());
+
+    receiver->recv("async-key", recv_region, 7, 0, std::chrono::seconds(5));
+
+    future.get();
+    EXPECT_TRUE(future.status().ok());
+
+    sender->stop();
+    receiver->stop();
+    server->stop();
+}
+
+TEST_F(KvIntegrationTest, SendRegionAsyncFailsIfStoppedBeforeAck) {
+    auto server = zerokv::core::KVServer::create(cfg);
+    ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
+
+    auto sender = zerokv::KV::create(cfg);
+    sender->start({server->address(), "127.0.0.1:0", "sender"});
+
+    auto region = sender->allocate_send_region(8);
+    ASSERT_NE(region, nullptr);
+    std::memcpy(region->address(), "payload", 7);
+
+    auto future = sender->send_region_async("async-stop", region, 7);
+    sender->stop();
+
+    future.get();
+    EXPECT_EQ(future.status().code(), zerokv::ErrorCode::kConnectionReset);
+
+    server->stop();
+}

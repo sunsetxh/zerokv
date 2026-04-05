@@ -96,6 +96,11 @@ struct KV::Impl {
     std::mutex mu;
     bool running = false;
     std::vector<std::string> owned_ack_keys;
+    struct PendingAsyncSend {
+        std::string message_key;
+        std::string ack_key;
+    };
+    std::vector<PendingAsyncSend> pending_async_sends;
 
     bool node_ready_locked() const noexcept {
         return running && static_cast<bool>(node);
@@ -121,6 +126,11 @@ struct KV::Impl {
 
     void sweep_cleanup_locked() {
         sweep_receiver_ack_cleanup_locked();
+    }
+
+    void record_pending_async_send_locked(const std::string& message_key) {
+        pending_async_sends.push_back(PendingAsyncSend{.message_key = message_key,
+                                                      .ack_key = make_ack_key(message_key)});
     }
 
     void publish_ack_locked(const std::string& message_key) {
@@ -275,6 +285,7 @@ void KV::stop() {
     impl_->node.reset();
     impl_->running = false;
     impl_->owned_ack_keys.clear();
+    impl_->pending_async_sends.clear();
 }
 
 zerokv::transport::MemoryRegion::Ptr KV::allocate_send_region(size_t size) {
@@ -287,6 +298,56 @@ zerokv::transport::MemoryRegion::Ptr KV::allocate_send_region(size_t size) {
         throw std::system_error(make_error_code(ErrorCode::kRegistrationFailed));
     }
     return region;
+}
+
+zerokv::transport::Future<void> KV::send_async(const std::string& key,
+                                               const void* data,
+                                               size_t size) {
+    std::lock_guard<std::mutex> lock(impl_->mu);
+    impl_->sweep_cleanup_locked();
+    if (key.empty()) {
+        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
+    }
+    if (size > 0 && data == nullptr) {
+        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
+    }
+    if (!impl_->node_ready_locked()) {
+        throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
+    }
+
+    auto publish = impl_->node->publish(key, data, size);
+    publish.get();
+    publish.status().throw_if_error();
+    impl_->record_pending_async_send_locked(key);
+    return zerokv::transport::Future<void>::make_error(
+        Status(ErrorCode::kInProgress, "async send pending"));
+}
+
+zerokv::transport::Future<void> KV::send_region_async(
+    const std::string& key,
+    const zerokv::transport::MemoryRegion::Ptr& region,
+    size_t size) {
+    std::lock_guard<std::mutex> lock(impl_->mu);
+    impl_->sweep_cleanup_locked();
+    if (key.empty()) {
+        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
+    }
+    if (!region) {
+        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
+    }
+    if (size > region->length()) {
+        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
+    }
+    if (!impl_->node_ready_locked()) {
+        throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
+    }
+
+    auto publish = impl_->node->publish_region(key, region, size);
+    publish.get();
+    publish.status().throw_if_error();
+    impl_->record_pending_async_send_locked(key);
+    return zerokv::transport::Future<void>::make_error(
+        Status(ErrorCode::kInProgress, "async send pending"));
 }
 
 void KV::send(const std::string& key, const void* data, size_t size) {
