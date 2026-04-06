@@ -1,5 +1,7 @@
 #include "core/tcp_transport.h"
 
+#include "internal/logging.h"
+
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cstring>
@@ -14,6 +16,12 @@ namespace zerokv::core::detail {
 
 namespace {
 
+void log_tcp_error(const std::string& message) {
+    ::zerokv::detail::write_log_line(::zerokv::detail::LogLevel::kError,
+                                     "core.tcp",
+                                     message);
+}
+
 struct ParsedAddress {
     std::string host;
     uint16_t port = 0;
@@ -25,6 +33,7 @@ bool parse_address(const std::string& address, ParsedAddress* out, std::string* 
         if (error) {
             *error = "invalid control address";
         }
+        log_tcp_error("parse_address failed: invalid control address=" + address);
         return false;
     }
 
@@ -36,6 +45,7 @@ bool parse_address(const std::string& address, ParsedAddress* out, std::string* 
             if (error) {
                 *error = "invalid control port";
             }
+            log_tcp_error("parse_address failed: invalid control port address=" + address);
             return false;
         }
         port = (port * 10) + static_cast<uint64_t>(c - '0');
@@ -43,6 +53,7 @@ bool parse_address(const std::string& address, ParsedAddress* out, std::string* 
             if (error) {
                 *error = "control port out of range";
             }
+            log_tcp_error("parse_address failed: control port out of range address=" + address);
             return false;
         }
     }
@@ -65,6 +76,7 @@ int TcpTransport::listen(const std::string& address, std::string* bound_address,
         if (error) {
             *error = std::strerror(errno);
         }
+        log_tcp_error(std::string("socket failed in listen: ") + std::strerror(errno));
         return -1;
     }
 
@@ -78,6 +90,7 @@ int TcpTransport::listen(const std::string& address, std::string* bound_address,
         if (error) {
             *error = "invalid IPv4 control host";
         }
+        log_tcp_error("listen failed: invalid IPv4 control host=" + parsed.host);
         ::close(fd);
         return -1;
     }
@@ -86,6 +99,7 @@ int TcpTransport::listen(const std::string& address, std::string* bound_address,
         if (error) {
             *error = std::strerror(errno);
         }
+        log_tcp_error(std::string("bind failed in listen: ") + std::strerror(errno));
         ::close(fd);
         return -1;
     }
@@ -93,6 +107,7 @@ int TcpTransport::listen(const std::string& address, std::string* bound_address,
         if (error) {
             *error = std::strerror(errno);
         }
+        log_tcp_error(std::string("listen syscall failed: ") + std::strerror(errno));
         ::close(fd);
         return -1;
     }
@@ -141,6 +156,7 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
         if (error) {
             *error = std::strerror(errno);
         }
+        log_tcp_error(std::string("socket failed in connect: ") + std::strerror(errno));
         return -1;
     }
 
@@ -151,6 +167,7 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
         if (error) {
             *error = "invalid IPv4 control host";
         }
+        log_tcp_error("connect failed: invalid IPv4 control host=" + parsed.host);
         ::close(fd);
         return -1;
     }
@@ -160,6 +177,7 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
             if (error) {
                 *error = std::strerror(errno);
             }
+            log_tcp_error(std::string("connect failed: ") + std::strerror(errno));
             ::close(fd);
             return -1;
         }
@@ -172,6 +190,7 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
         if (error) {
             *error = std::strerror(errno);
         }
+        log_tcp_error(std::string("fcntl(F_GETFL) failed: ") + std::strerror(errno));
         ::close(fd);
         return -1;
     }
@@ -179,6 +198,7 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
         if (error) {
             *error = std::strerror(errno);
         }
+        log_tcp_error(std::string("fcntl(F_SETFL,O_NONBLOCK) failed: ") + std::strerror(errno));
         ::close(fd);
         return -1;
     }
@@ -192,6 +212,7 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
         if (error) {
             *error = std::strerror(errno);
         }
+        log_tcp_error(std::string("connect failed before poll: ") + std::strerror(errno));
         ::close(fd);
         return -1;
     }
@@ -209,6 +230,7 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
         if (error) {
             *error = "timed out";
         }
+        log_tcp_error("connect poll timed out");
         ::close(fd);
         return -1;
     }
@@ -216,6 +238,7 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
         if (error) {
             *error = std::strerror(errno);
         }
+        log_tcp_error(std::string("connect poll failed: ") + std::strerror(errno));
         ::close(fd);
         return -1;
     }
@@ -226,6 +249,7 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
         if (error) {
             *error = std::strerror(errno);
         }
+        log_tcp_error(std::string("getsockopt(SO_ERROR) failed: ") + std::strerror(errno));
         ::close(fd);
         return -1;
     }
@@ -233,6 +257,7 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
         if (error) {
             *error = std::strerror(so_error);
         }
+        log_tcp_error(std::string("connect completed with socket error: ") + std::strerror(so_error));
         ::close(fd);
         return -1;
     }
@@ -241,6 +266,7 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
         if (error) {
             *error = std::strerror(errno);
         }
+        log_tcp_error(std::string("fcntl(F_SETFL,restore) failed: ") + std::strerror(errno));
         ::close(fd);
         return -1;
     }
@@ -256,6 +282,7 @@ bool TcpTransport::send_all(int fd, std::span<const uint8_t> data) {
             if (errno == EINTR) {
                 continue;
             }
+            log_tcp_error(std::string("send_all failed: ") + std::strerror(errno));
             return false;
         }
         total += static_cast<size_t>(rc);
@@ -274,6 +301,7 @@ bool TcpTransport::recv_exact(int fd, std::span<uint8_t> data) {
             if (errno == EINTR) {
                 continue;
             }
+            log_tcp_error(std::string("recv_exact failed: ") + std::strerror(errno));
             return false;
         }
         total += static_cast<size_t>(rc);

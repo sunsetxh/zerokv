@@ -4,6 +4,7 @@
 #include "zerokv/transport/endpoint.h"
 #include "zerokv/common.h"
 
+#include "internal/logging.h"
 #include "internal/listener_addr.h"
 
 #include <ucp/api/ucp.h>
@@ -25,6 +26,12 @@
 namespace zerokv::transport {
 
 namespace {
+
+void log_worker_error(const std::string& message) {
+    ::zerokv::detail::write_log_line(::zerokv::detail::LogLevel::kError,
+                                     "transport.worker",
+                                     message);
+}
 
 struct TagRecvCallbackState {
     size_t* bytes = nullptr;
@@ -123,6 +130,8 @@ static void connection_handler(ucp_conn_request_h conn_request, void* arg) {
     ucp_ep_h ep_handle = nullptr;
     ucs_status_t status = ucp_ep_create(worker, &ep_params, &ep_handle);
     if (status != UCS_OK) {
+        log_worker_error(std::string("server-side ucp_ep_create failed: ") +
+                         ucs_status_string(status));
         return;
     }
 
@@ -151,6 +160,7 @@ Worker::Ptr Worker::create(const Context::Ptr& ctx, size_t index) {
         &params, &worker);
 
     if (status != UCS_OK) {
+        log_worker_error(std::string("ucp_worker_create failed: ") + ucs_status_string(status));
         return nullptr;
     }
 
@@ -271,6 +281,7 @@ Future<std::pair<size_t, Tag>> Worker::tag_recv(void* buffer, size_t length,
 
     if (UCS_PTR_IS_ERR(status)) {
         ucs_status_t err = UCS_PTR_STATUS(status);
+        log_worker_error(std::string("worker ucp_tag_recv_nbx failed: ") + ucs_status_string(err));
         return Future<std::pair<size_t, Tag>>::make_error(
             Status(ErrorCode::kTransportError, std::string("Worker recv failed: ") + ucs_status_string(err)));
     }
@@ -311,6 +322,8 @@ Future<std::shared_ptr<Endpoint>> Worker::connect(const std::vector<uint8_t>& re
     ucs_status_t status = ucp_ep_create(impl_->handle_, &ep_params, &ep_handle);
 
     if (status != UCS_OK) {
+        log_worker_error(std::string("ucp_ep_create(remote_address) failed: ") +
+                         ucs_status_string(status));
         return Future<std::shared_ptr<Endpoint>>::make_error(
             Status(ErrorCode::kTransportError,
                    std::string("Failed to create endpoint: ") + ucs_status_string(status)));
@@ -400,6 +413,8 @@ Future<std::shared_ptr<Endpoint>> Worker::connect(const std::string& address,
     ucs_status_t status = ucp_ep_create(impl_->handle_, &ep_params, &ep_handle);
 
     if (status != UCS_OK) {
+        log_worker_error(std::string("ucp_ep_create(sockaddr) failed for ") + address + ": " +
+                         ucs_status_string(status));
         return Future<std::shared_ptr<Endpoint>>::make_error(
             Status(ErrorCode::kTransportError,
                    std::string("Failed to connect to ") + address + ": " + ucs_status_string(status)));
@@ -467,6 +482,8 @@ Listener::Ptr Worker::listen(const std::string& address,
     ucs_status_t status = ucp_listener_create(impl_->handle_, &params, &listener);
 
     if (status != UCS_OK) {
+        log_worker_error(std::string("ucp_listener_create failed for ") + address + ": " +
+                         ucs_status_string(status));
         return nullptr;
     }
 
