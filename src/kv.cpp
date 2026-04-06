@@ -490,68 +490,27 @@ zerokv::transport::Future<void> KV::send_region_async(
 }
 
 void KV::send(const std::string& key, const void* data, size_t size) {
-    std::lock_guard<std::mutex> lock(impl_->mu);
-    impl_->sweep_cleanup_locked();
-    if (key.empty()) {
-        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
-    }
-    if (size > 0 && data == nullptr) {
-        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
-    }
-    if (!impl_->node_ready_locked()) {
-        throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
-    }
-
-    const auto publish_start = SteadyClock::now();
-    auto publish = impl_->node->publish(key, data, size);
-    publish.get();
-    publish.status().throw_if_error();
-    const auto publish_end = SteadyClock::now();
-    trace_message_kv("MESSAGE_KV_SEND_PUBLISH_DONE key=" + key +
-                     " bytes=" + std::to_string(size) +
-                     " publish_us=" + std::to_string(elapsed_us(publish_start, publish_end)));
-    impl_->wait_for_ack_and_cleanup_message_locked(key);
+    const auto send_start = SteadyClock::now();
+    auto future = send_async(key, data, size);
+    future.get();
+    future.status().throw_if_error();
     const auto send_end = SteadyClock::now();
     trace_message_kv("MESSAGE_KV_SEND key=" + key +
                      " bytes=" + std::to_string(size) +
-                     " publish_us=" + std::to_string(elapsed_us(publish_start, publish_end)) +
-                     " post_publish_us=" + std::to_string(elapsed_us(publish_end, send_end)) +
-                     " total_us=" + std::to_string(elapsed_us(publish_start, send_end)));
+                     " total_us=" + std::to_string(elapsed_us(send_start, send_end)));
 }
 
 void KV::send_region(const std::string& key,
                      const zerokv::transport::MemoryRegion::Ptr& region,
                      size_t size) {
-    std::lock_guard<std::mutex> lock(impl_->mu);
-    impl_->sweep_cleanup_locked();
-    if (key.empty()) {
-        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
-    }
-    if (!region) {
-        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
-    }
-    if (size > region->length()) {
-        throw std::system_error(make_error_code(ErrorCode::kInvalidArgument));
-    }
-    if (!impl_->node_ready_locked()) {
-        throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
-    }
-
-    const auto publish_start = SteadyClock::now();
-    auto publish = impl_->node->publish_region(key, region, size);
-    publish.get();
-    publish.status().throw_if_error();
-    const auto publish_end = SteadyClock::now();
-    trace_message_kv("MESSAGE_KV_SEND_REGION_PUBLISH_DONE key=" + key +
-                     " bytes=" + std::to_string(size) +
-                     " publish_us=" + std::to_string(elapsed_us(publish_start, publish_end)));
-    impl_->wait_for_ack_and_cleanup_message_locked(key);
+    const auto send_start = SteadyClock::now();
+    auto future = send_region_async(key, region, size);
+    future.get();
+    future.status().throw_if_error();
     const auto send_end = SteadyClock::now();
     trace_message_kv("MESSAGE_KV_SEND_REGION key=" + key +
                      " bytes=" + std::to_string(size) +
-                     " publish_us=" + std::to_string(elapsed_us(publish_start, publish_end)) +
-                     " post_publish_us=" + std::to_string(elapsed_us(publish_end, send_end)) +
-                     " total_us=" + std::to_string(elapsed_us(publish_start, send_end)));
+                     " total_us=" + std::to_string(elapsed_us(send_start, send_end)));
 }
 
 void KV::recv(const std::string& key,

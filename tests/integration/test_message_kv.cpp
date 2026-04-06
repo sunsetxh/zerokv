@@ -363,6 +363,41 @@ TEST_F(KvIntegrationTest, SendRegionUnpublishesMessageKeyAfterAck) {
     server->stop();
 }
 
+TEST_F(KvIntegrationTest, SendRegionStillWaitsForAckBeforeReturning) {
+    auto server = zerokv::core::KVServer::create(cfg);
+    ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
+
+    auto sender = zerokv::KV::create(cfg);
+    auto receiver = zerokv::KV::create(cfg);
+    sender->start({server->address(), "127.0.0.1:0", "sender"});
+    receiver->start({server->address(), "127.0.0.1:0", "receiver"});
+
+    auto send_region = sender->allocate_send_region(8);
+    ASSERT_NE(send_region, nullptr);
+    std::memcpy(send_region->address(), "payload", 7);
+
+    auto recv_region = zerokv::transport::MemoryRegion::allocate(
+        zerokv::Context::create(cfg), 8);
+    ASSERT_NE(recv_region, nullptr);
+
+    std::atomic<bool> send_returned{false};
+    std::thread send_thread([&] {
+        sender->send_region("sync-key", send_region, 7);
+        send_returned.store(true);
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_FALSE(send_returned.load());
+
+    receiver->recv("sync-key", recv_region, 7, 0, std::chrono::seconds(5));
+    send_thread.join();
+    EXPECT_TRUE(send_returned.load());
+
+    sender->stop();
+    receiver->stop();
+    server->stop();
+}
+
 TEST_F(KvIntegrationTest, SendRequiresRunningNodeAndValidatesInputs) {
     auto mq = zerokv::KV::create(cfg);
     expect_system_error_code([&] { mq->send("key", "x", 1); },
