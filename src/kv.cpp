@@ -109,6 +109,7 @@ struct KV::Impl {
         bool subscribed = false;
     };
     std::deque<PendingAsyncSend> pending_async_sends;
+    std::unordered_map<std::string, PendingAsyncSend> active_async_sends;
 
     bool node_ready_locked() const noexcept {
         return running && static_cast<bool>(node);
@@ -136,94 +137,125 @@ struct KV::Impl {
         sweep_receiver_ack_cleanup_locked();
     }
 
-    bool wait_for_ack_or_stop(const std::string& ack_key, uint64_t* event_wait_us) {
-        const auto start = SteadyClock::now();
-        while (true) {
-            {
-                std::lock_guard<std::mutex> lock(mu);
-                if (cleanup_stop || !running || !node) {
-                    *event_wait_us = elapsed_us(start, SteadyClock::now());
-                    return false;
-                }
-            }
-
-            auto status = node->wait_for_subscription_event(ack_key, std::chrono::milliseconds(50));
-            if (status.ok()) {
-                *event_wait_us = elapsed_us(start, SteadyClock::now());
-                return true;
-            }
-            auto fallback = node->wait_for_key(ack_key, std::chrono::milliseconds(1));
-            if (fallback.ok()) {
-                *event_wait_us = elapsed_us(start, SteadyClock::now());
-                return true;
-            }
-            if (status.code() != ErrorCode::kTimeout) {
-                *event_wait_us = elapsed_us(start, SteadyClock::now());
-                return false;
-            }
-        }
-    }
-
     void fail_pending_async_sends_locked(zerokv::Status status) {
         while (!pending_async_sends.empty()) {
             auto pending = std::move(pending_async_sends.front());
             pending_async_sends.pop_front();
             pending.promise.set_error(status);
         }
+        while (!active_async_sends.empty()) {
+            auto it = active_async_sends.begin();
+            auto pending = std::move(it->second);
+            active_async_sends.erase(it);
+            pending.promise.set_error(status);
+        }
+    }
+
+    void drain_pending_async_sends_locked() {
+        while (!pending_async_sends.empty()) {
+            auto pending = std::move(pending_async_sends.front());
+            pending_async_sends.pop_front();
+            active_async_sends.emplace(pending.ack_key, std::move(pending));
+        }
     }
 
     void cleanup_loop() {
         while (true) {
-            PendingAsyncSend pending;
+            std::vector<std::string> active_ack_keys;
             {
                 std::unique_lock<std::mutex> lock(mu);
-                cleanup_cv.wait(lock, [&] { return cleanup_stop || !pending_async_sends.empty(); });
-                if (cleanup_stop && pending_async_sends.empty()) {
+                cleanup_cv.wait(lock, [&] {
+                    return cleanup_stop || !pending_async_sends.empty() || !active_async_sends.empty();
+                });
+                if (cleanup_stop) {
                     return;
                 }
-                pending = std::move(pending_async_sends.front());
-                pending_async_sends.pop_front();
-            }
-
-            uint64_t event_wait_us = 0;
-            const bool acked = wait_for_ack_or_stop(pending.ack_key, &event_wait_us);
-            trace_message_kv("MESSAGE_KV_ASYNC_ACK_WAIT key=" + pending.message_key +
-                             " event_wait_us=" + std::to_string(event_wait_us) +
-                             " status=" + std::to_string(acked ? 0 : static_cast<int>(ErrorCode::kConnectionReset)));
-
-            {
-                std::lock_guard<std::mutex> lock(mu);
-                if (running && node && pending.subscribed) {
-                    auto unsubscribe_future = node->unsubscribe(pending.ack_key);
-                    if (unsubscribe_future.status().ok()) {
-                        unsubscribe_future.get();
-                    }
+                drain_pending_async_sends_locked();
+                active_ack_keys.reserve(active_async_sends.size());
+                for (const auto& [ack_key, _] : active_async_sends) {
+                    active_ack_keys.push_back(ack_key);
                 }
+                trace_message_kv("MESSAGE_KV_ASYNC_BATCH_DRAIN active=" +
+                                 std::to_string(active_async_sends.size()) +
+                                 " queued=" + std::to_string(pending_async_sends.size()));
             }
 
-            if (!acked) {
-                pending.promise.set_error(Status(ErrorCode::kConnectionReset, "KV is stopping"));
+            if (active_ack_keys.empty()) {
                 continue;
             }
 
-            bool cleaned = false;
-            {
-                std::lock_guard<std::mutex> lock(mu);
-                if (running && node) {
-                    auto unpublish = node->unpublish(pending.message_key);
-                    unpublish.get();
-                    if (unpublish.status().ok()) {
-                        cleaned = true;
-                    }
+            trace_message_kv("MESSAGE_KV_ASYNC_BATCH_WAIT_ANY active=" +
+                             std::to_string(active_ack_keys.size()));
+
+            std::unordered_set<std::string> ready_ack_keys;
+            if (auto event = node->wait_for_any_subscription_event(active_ack_keys,
+                                                                   std::chrono::milliseconds(50))) {
+                ready_ack_keys.insert(event->key);
+                trace_message_kv("MESSAGE_KV_ASYNC_BATCH_READY ack_key=" + event->key +
+                                 " via=event");
+            }
+
+            for (const auto& ack_key : active_ack_keys) {
+                if (ready_ack_keys.count(ack_key) != 0) {
+                    continue;
+                }
+                auto status = node->wait_for_key(ack_key, std::chrono::milliseconds(1));
+                if (status.ok()) {
+                    ready_ack_keys.insert(ack_key);
+                    trace_message_kv("MESSAGE_KV_ASYNC_BATCH_READY ack_key=" + ack_key +
+                                     " via=fallback");
                 }
             }
 
-            if (cleaned) {
-                pending.promise.set_value();
-                trace_message_kv("MESSAGE_KV_SEND_ASYNC_COMPLETE key=" + pending.message_key +
-                                 " status=0");
-            } else {
-                pending.promise.set_error(Status(ErrorCode::kConnectionReset, "failed to cleanup async send"));
+            if (ready_ack_keys.empty()) {
+                continue;
+            }
+
+            for (const auto& ack_key : ready_ack_keys) {
+                PendingAsyncSend pending;
+                {
+                    std::lock_guard<std::mutex> lock(mu);
+                    auto it = active_async_sends.find(ack_key);
+                    if (it == active_async_sends.end()) {
+                        continue;
+                    }
+                    pending = std::move(it->second);
+                    active_async_sends.erase(it);
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(mu);
+                    if (running && node && pending.subscribed) {
+                        auto unsubscribe_future = node->unsubscribe(pending.ack_key);
+                        if (unsubscribe_future.status().ok()) {
+                            unsubscribe_future.get();
+                        }
+                    }
+                }
+
+                bool cleaned = false;
+                {
+                    std::lock_guard<std::mutex> lock(mu);
+                    if (running && node) {
+                        auto unpublish = node->unpublish(pending.message_key);
+                        unpublish.get();
+                        if (unpublish.status().ok()) {
+                            cleaned = true;
+                        }
+                    }
+                }
+
+                if (cleaned) {
+                    pending.promise.set_value();
+                    trace_message_kv("MESSAGE_KV_ASYNC_BATCH_COMPLETE key=" + pending.message_key +
+                                     " status=0");
+                } else {
+                    pending.promise.set_error(
+                        Status(ErrorCode::kConnectionReset, "failed to cleanup async send"));
+                    trace_message_kv("MESSAGE_KV_ASYNC_BATCH_COMPLETE key=" + pending.message_key +
+                                     " status=" +
+                                     std::to_string(static_cast<int>(ErrorCode::kConnectionReset)));
+                }
             }
         }
     }
@@ -422,13 +454,14 @@ zerokv::transport::Future<void> KV::send_async(const std::string& key,
         throw std::system_error(make_error_code(ErrorCode::kConnectionRefused));
     }
 
-    auto publish = impl_->node->publish(key, data, size);
-    auto subscribe_future = impl_->node->subscribe(make_ack_key(key));
+    const auto ack_key = make_ack_key(key);
+    auto subscribe_future = impl_->node->subscribe(ack_key);
     subscribe_future.status().throw_if_error();
     subscribe_future.get();
+    auto publish = impl_->node->publish(key, data, size);
     publish.get();
     if (!publish.status().ok()) {
-        auto unsubscribe_future = impl_->node->unsubscribe(make_ack_key(key));
+        auto unsubscribe_future = impl_->node->unsubscribe(ack_key);
         if (unsubscribe_future.status().ok()) {
             unsubscribe_future.get();
         }
@@ -436,7 +469,7 @@ zerokv::transport::Future<void> KV::send_async(const std::string& key,
     }
     KV::Impl::PendingAsyncSend pending;
     pending.message_key = key;
-    pending.ack_key = make_ack_key(key);
+    pending.ack_key = ack_key;
     pending.subscribed = true;
     auto future = pending.promise.get_future();
     impl_->pending_async_sends.push_back(std::move(pending));
