@@ -549,3 +549,44 @@ TEST_F(KvIntegrationTest, AsyncSendCleanupCompletesByAckArrivalOrder) {
     receiver->stop();
     server->stop();
 }
+
+TEST_F(KvIntegrationTest, AsyncSendDeferredAckUnsubscribeDoesNotBlockNextSendOrStop) {
+    auto server = zerokv::core::KVServer::create(cfg);
+    ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
+
+    auto sender = zerokv::KV::create(cfg);
+    auto receiver = zerokv::KV::create(cfg);
+    sender->start({server->address(), "127.0.0.1:0", "sender"});
+    receiver->start({server->address(), "127.0.0.1:0", "receiver"});
+
+    auto send_region_a = sender->allocate_send_region(8);
+    auto send_region_b = sender->allocate_send_region(8);
+    ASSERT_NE(send_region_a, nullptr);
+    ASSERT_NE(send_region_b, nullptr);
+    std::memcpy(send_region_a->address(), "firstxx", 7);
+    std::memcpy(send_region_b->address(), "secondx", 7);
+
+    auto recv_region = zerokv::transport::MemoryRegion::allocate(
+        zerokv::Context::create(cfg), 16);
+    ASSERT_NE(recv_region, nullptr);
+
+    auto future_a = sender->send_region_async("defer-a", send_region_a, 7);
+    receiver->recv("defer-a", recv_region, 7, 0, std::chrono::seconds(5));
+    future_a.get();
+    EXPECT_TRUE(future_a.status().ok());
+    EXPECT_EQ(std::memcmp(recv_region->address(), "firstxx", 7), 0);
+
+    auto future_b = sender->send_region_async("defer-b", send_region_b, 7);
+    receiver->recv("defer-b", recv_region, 7, 8, std::chrono::seconds(5));
+    future_b.get();
+    EXPECT_TRUE(future_b.status().ok());
+    EXPECT_EQ(std::memcmp(static_cast<const char*>(recv_region->address()) + 8, "secondx", 7), 0);
+
+    auto keys = server->list_keys();
+    EXPECT_EQ(std::find(keys.begin(), keys.end(), "defer-a"), keys.end());
+    EXPECT_EQ(std::find(keys.begin(), keys.end(), "defer-b"), keys.end());
+
+    sender->stop();
+    receiver->stop();
+    server->stop();
+}

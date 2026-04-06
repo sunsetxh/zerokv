@@ -102,6 +102,7 @@ struct KV::Impl {
     bool running = false;
     bool cleanup_stop = false;
     std::vector<std::string> owned_ack_keys;
+    std::vector<std::string> stale_sender_ack_keys;
     struct PendingAsyncSend {
         std::string message_key;
         std::string ack_key;
@@ -133,8 +134,33 @@ struct KV::Impl {
         owned_ack_keys.swap(remaining);
     }
 
+    void sweep_sender_ack_unsubscribe_locked() {
+        if (!node_ready_locked() || stale_sender_ack_keys.empty()) {
+            return;
+        }
+
+        std::vector<std::string> remaining;
+        remaining.reserve(stale_sender_ack_keys.size());
+        for (const auto& ack_key : stale_sender_ack_keys) {
+            trace_message_kv("MESSAGE_KV_SWEEP_ACK_UNSUBSCRIBE ack_key=" + ack_key);
+            auto unsubscribe = node->unsubscribe(ack_key);
+            if (unsubscribe.status().ok()) {
+                unsubscribe.get();
+            }
+            if (!unsubscribe.status().ok()) {
+                remaining.push_back(ack_key);
+                trace_message_kv("MESSAGE_KV_SWEEP_ACK_UNSUBSCRIBE_FAILED ack_key=" + ack_key +
+                                 " code=" +
+                                 std::to_string(static_cast<int>(unsubscribe.status().code())));
+            }
+        }
+
+        stale_sender_ack_keys.swap(remaining);
+    }
+
     void sweep_cleanup_locked() {
         sweep_receiver_ack_cleanup_locked();
+        sweep_sender_ack_unsubscribe_locked();
     }
 
     void fail_pending_async_sends_locked(zerokv::Status status) {
@@ -223,16 +249,6 @@ struct KV::Impl {
                     active_async_sends.erase(it);
                 }
 
-                {
-                    std::lock_guard<std::mutex> lock(mu);
-                    if (running && node && pending.subscribed) {
-                        auto unsubscribe_future = node->unsubscribe(pending.ack_key);
-                        if (unsubscribe_future.status().ok()) {
-                            unsubscribe_future.get();
-                        }
-                    }
-                }
-
                 bool cleaned = false;
                 {
                     std::lock_guard<std::mutex> lock(mu);
@@ -246,6 +262,12 @@ struct KV::Impl {
                 }
 
                 if (cleaned) {
+                    {
+                        std::lock_guard<std::mutex> lock(mu);
+                        stale_sender_ack_keys.push_back(pending.ack_key);
+                    }
+                    trace_message_kv("MESSAGE_KV_ASYNC_DEFER_UNSUBSCRIBE ack_key=" +
+                                     pending.ack_key);
                     pending.promise.set_value();
                     trace_message_kv("MESSAGE_KV_ASYNC_BATCH_COMPLETE key=" + pending.message_key +
                                      " status=0");
@@ -301,13 +323,6 @@ struct KV::Impl {
                          " total_wait_us=" + std::to_string(elapsed_us(subscribe_end, wait_end)) +
                          " status=" + std::to_string(static_cast<int>(ack_status.code())));
 
-        const auto unsubscribe_start = SteadyClock::now();
-        auto unsubscribe_future = node->unsubscribe(ack_key);
-        if (unsubscribe_future.status().ok()) {
-            unsubscribe_future.get();
-        }
-        const auto unsubscribe_end = SteadyClock::now();
-
         if (!ack_status.ok()) {
             auto rollback = node->unpublish(message_key);
             rollback.get();
@@ -319,8 +334,9 @@ struct KV::Impl {
         unpublish.get();
         unpublish.status().throw_if_error();
         const auto unpublish_end = SteadyClock::now();
+        stale_sender_ack_keys.push_back(ack_key);
+        trace_message_kv("MESSAGE_KV_ASYNC_DEFER_UNSUBSCRIBE ack_key=" + ack_key);
         trace_message_kv("MESSAGE_KV_ACK_CLEANUP key=" + message_key +
-                         " unsubscribe_ack_us=" + std::to_string(elapsed_us(unsubscribe_start, unsubscribe_end)) +
                          " unpublish_msg_us=" + std::to_string(elapsed_us(unpublish_start, unpublish_end)));
     }
 
