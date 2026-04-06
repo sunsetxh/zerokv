@@ -142,15 +142,15 @@ struct KV::Impl {
         std::vector<std::string> remaining;
         remaining.reserve(stale_sender_ack_keys.size());
         for (const auto& ack_key : stale_sender_ack_keys) {
-            trace_message_kv("MESSAGE_KV_SWEEP_ACK_UNSUBSCRIBE ack_key=" + ack_key);
+            trace_message_kv("KV_ASYNC_CLEANUP_SWEEP_ACK_UNSUBSCRIBE ack_key=" + ack_key);
             auto unsubscribe = node->unsubscribe(ack_key);
             if (unsubscribe.status().ok()) {
                 unsubscribe.get();
             }
             if (!unsubscribe.status().ok()) {
                 remaining.push_back(ack_key);
-                trace_message_kv("MESSAGE_KV_SWEEP_ACK_UNSUBSCRIBE_FAILED ack_key=" + ack_key +
-                                 " code=" +
+                trace_message_kv("KV_ASYNC_CLEANUP_SWEEP_ACK_UNSUBSCRIBE_FAILED ack_key=" + ack_key +
+                                 " status=" +
                                  std::to_string(static_cast<int>(unsubscribe.status().code())));
             }
         }
@@ -201,7 +201,7 @@ struct KV::Impl {
                 for (const auto& [ack_key, _] : active_async_sends) {
                     active_ack_keys.push_back(ack_key);
                 }
-                trace_message_kv("MESSAGE_KV_ASYNC_BATCH_DRAIN active=" +
+                trace_message_kv("KV_ASYNC_CLEANUP_DRAIN active=" +
                                  std::to_string(active_async_sends.size()) +
                                  " queued=" + std::to_string(pending_async_sends.size()));
             }
@@ -210,15 +210,16 @@ struct KV::Impl {
                 continue;
             }
 
-            trace_message_kv("MESSAGE_KV_ASYNC_BATCH_WAIT_ANY active=" +
-                             std::to_string(active_ack_keys.size()));
+            trace_message_kv("KV_ASYNC_CLEANUP_WAIT_ANY active=" +
+                             std::to_string(active_ack_keys.size()) +
+                             " wait_ms=50");
 
             std::unordered_set<std::string> ready_ack_keys;
             if (auto event = node->wait_for_any_subscription_event(active_ack_keys,
                                                                    std::chrono::milliseconds(50))) {
                 ready_ack_keys.insert(event->key);
-                trace_message_kv("MESSAGE_KV_ASYNC_BATCH_READY ack_key=" + event->key +
-                                 " via=event");
+                trace_message_kv("KV_ASYNC_CLEANUP_READY ack_key=" + event->key +
+                                 " source=event");
             }
 
             for (const auto& ack_key : active_ack_keys) {
@@ -228,8 +229,8 @@ struct KV::Impl {
                 auto status = node->wait_for_key(ack_key, std::chrono::milliseconds(1));
                 if (status.ok()) {
                     ready_ack_keys.insert(ack_key);
-                    trace_message_kv("MESSAGE_KV_ASYNC_BATCH_READY ack_key=" + ack_key +
-                                     " via=fallback");
+                    trace_message_kv("KV_ASYNC_CLEANUP_READY ack_key=" + ack_key +
+                                     " source=fallback");
                 }
             }
 
@@ -266,15 +267,15 @@ struct KV::Impl {
                         std::lock_guard<std::mutex> lock(mu);
                         stale_sender_ack_keys.push_back(pending.ack_key);
                     }
-                    trace_message_kv("MESSAGE_KV_ASYNC_DEFER_UNSUBSCRIBE ack_key=" +
+                    trace_message_kv("KV_ASYNC_CLEANUP_DEFER_ACK_UNSUBSCRIBE ack_key=" +
                                      pending.ack_key);
                     pending.promise.set_value();
-                    trace_message_kv("MESSAGE_KV_ASYNC_BATCH_COMPLETE key=" + pending.message_key +
+                    trace_message_kv("KV_ASYNC_CLEANUP_COMPLETE key=" + pending.message_key +
                                      " status=0");
                 } else {
                     pending.promise.set_error(
                         Status(ErrorCode::kConnectionReset, "failed to cleanup async send"));
-                    trace_message_kv("MESSAGE_KV_ASYNC_BATCH_COMPLETE key=" + pending.message_key +
+                    trace_message_kv("KV_ASYNC_CLEANUP_COMPLETE key=" + pending.message_key +
                                      " status=" +
                                      std::to_string(static_cast<int>(ErrorCode::kConnectionReset)));
                 }
@@ -316,9 +317,8 @@ struct KV::Impl {
             }
         }
         const auto wait_end = SteadyClock::now();
-        trace_message_kv("MESSAGE_KV_ACK_WAIT key=" + message_key +
+        trace_message_kv("KV_SEND_ACK_WAIT key=" + message_key +
                          " subscribe_us=" + std::to_string(elapsed_us(total_start, subscribe_end)) +
-                         " fast_check_us=0" +
                          " event_wait_us=" + std::to_string(event_wait_us) +
                          " total_wait_us=" + std::to_string(elapsed_us(subscribe_end, wait_end)) +
                          " status=" + std::to_string(static_cast<int>(ack_status.code())));
@@ -335,9 +335,10 @@ struct KV::Impl {
         unpublish.status().throw_if_error();
         const auto unpublish_end = SteadyClock::now();
         stale_sender_ack_keys.push_back(ack_key);
-        trace_message_kv("MESSAGE_KV_ASYNC_DEFER_UNSUBSCRIBE ack_key=" + ack_key);
-        trace_message_kv("MESSAGE_KV_ACK_CLEANUP key=" + message_key +
-                         " unpublish_msg_us=" + std::to_string(elapsed_us(unpublish_start, unpublish_end)));
+        trace_message_kv("KV_ASYNC_CLEANUP_DEFER_ACK_UNSUBSCRIBE ack_key=" + ack_key);
+        trace_message_kv("KV_SEND_UNPUBLISH key=" + message_key +
+                         " cleanup_us=" + std::to_string(elapsed_us(unpublish_start, unpublish_end)) +
+                         " status=0");
     }
 
     void recv_one_locked(const std::string& key,
@@ -392,9 +393,10 @@ struct KV::Impl {
         publish_ack_locked(key);
         const auto ack_end = SteadyClock::now();
         record_owned_ack_keys_locked({make_ack_key(key)});
-        trace_message_kv("MESSAGE_KV_RECV_ONE key=" + key +
+        trace_message_kv("KV_RECV_ONE_COMPLETE key=" + key +
                          " bytes=" + std::to_string(length) +
-                         " ack_publish_us=" + std::to_string(elapsed_us(ack_start, ack_end)));
+                         " ack_us=" + std::to_string(elapsed_us(ack_start, ack_end)) +
+                         " status=0");
     }
 };
 
@@ -489,8 +491,9 @@ zerokv::transport::Future<void> KV::send_async(const std::string& key,
     pending.subscribed = true;
     auto future = pending.promise.get_future();
     impl_->pending_async_sends.push_back(std::move(pending));
-    trace_message_kv("MESSAGE_KV_SEND_ASYNC_ENQUEUE key=" + key +
-                     " bytes=" + std::to_string(size));
+    trace_message_kv("KV_SEND_ASYNC_ENQUEUE key=" + key +
+                     " bytes=" + std::to_string(size) +
+                     " status=0");
     impl_->cleanup_cv.notify_one();
     return future;
 }
@@ -532,8 +535,9 @@ zerokv::transport::Future<void> KV::send_region_async(
     pending.subscribed = true;
     auto future = pending.promise.get_future();
     impl_->pending_async_sends.push_back(std::move(pending));
-    trace_message_kv("MESSAGE_KV_SEND_ASYNC_ENQUEUE key=" + key +
-                     " bytes=" + std::to_string(size));
+    trace_message_kv("KV_SEND_ASYNC_ENQUEUE key=" + key +
+                     " bytes=" + std::to_string(size) +
+                     " status=0");
     impl_->cleanup_cv.notify_one();
     return future;
 }
@@ -544,9 +548,10 @@ void KV::send(const std::string& key, const void* data, size_t size) {
     future.get();
     future.status().throw_if_error();
     const auto send_end = SteadyClock::now();
-    trace_message_kv("MESSAGE_KV_SEND key=" + key +
+    trace_message_kv("KV_SEND_SYNC_TOTAL key=" + key +
                      " bytes=" + std::to_string(size) +
-                     " total_us=" + std::to_string(elapsed_us(send_start, send_end)));
+                     " total_us=" + std::to_string(elapsed_us(send_start, send_end)) +
+                     " status=0");
 }
 
 void KV::send_region(const std::string& key,
@@ -557,9 +562,10 @@ void KV::send_region(const std::string& key,
     future.get();
     future.status().throw_if_error();
     const auto send_end = SteadyClock::now();
-    trace_message_kv("MESSAGE_KV_SEND_REGION key=" + key +
+    trace_message_kv("KV_SEND_REGION_SYNC_TOTAL key=" + key +
                      " bytes=" + std::to_string(size) +
-                     " total_us=" + std::to_string(elapsed_us(send_start, send_end)));
+                     " total_us=" + std::to_string(elapsed_us(send_start, send_end)) +
+                     " status=0");
 }
 
 void KV::recv(const std::string& key,
@@ -589,7 +595,7 @@ KV::BatchRecvResult KV::recv_batch(const std::vector<BatchRecvItem>& items,
     }
     impl_->sweep_cleanup_locked();
 
-    trace_message_kv("MESSAGE_KV_RECV_BATCH_START items=" + std::to_string(items.size()) +
+    trace_message_kv("KV_RECV_BATCH_BEGIN items=" + std::to_string(items.size()) +
                      " timeout_ms=" + std::to_string(timeout.count()));
 
     std::vector<std::string> ordered_keys;
@@ -627,39 +633,43 @@ KV::BatchRecvResult KV::recv_batch(const std::vector<BatchRecvItem>& items,
 
     auto try_fetch_key = [&](const std::string& key) -> PlacementState {
         const auto& placements = placements_by_key.at(key);
-        trace_message_kv("MESSAGE_KV_RECV_BATCH_FETCH_BEGIN key=" + key +
+        trace_message_kv("KV_RECV_BATCH_FETCH_BEGIN key=" + key +
                          " placements=" + std::to_string(placements.size()));
         for (const auto* placement : placements) {
             auto fetch = impl_->node->fetch_to(key, region, placement->length, placement->offset);
             if (!fetch.status().ok()) {
                 if (fetch.status().code() == ErrorCode::kInvalidArgument) {
-                    trace_message_kv("MESSAGE_KV_RECV_BATCH_FETCH_PENDING key=" + key);
+                    trace_message_kv("KV_RECV_BATCH_FETCH_PENDING key=" + key +
+                                     " status=" +
+                                     std::to_string(static_cast<int>(ErrorCode::kInvalidArgument)));
                     return PlacementState::kPending;
                 }
-                trace_message_kv("MESSAGE_KV_RECV_BATCH_FETCH_FAILED key=" + key +
-                                 " code=" + std::to_string(static_cast<int>(fetch.status().code())));
+                trace_message_kv("KV_RECV_BATCH_FETCH_FAILED key=" + key +
+                                 " status=" + std::to_string(static_cast<int>(fetch.status().code())));
                 return PlacementState::kFailed;
             }
             fetch.get();
             if (!fetch.status().ok()) {
                 if (fetch.status().code() == ErrorCode::kInvalidArgument) {
-                    trace_message_kv("MESSAGE_KV_RECV_BATCH_FETCH_PENDING key=" + key);
+                    trace_message_kv("KV_RECV_BATCH_FETCH_PENDING key=" + key +
+                                     " status=" +
+                                     std::to_string(static_cast<int>(ErrorCode::kInvalidArgument)));
                     return PlacementState::kPending;
                 }
-                trace_message_kv("MESSAGE_KV_RECV_BATCH_FETCH_FAILED key=" + key +
-                                 " code=" + std::to_string(static_cast<int>(fetch.status().code())));
+                trace_message_kv("KV_RECV_BATCH_FETCH_FAILED key=" + key +
+                                 " status=" + std::to_string(static_cast<int>(fetch.status().code())));
                 return PlacementState::kFailed;
             }
         }
-        trace_message_kv("MESSAGE_KV_RECV_BATCH_FETCH_DONE key=" + key);
+        trace_message_kv("KV_RECV_BATCH_FETCH_DONE key=" + key + " status=0");
         return PlacementState::kSuccess;
     };
 
     auto ack_completed_key = [&](const std::string& key) {
-        trace_message_kv("MESSAGE_KV_RECV_BATCH_ACK_BEGIN key=" + key);
+        trace_message_kv("KV_RECV_BATCH_ACK_BEGIN key=" + key);
         impl_->publish_ack_locked(key);
         impl_->record_owned_ack_keys_locked({make_ack_key(key)});
-        trace_message_kv("MESSAGE_KV_RECV_BATCH_ACK_DONE key=" + key);
+        trace_message_kv("KV_RECV_BATCH_ACK_DONE key=" + key + " status=0");
     };
 
     BatchRecvResult result;
@@ -693,7 +703,8 @@ KV::BatchRecvResult KV::recv_batch(const std::vector<BatchRecvItem>& items,
         if (!pending.count(event->key)) {
             continue;
         }
-        trace_message_kv("MESSAGE_KV_RECV_BATCH_WAIT_ANY_MATCH key=" + event->key);
+        trace_message_kv("KV_RECV_BATCH_WAIT_ANY key=" + event->key +
+                         " source=event");
         auto state = try_fetch_key(event->key);
         if (state == PlacementState::kSuccess) {
             append_placements(&result.completed, placements_by_key.at(event->key));
@@ -738,16 +749,17 @@ KV::BatchRecvResult KV::recv_batch(const std::vector<BatchRecvItem>& items,
             last_complete_us = it->second;
         }
     }
-    trace_message_kv("MESSAGE_KV_RECV_BATCH items=" + std::to_string(items.size()) +
+    trace_message_kv("KV_RECV_BATCH_COMPLETE items=" + std::to_string(items.size()) +
                      " fetch_wait_us=" + std::to_string(elapsed_us(recv_start, recv_end)) +
-                     " ack_publish_us=0" +
+                     " ack_us=0" +
                      " first_complete_us=" + std::to_string(first_complete_us) +
                      " last_complete_us=" + std::to_string(last_complete_us) +
                      " completion_window_us=" +
                          std::to_string(first_set ? (last_complete_us - first_complete_us) : 0) +
                      " completed=" + std::to_string(result.completed.size()) +
                      " failed=" + std::to_string(result.failed.size()) +
-                     " timed_out=" + std::to_string(result.timed_out.size()));
+                     " timed_out=" + std::to_string(result.timed_out.size()) +
+                     " status=0");
     return result;
 }
 
