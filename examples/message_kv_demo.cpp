@@ -74,8 +74,27 @@ std::vector<size_t> parse_sizes_impl(const std::string& csv) {
 
 }  // namespace
 
+enum class SendMode {
+    kSync,
+    kAsync,
+};
+
 std::vector<size_t> parse_sizes_csv(const std::string& csv) {
     return parse_sizes_impl(csv);
+}
+
+SendMode parse_send_mode(const std::string& value) {
+    if (value == "sync") {
+        return SendMode::kSync;
+    }
+    if (value == "async") {
+        return SendMode::kAsync;
+    }
+    throw std::invalid_argument("send mode must be 'sync' or 'async'");
+}
+
+const char* send_mode_name(SendMode mode) {
+    return mode == SendMode::kAsync ? "async" : "sync";
 }
 
 std::string make_round_key(size_t round_index, size_t size_bytes, size_t thread_index) {
@@ -113,6 +132,7 @@ double throughput_mib_per_sec(size_t bytes, uint64_t elapsed_us_value) {
 }
 
 std::string render_send_round_summary(size_t round_index,
+                                      const char* send_mode,
                                       size_t size_bytes,
                                       size_t messages,
                                       uint64_t send_total_us,
@@ -120,6 +140,7 @@ std::string render_send_round_summary(size_t round_index,
                                       size_t total_bytes) {
     std::ostringstream out;
     out << "SEND_ROUND round=" << round_index
+        << " send_mode=" << send_mode
         << " size=" << size_bytes
         << " messages=" << messages
         << " send_total_us=" << send_total_us
@@ -127,6 +148,22 @@ std::string render_send_round_summary(size_t round_index,
         << " total_bytes=" << total_bytes
         << " throughput_MiBps=" << throughput_mib_per_sec(total_bytes, send_total_us);
     return out.str();
+}
+
+std::string render_send_round_summary(size_t round_index,
+                                      SendMode send_mode,
+                                      size_t size_bytes,
+                                      size_t messages,
+                                      uint64_t send_total_us,
+                                      uint64_t max_thread_send_us,
+                                      size_t total_bytes) {
+    return render_send_round_summary(round_index,
+                                     send_mode_name(send_mode),
+                                     size_bytes,
+                                     messages,
+                                     send_total_us,
+                                     max_thread_send_us,
+                                     total_bytes);
 }
 
 std::string make_compact_preview(const void* data, size_t size_bytes, size_t max_bytes) {
@@ -181,6 +218,7 @@ struct Args {
     std::string node_id = "rank0";
     std::string transport = "tcp";
     std::string sizes_csv = "1K,64K,1M,4M,16M,32M,64M,128M";
+    std::string send_mode = "sync";
     int threads = 4;
     int messages = 4;
     int timeout_ms = 5000;
@@ -197,7 +235,7 @@ void print_usage(const char* argv0) {
         << " [--warmup-rounds 1] [--sizes 1K,64K,...] [--transport tcp|rdma]\n"
         << "  " << argv0
         << " --role rank1 --server-addr <addr> --data-addr <addr> --node-id <id>\n"
-        << "           [--threads 4] [--warmup-rounds 1] [--sizes 1K,64K,...] [--timeout-ms 5000]"
+        << "           [--threads 4] [--send-mode sync|async] [--warmup-rounds 1] [--sizes 1K,64K,...] [--timeout-ms 5000]"
         << " [--transport tcp|rdma]\n";
 }
 
@@ -218,6 +256,8 @@ bool parse_args(int argc, char** argv, Args* args) {
             args->transport = argv[++i];
         } else if (arg == "--sizes" && i + 1 < argc) {
             args->sizes_csv = argv[++i];
+        } else if (arg == "--send-mode" && i + 1 < argc) {
+            args->send_mode = argv[++i];
         } else if (arg == "--threads" && i + 1 < argc) {
             args->threads = std::stoi(argv[++i]);
         } else if (arg == "--messages" && i + 1 < argc) {
@@ -450,6 +490,17 @@ int run_rank1(const Args& args, const Config& cfg) {
             workers_mq[static_cast<size_t>(i)]->allocate_send_region(max_size_bytes);
     }
 
+    zerokv::examples::message_kv_demo::SendMode send_mode;
+    try {
+        send_mode = zerokv::examples::message_kv_demo::parse_send_mode(args.send_mode);
+    } catch (const std::exception& ex) {
+        std::cerr << "--send-mode: " << ex.what() << "\n";
+        for (auto& mq : workers_mq) {
+            mq->stop();
+        }
+        return 1;
+    }
+
     auto run_round = [&](size_t protocol_round_index,
                          size_t report_round_index,
                          size_t size_bytes,
@@ -458,6 +509,8 @@ int run_rank1(const Args& args, const Config& cfg) {
         workers.reserve(static_cast<size_t>(args.threads));
         std::vector<std::exception_ptr> errors(static_cast<size_t>(args.threads));
         std::vector<uint64_t> send_us(static_cast<size_t>(args.threads), 0);
+        std::vector<zerokv::transport::Future<void>> async_futures(
+            static_cast<size_t>(args.threads));
         const size_t total_bytes = size_bytes * static_cast<size_t>(args.threads);
 
         const auto round_start = SteadyClock::now();
@@ -472,15 +525,14 @@ int run_rank1(const Args& args, const Config& cfg) {
                         protocol_round_index, size_bytes, static_cast<size_t>(i));
                     std::memcpy(region->address(), payload.data(), size_bytes);
                     const auto send_start = SteadyClock::now();
-                    mq->send_region(key, region, size_bytes);
+                    if (send_mode == zerokv::examples::message_kv_demo::SendMode::kAsync) {
+                        async_futures[static_cast<size_t>(i)] =
+                            mq->send_region_async(key, region, size_bytes);
+                    } else {
+                        mq->send_region(key, region, size_bytes);
+                    }
                     const auto send_end = SteadyClock::now();
                     send_us[static_cast<size_t>(i)] = elapsed_us(send_start, send_end);
-                    if (print_summary) {
-                        std::cout << "SEND_OK key=" << key
-                                  << " bytes=" << size_bytes
-                                  << " send_us=" << send_us[static_cast<size_t>(i)]
-                                  << "\n";
-                    }
                 } catch (...) {
                     errors[static_cast<size_t>(i)] = std::current_exception();
                 }
@@ -489,8 +541,6 @@ int run_rank1(const Args& args, const Config& cfg) {
         for (auto& worker : workers) {
             worker.join();
         }
-
-        const auto round_end = SteadyClock::now();
 
         for (const auto& error : errors) {
             if (error) {
@@ -503,16 +553,41 @@ int run_rank1(const Args& args, const Config& cfg) {
             }
         }
 
+        if (send_mode == zerokv::examples::message_kv_demo::SendMode::kAsync) {
+            for (size_t i = 0; i < async_futures.size(); ++i) {
+                try {
+                    async_futures[i].get();
+                    async_futures[i].status().throw_if_error();
+                } catch (const std::exception& ex) {
+                    std::cerr << "SEND_ERR message=" << ex.what() << "\n";
+                    return false;
+                }
+            }
+        }
+
         uint64_t max_thread_send_us = 0;
         for (uint64_t value : send_us) {
             if (value > max_thread_send_us) {
                 max_thread_send_us = value;
             }
         }
+        const auto round_end = SteadyClock::now();
         const auto total_us = elapsed_us(round_start, round_end);
+        if (print_summary) {
+            for (int i = 0; i < args.threads; ++i) {
+                const auto key = zerokv::examples::message_kv_demo::make_round_key(
+                    protocol_round_index, size_bytes, static_cast<size_t>(i));
+                std::cout << "SEND_OK key=" << key
+                          << " bytes=" << size_bytes
+                          << " send_mode=" << zerokv::examples::message_kv_demo::send_mode_name(send_mode)
+                          << " send_us=" << send_us[static_cast<size_t>(i)]
+                          << "\n";
+            }
+        }
         if (print_summary) {
             std::cout << zerokv::examples::message_kv_demo::render_send_round_summary(
                              report_round_index,
+                             zerokv::examples::message_kv_demo::send_mode_name(send_mode),
                              size_bytes,
                              static_cast<size_t>(args.threads),
                              total_us,

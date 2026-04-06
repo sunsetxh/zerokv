@@ -6,13 +6,20 @@
 #include <vector>
 
 namespace zerokv::examples::message_kv_demo {
+enum class SendMode {
+    kSync,
+    kAsync,
+};
 std::vector<size_t> parse_sizes_csv(const std::string& csv);
+SendMode parse_send_mode(const std::string& value);
+const char* send_mode_name(SendMode mode);
 std::string make_round_key(size_t round_index, size_t size_bytes, size_t thread_index);
 std::string make_payload(size_t round_index, size_t size_bytes, size_t thread_index);
 size_t max_size_bytes_for_sizes(const std::vector<size_t>& sizes);
 size_t max_total_recv_bytes_for_sizes(size_t messages, const std::vector<size_t>& sizes);
 bool should_sleep_after_round(size_t round_index, size_t total_rounds);
 std::string render_send_round_summary(size_t round_index,
+                                      const char* send_mode,
                                       size_t size_bytes,
                                       size_t messages,
                                       uint64_t send_total_us,
@@ -35,6 +42,17 @@ TEST(MessageKvDemoHelpersTest, ParsesDefaultLikeSizeCsv) {
     EXPECT_EQ(sizes[0], 1024u);
     EXPECT_EQ(sizes[1], 64u * 1024u);
     EXPECT_EQ(sizes[2], 1024u * 1024u);
+}
+
+TEST(MessageKvDemoHelpersTest, ParseSendModeAcceptsSyncAndAsync) {
+    EXPECT_EQ(zerokv::examples::message_kv_demo::send_mode_name(
+                  zerokv::examples::message_kv_demo::parse_send_mode("sync")),
+              std::string("sync"));
+    EXPECT_EQ(zerokv::examples::message_kv_demo::send_mode_name(
+                  zerokv::examples::message_kv_demo::parse_send_mode("async")),
+              std::string("async"));
+    EXPECT_THROW(zerokv::examples::message_kv_demo::parse_send_mode("bad"),
+                 std::invalid_argument);
 }
 
 TEST(MessageKvDemoHelpersTest, RoundKeyUsesRawByteSize) {
@@ -69,9 +87,16 @@ TEST(MessageKvDemoHelpersTest, PostRecvWaitOnlyRunsAfterFinalMeasuredRound) {
 
 TEST(MessageKvDemoHelpersTest, SendRoundSummaryUsesConfiguredSizeAndCounts) {
     auto line = zerokv::examples::message_kv_demo::render_send_round_summary(
-        3, 65536, 4, 1200, 500, 262144);
+        3,
+        "async",
+        65536,
+        4,
+        1200,
+        500,
+        262144);
     EXPECT_NE(line.find("SEND_ROUND"), std::string::npos);
     EXPECT_NE(line.find("round=3"), std::string::npos);
+    EXPECT_NE(line.find("send_mode=async"), std::string::npos);
     EXPECT_NE(line.find("size=65536"), std::string::npos);
     EXPECT_NE(line.find("messages=4"), std::string::npos);
     EXPECT_NE(line.find("total_bytes=262144"), std::string::npos);

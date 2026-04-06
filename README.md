@@ -184,6 +184,9 @@ scenario. The default sweep list is `1K,64K,1M,4M,16M,32M,64M,128M`.
 
 - `RANK0` runs `KVServer + KV receiver` in one process
 - `RANK1` sends one message per round from 4 threads, reusing a preallocated send buffer per thread
+- `RANK1` supports `--send-mode sync|async`; `sync` keeps the old blocking ack
+  semantics, `async` measures sender-side publish/enqueue cost while still
+  waiting for all futures to complete before ending each round
 - both sides default to `--warmup-rounds 1`, reusing `KV` instances across
   rounds so the measured rounds are closer to steady-state behavior
 - `RANK0` preallocates one receive region sized to `messages * max(--sizes)` and
@@ -229,6 +232,7 @@ Run on two nodes:
   --data-addr 10.0.0.2:0 \
   --node-id rank1-sender \
   --threads 4 \
+  --send-mode async \
   --warmup-rounds 1 \
   --sizes 1K,64K,1M,4M,16M,32M,64M,128M \
   --transport rdma
@@ -248,9 +252,9 @@ Expected sender output per round also includes per-thread send latency and one
 aggregate summary:
 
 ```text
-SEND_OK key=msg-round0-size1024-thread0 bytes=1024 send_us=...
+SEND_OK key=msg-round0-size1024-thread0 bytes=1024 send_mode=async send_us=...
 ...
-SEND_ROUND round=0 protocol_round=1 size=1024 messages=4 send_total_us=... max_thread_send_us=... total_bytes=4096 throughput_MiBps=...
+SEND_ROUND round=0 send_mode=async size=1024 messages=4 send_total_us=... max_thread_send_us=... total_bytes=4096 throughput_MiBps=...
 ```
 
 Implementation note:
@@ -261,6 +265,8 @@ Implementation note:
 - `send_region()` is synchronous with receiver acknowledgement:
   the sender publishes the message key, waits for the receiver's internal ack
   key, then unpublishes the message key before returning.
+- `send_region_async()` returns earlier, but each future completes only after
+  the receiver ack arrives and the sender has removed the message metadata.
 
 ### Python KV example
 
