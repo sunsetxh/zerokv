@@ -40,6 +40,18 @@ using Worker = ::zerokv::transport::Worker;
 
 namespace {
 
+void log_kv_node_error(const std::string& message) {
+    ::zerokv::detail::write_log_line(::zerokv::detail::LogLevel::kError,
+                                     "core.kv_node",
+                                     message);
+}
+
+void log_kv_node_warn(const std::string& message) {
+    ::zerokv::detail::write_log_line(::zerokv::detail::LogLevel::kWarn,
+                                     "core.kv_node",
+                                     message);
+}
+
 using SteadyClock = std::chrono::steady_clock;
 constexpr uint32_t kPushInboxMagic = 0x50555831;  // "PUX1"
 constexpr size_t kDefaultPushInboxCapacity = 64 * 1024;
@@ -255,12 +267,14 @@ struct KVNode::Impl {
         auto payload = detail::encode(req);
         const uint64_t request_id = next_request_id_.fetch_add(1);
         if (!detail::send_frame(control_fd_, detail::MsgType::kRegisterNode, request_id, payload)) {
+            log_kv_node_error("register_with_server send_frame failed");
             return Status(ErrorCode::kConnectionReset, "failed to send register request");
         }
 
         detail::MsgHeader header;
         std::vector<uint8_t> response_payload;
         if (!detail::recv_frame(control_fd_, &header, &response_payload)) {
+            log_kv_node_error("register_with_server recv_frame failed");
             return Status(ErrorCode::kConnectionReset, "failed to read register response");
         }
         if (header.request_id != request_id) {
@@ -384,12 +398,14 @@ struct KVNode::Impl {
         auto payload = detail::encode(req);
         const uint64_t request_id = next_request_id_.fetch_add(1);
         if (!detail::send_frame(control_fd_, detail::MsgType::kPutMeta, request_id, payload)) {
+            log_kv_node_error("put_meta send_frame failed");
             return Status(ErrorCode::kConnectionReset, "failed to send put_meta request");
         }
 
         detail::MsgHeader header;
         std::vector<uint8_t> response_payload;
         if (!detail::recv_frame(control_fd_, &header, &response_payload)) {
+            log_kv_node_error("put_meta recv_frame failed");
             return Status(ErrorCode::kConnectionReset, "failed to read put_meta response");
         }
         if (header.request_id != request_id) {
@@ -428,12 +444,14 @@ struct KVNode::Impl {
         auto payload = detail::encode(req);
         const uint64_t request_id = next_request_id_.fetch_add(1);
         if (!detail::send_frame(control_fd_, detail::MsgType::kUnpublish, request_id, payload)) {
+            log_kv_node_error("unpublish send_frame failed");
             return Status(ErrorCode::kConnectionReset, "failed to send unpublish request");
         }
 
         detail::MsgHeader header;
         std::vector<uint8_t> response_payload;
         if (!detail::recv_frame(control_fd_, &header, &response_payload)) {
+            log_kv_node_error("unpublish recv_frame failed");
             return Status(ErrorCode::kConnectionReset, "failed to read unpublish response");
         }
         if (header.request_id != request_id) {
@@ -471,12 +489,14 @@ struct KVNode::Impl {
 
         const uint64_t request_id = next_request_id_.fetch_add(1);
         if (!detail::send_frame(control_fd_, detail::MsgType::kSubscribe, request_id, detail::encode(req))) {
+            log_kv_node_error("subscribe send_frame failed");
             return Status(ErrorCode::kConnectionReset, "failed to send subscribe request");
         }
 
         detail::MsgHeader header;
         std::vector<uint8_t> response_payload;
         if (!detail::recv_frame(control_fd_, &header, &response_payload)) {
+            log_kv_node_error("subscribe recv_frame failed");
             return Status(ErrorCode::kConnectionReset, "failed to read subscribe response");
         }
         if (header.request_id != request_id) {
@@ -514,12 +534,14 @@ struct KVNode::Impl {
 
         const uint64_t request_id = next_request_id_.fetch_add(1);
         if (!detail::send_frame(control_fd_, detail::MsgType::kUnsubscribe, request_id, detail::encode(req))) {
+            log_kv_node_error("unsubscribe send_frame failed");
             return Status(ErrorCode::kConnectionReset, "failed to send unsubscribe request");
         }
 
         detail::MsgHeader header;
         std::vector<uint8_t> response_payload;
         if (!detail::recv_frame(control_fd_, &header, &response_payload)) {
+            log_kv_node_error("unsubscribe recv_frame failed");
             return Status(ErrorCode::kConnectionReset, "failed to read unsubscribe response");
         }
         if (header.request_id != request_id) {
@@ -562,6 +584,7 @@ struct KVNode::Impl {
         const uint64_t request_id = next_request_id_.fetch_add(1);
         const auto rpc_start = SteadyClock::now();
         if (!detail::send_frame(control_fd_, detail::MsgType::kGetMeta, request_id, payload)) {
+            log_kv_node_error("get_meta send_frame failed");
             if (metrics) {
                 metrics->get_meta_rpc_us = elapsed_us(rpc_start, SteadyClock::now());
             }
@@ -574,6 +597,7 @@ struct KVNode::Impl {
         detail::MsgHeader header;
         std::vector<uint8_t> response_payload;
         if (!detail::recv_frame(control_fd_, &header, &response_payload)) {
+            log_kv_node_error("get_meta recv_frame failed");
             if (metrics) {
                 metrics->get_meta_rpc_us = elapsed_us(rpc_start, SteadyClock::now());
             }
@@ -809,6 +833,7 @@ struct KVNode::Impl {
         }
         std::lock_guard<std::mutex> push_lock(push_mu_);
         if (push_busy_) {
+            log_kv_node_warn("push inbox busy for incoming push reservation");
             return Status(ErrorCode::kConnectionRefused, "push inbox busy");
         }
         push_busy_ = true;
@@ -1041,11 +1066,13 @@ Status KVNode::start(const NodeConfig& cfg) {
     impl_->node_id_ = cfg.node_id.empty() ? generate_node_id() : cfg.node_id;
     impl_->context_ = Context::create(impl_->cfg_);
     if (!impl_->context_) {
+        log_kv_node_error("failed to create zerokv context");
         impl_->node_id_.clear();
         return Status(ErrorCode::kTransportError, "failed to create zerokv context");
     }
     impl_->worker_ = Worker::create(impl_->context_);
     if (!impl_->worker_) {
+        log_kv_node_error("failed to create zerokv worker");
         impl_->context_.reset();
         impl_->node_id_.clear();
         return Status(ErrorCode::kTransportError, "failed to create zerokv worker");
@@ -1055,6 +1082,7 @@ Status KVNode::start(const NodeConfig& cfg) {
         impl->inbound_eps_.push_back(std::move(ep));
     });
     if (!impl_->listener_) {
+        log_kv_node_error("failed to create KVNode data listener");
         impl_->worker_.reset();
         impl_->context_.reset();
         impl_->node_id_.clear();
@@ -1064,6 +1092,7 @@ Status KVNode::start(const NodeConfig& cfg) {
     std::string error;
     impl_->push_inbox_region_ = MemoryRegion::allocate(impl_->context_, impl_->push_inbox_capacity_);
     if (!impl_->push_inbox_region_) {
+        log_kv_node_error("failed to allocate push inbox region");
         impl_->listener_->close();
         impl_->listener_.reset();
         impl_->worker_.reset();
@@ -1075,6 +1104,8 @@ Status KVNode::start(const NodeConfig& cfg) {
     impl_->push_listen_fd_ = detail::TcpTransport::listen(
         make_ephemeral_bind_addr(impl_->local_data_addr_), &impl_->push_control_addr_, &error);
     if (impl_->push_listen_fd_ < 0) {
+        log_kv_node_error("failed to create push control listener: " +
+                          (error.empty() ? std::string("unknown") : error));
         impl_->listener_->close();
         impl_->listener_.reset();
         impl_->worker_.reset();
@@ -1086,6 +1117,8 @@ Status KVNode::start(const NodeConfig& cfg) {
     impl_->subscription_listen_fd_ = detail::TcpTransport::listen(
         make_ephemeral_bind_addr(impl_->local_data_addr_), &impl_->subscription_control_addr_, &error);
     if (impl_->subscription_listen_fd_ < 0) {
+        log_kv_node_error("failed to create subscription listener: " +
+                          (error.empty() ? std::string("unknown") : error));
         detail::TcpTransport::close_fd(&impl_->push_listen_fd_);
         impl_->listener_->close();
         impl_->listener_.reset();
@@ -1104,6 +1137,8 @@ Status KVNode::start(const NodeConfig& cfg) {
 
     impl_->control_fd_ = detail::TcpTransport::connect(impl_->server_addr_, impl_->cfg_.connect_timeout(), &error);
     if (impl_->control_fd_ < 0) {
+        log_kv_node_error("failed to connect to KV server: " +
+                          (error.empty() ? std::string("unknown") : error));
         impl_->running_.store(false);
         detail::TcpTransport::close_fd(&impl_->push_listen_fd_);
         detail::TcpTransport::close_fd(&impl_->subscription_listen_fd_);
@@ -1139,6 +1174,9 @@ Status KVNode::start(const NodeConfig& cfg) {
 
     auto status = impl_->register_with_server();
     if (!status.ok()) {
+        log_kv_node_error("register_with_server failed: code=" +
+                          std::to_string(static_cast<int>(status.code())) +
+                          " message=" + status.message());
         impl_->running_.store(false);
         detail::TcpTransport::close_fd(&impl_->control_fd_);
         detail::TcpTransport::close_fd(&impl_->push_listen_fd_);

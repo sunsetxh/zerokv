@@ -5,12 +5,20 @@
 #include "zerokv/transport/future.h"
 #include "zerokv/common.h"
 
+#include "internal/logging.h"
+
 #include <ucp/api/ucp.h>
 #include <memory>
 
 namespace zerokv::transport {
 
 namespace {
+
+void log_endpoint_error(const std::string& message) {
+    ::zerokv::detail::write_log_line(::zerokv::detail::LogLevel::kError,
+                                     "transport.endpoint",
+                                     message);
+}
 
 struct RmaRequestState {
     MemoryRegion::Ptr region;
@@ -130,6 +138,7 @@ Future<void> Endpoint::tag_send(const void* buffer, size_t length, Tag tag) {
 
     if (UCS_PTR_IS_ERR(status)) {
         ucs_status_t err = UCS_PTR_STATUS(status);
+        log_endpoint_error(std::string("ucp_tag_send_nbx failed: ") + ucs_status_string(err));
         return Future<void>::make_error(
             Status(ErrorCode::kTransportError, std::string("Send failed: ") + ucs_status_string(err)));
     }
@@ -166,6 +175,7 @@ Future<void> Endpoint::tag_send(const MemoryRegion::Ptr& region, size_t offset,
 
     if (UCS_PTR_IS_ERR(status)) {
         ucs_status_t err = UCS_PTR_STATUS(status);
+        log_endpoint_error(std::string("ucp_tag_send_nbx(region) failed: ") + ucs_status_string(err));
         return Future<void>::make_error(
             Status(ErrorCode::kTransportError, std::string("Send from region failed: ") + ucs_status_string(err)));
     }
@@ -212,6 +222,7 @@ Future<std::pair<size_t, Tag>> Endpoint::tag_recv(void* buffer, size_t length,
 
     if (UCS_PTR_IS_ERR(status)) {
         ucs_status_t err = UCS_PTR_STATUS(status);
+        log_endpoint_error(std::string("ucp_tag_recv_nbx failed: ") + ucs_status_string(err));
         return Future<std::pair<size_t, Tag>>::make_error(
             Status(ErrorCode::kTransportError, std::string("Recv failed: ") + ucs_status_string(err)));
     }
@@ -256,6 +267,7 @@ Future<void> Endpoint::put(const MemoryRegion::Ptr& local, size_t local_offset,
     ucp_rkey_h ucx_rkey = nullptr;
     ucs_status_t status = ucp_ep_rkey_unpack(impl_->handle_, rkey.bytes(), &ucx_rkey);
     if (status != UCS_OK) {
+        log_endpoint_error(std::string("ucp_ep_rkey_unpack(put) failed: ") + ucs_status_string(status));
         return Future<void>::make_error(
             Status(ErrorCode::kInvalidArgument,
                    std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
@@ -284,6 +296,7 @@ Future<void> Endpoint::put(const MemoryRegion::Ptr& local, size_t local_offset,
     if (UCS_PTR_IS_ERR(req)) {
         ucs_status_t err = UCS_PTR_STATUS(req);
         state.reset();
+        log_endpoint_error(std::string("ucp_put_nbx failed: ") + ucs_status_string(err));
         return Future<void>::make_error(
             Status(ErrorCode::kTransportError, std::string("RDMA put failed: ") + ucs_status_string(err)));
     }
@@ -313,6 +326,7 @@ Future<void> Endpoint::get(const MemoryRegion::Ptr& local, size_t local_offset,
     ucp_rkey_h ucx_rkey = nullptr;
     ucs_status_t status = ucp_ep_rkey_unpack(impl_->handle_, rkey.bytes(), &ucx_rkey);
     if (status != UCS_OK) {
+        log_endpoint_error(std::string("ucp_ep_rkey_unpack(get) failed: ") + ucs_status_string(status));
         return Future<void>::make_error(
             Status(ErrorCode::kInvalidArgument,
                    std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
@@ -341,6 +355,7 @@ Future<void> Endpoint::get(const MemoryRegion::Ptr& local, size_t local_offset,
     if (UCS_PTR_IS_ERR(req)) {
         ucs_status_t err = UCS_PTR_STATUS(req);
         state.reset();
+        log_endpoint_error(std::string("ucp_get_nbx failed: ") + ucs_status_string(err));
         return Future<void>::make_error(
             Status(ErrorCode::kTransportError, std::string("RDMA get failed: ") + ucs_status_string(err)));
     }
@@ -389,6 +404,7 @@ Future<uint64_t> Endpoint::atomic_fadd(uint64_t remote_addr,
     ucp_rkey_h ucx_rkey = nullptr;
     ucs_status_t status = ucp_ep_rkey_unpack(impl_->handle_, rkey.bytes(), &ucx_rkey);
     if (status != UCS_OK) {
+        log_endpoint_error(std::string("ucp_ep_rkey_unpack(fadd) failed: ") + ucs_status_string(status));
         return Future<uint64_t>::make_error(
             Status(ErrorCode::kInvalidArgument,
                    std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
@@ -426,6 +442,7 @@ Future<uint64_t> Endpoint::atomic_fadd(uint64_t remote_addr,
 
     if (UCS_PTR_IS_ERR(req)) {
         ucs_status_t err = UCS_PTR_STATUS(req);
+        log_endpoint_error(std::string("ucp_atomic_op_nbx(fadd) failed: ") + ucs_status_string(err));
         return Future<uint64_t>::make_error(
             Status(ErrorCode::kTransportError,
                    std::string("Atomic fadd failed: ") + ucs_status_string(err)));
@@ -456,6 +473,7 @@ Future<uint64_t> Endpoint::atomic_cswap(uint64_t remote_addr,
     ucp_rkey_h ucx_rkey = nullptr;
     ucs_status_t status = ucp_ep_rkey_unpack(impl_->handle_, rkey.bytes(), &ucx_rkey);
     if (status != UCS_OK) {
+        log_endpoint_error(std::string("ucp_ep_rkey_unpack(cswap) failed: ") + ucs_status_string(status));
         return Future<uint64_t>::make_error(
             Status(ErrorCode::kInvalidArgument,
                    std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
@@ -494,6 +512,7 @@ Future<uint64_t> Endpoint::atomic_cswap(uint64_t remote_addr,
 
     if (UCS_PTR_IS_ERR(req)) {
         ucs_status_t err = UCS_PTR_STATUS(req);
+        log_endpoint_error(std::string("ucp_atomic_op_nbx(cswap) failed: ") + ucs_status_string(err));
         return Future<uint64_t>::make_error(
             Status(ErrorCode::kTransportError,
                    std::string("Atomic cswap failed: ") + ucs_status_string(err)));
@@ -522,6 +541,7 @@ Future<void> Endpoint::flush() {
 
     if (UCS_PTR_IS_ERR(status)) {
         ucs_status_t err = UCS_PTR_STATUS(status);
+        log_endpoint_error(std::string("ucp_ep_flush_nbx failed: ") + ucs_status_string(err));
         return Future<void>::make_error(
             Status(ErrorCode::kTransportError, std::string("Flush failed: ") + ucs_status_string(err)));
     }
@@ -552,6 +572,7 @@ Future<void> Endpoint::stream_send(const void* buffer, size_t length) {
 
     if (UCS_PTR_IS_ERR(status)) {
         ucs_status_t err = UCS_PTR_STATUS(status);
+        log_endpoint_error(std::string("ucp_stream_send_nbx failed: ") + ucs_status_string(err));
         return Future<void>::make_error(
             Status(ErrorCode::kTransportError, std::string("Stream send failed: ") + ucs_status_string(err)));
     }
@@ -581,6 +602,7 @@ Future<void> Endpoint::stream_send(const MemoryRegion::Ptr& region) {
 
     if (UCS_PTR_IS_ERR(status)) {
         ucs_status_t err = UCS_PTR_STATUS(status);
+        log_endpoint_error(std::string("ucp_stream_send_nbx(region) failed: ") + ucs_status_string(err));
         return Future<void>::make_error(
             Status(ErrorCode::kTransportError,
                    std::string("Stream send from region failed: ") + ucs_status_string(err)));
@@ -619,6 +641,7 @@ Future<size_t> Endpoint::stream_recv(void* buffer, size_t length) {
 
     if (UCS_PTR_IS_ERR(status)) {
         ucs_status_t err = UCS_PTR_STATUS(status);
+        log_endpoint_error(std::string("ucp_stream_recv_nbx failed: ") + ucs_status_string(err));
         return Future<size_t>::make_error(
             Status(ErrorCode::kTransportError, std::string("Stream recv failed: ") + ucs_status_string(err)));
     }
@@ -655,6 +678,7 @@ Future<size_t> Endpoint::stream_recv(const MemoryRegion::Ptr& region) {
 
     if (UCS_PTR_IS_ERR(status)) {
         ucs_status_t err = UCS_PTR_STATUS(status);
+        log_endpoint_error(std::string("ucp_stream_recv_nbx(region) failed: ") + ucs_status_string(err));
         return Future<size_t>::make_error(
             Status(ErrorCode::kTransportError,
                    std::string("Stream recv to region failed: ") + ucs_status_string(err)));
@@ -695,6 +719,7 @@ Future<void> Endpoint::close() {
     if (UCS_PTR_IS_ERR(status_ptr)) {
         ucs_status_t err = UCS_PTR_STATUS(status_ptr);
         impl_->handle_ = nullptr;
+        log_endpoint_error(std::string("ucp_ep_close_nbx failed: ") + ucs_status_string(err));
         return Future<void>::make_error(
             Status(ErrorCode::kEndpointClosed, std::string("Close failed: ") + ucs_status_string(err)));
     }
