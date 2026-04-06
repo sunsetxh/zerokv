@@ -3,6 +3,8 @@
 #include "zerokv/transport/endpoint.h"
 #include "zerokv/transport/worker.h"
 
+#include "internal/trace_log.h"
+
 #include "core/protocol.h"
 #include "core/tcp_framing.h"
 #include "core/tcp_transport.h"
@@ -14,7 +16,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -68,7 +69,7 @@ bool kv_trace_enabled() {
 
 void trace_kv(const std::string& line) {
     if (kv_trace_enabled()) {
-        std::cerr << line << "\n";
+        ::zerokv::detail::write_trace_line(line);
     }
 }
 

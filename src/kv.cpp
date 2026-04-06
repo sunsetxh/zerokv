@@ -1,10 +1,11 @@
 #include "zerokv/kv.h"
 
+#include "internal/trace_log.h"
+
 #include <algorithm>
 #include <condition_variable>
 #include <cstdlib>
 #include <deque>
-#include <iostream>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -35,7 +36,7 @@ bool message_kv_trace_enabled() {
 
 void trace_message_kv(const std::string& line) {
     if (message_kv_trace_enabled()) {
-        std::cerr << line << "\n";
+        ::zerokv::detail::write_trace_line(line);
     }
 }
 
