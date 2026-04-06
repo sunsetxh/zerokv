@@ -298,6 +298,59 @@ Interpretation of that table:
 - `sync` mode is best used to answer:
   - how long does a full publish + ack + metadata cleanup cycle take?
 
+### Sender Optimization Snapshot
+
+Recent sender-side work has now removed the most obvious artificial stalls from
+the `KV` path. The useful way to read the current state is:
+
+1. `send_region()` remains the intended steady-state sender API
+2. `send_region_async()` now makes sender-thread return latency very small
+3. the remaining gap is mostly in the ack observation + metadata cleanup tail,
+   not in data publish itself
+
+The recent sender optimization sequence was:
+
+| commit | change | practical effect |
+|---|---|---|
+| `379fa84` | async sender cleanup thread | introduced `send_async()` / `send_region_async()` and moved ack wait + message cleanup off the caller thread |
+| `8e6b7ab` | sync sender delegates to async path | removed duplicate sync sender lifecycle logic and aligned semantics |
+| `c314c92` | demo `--send-mode async` | made sender-thread return latency measurable in the two-node demo |
+| `86e191d` | batch wait-any async cleanup | removed FIFO cleanup serialization; async futures now complete in ack-arrival order |
+| `f921f92` | lazy sender ack unsubscribe | removed `unsubscribe(ack_key)` from the sender completion hot path; deferred to sweep/stop |
+
+The resulting sender-side picture on the VM RDMA path (`rxe0:1`, `64K,1MiB`) is:
+
+| stage | mode | size | sender view |
+|---|---|---:|---|
+| pre-async baseline | sync | 1M | `SEND_ROUND total_us ≈ 18466` |
+| first async mode | async | 1M | `send_us ≈ 3351..4351`, `SEND_ROUND total_us ≈ 22283` |
+| batch wait-any cleanup | async | 1M | `send_us ≈ 357..485`, `SEND_ROUND total_us ≈ 17131` |
+| lazy ack unsubscribe | sync | 1M | `SEND_ROUND total_us ≈ 17699` |
+| lazy ack unsubscribe | async | 1M | `send_us ≈ 566..647`, `SEND_ROUND total_us ≈ 18471` |
+
+Interpretation:
+
+- the biggest sender win came from removing cleanup FIFO serialization
+- moving `unsubscribe(ack_key)` out of the hot path produced only a modest sync
+  improvement
+- `async` is now clearly useful if the application cares about caller-thread
+  release time
+- `async` is still not a dramatic win if the metric is round-complete time,
+  because the current round barrier still waits for:
+  - ack observation
+  - message key `unpublish`
+  - future completion bookkeeping
+
+The remaining sender bottleneck is therefore not publish return time. It is the
+control-path tail after publish:
+
+- ack detection
+- message metadata deletion
+- any associated control-plane jitter
+
+That is why recent sender work improved `send_us` more than it improved
+`SEND_ROUND total_us`.
+
 ### VM1/VM2 Validation Snapshot
 
 The current `afcdf6c` layering/rename state was revalidated on the local QEMU
