@@ -351,6 +351,38 @@ control-path tail after publish:
 That is why recent sender work improved `send_us` more than it improved
 `SEND_ROUND total_us`.
 
+### Sender Next Steps
+
+Based on the current results, the next sender-side priorities are:
+
+1. reduce the control-path tail after publish
+   - especially ack observation and message-key deletion cost
+2. keep async semantics strict
+   - `Future<void>` should continue to mean:
+     - ack observed
+     - message metadata deleted
+3. avoid low-yield work
+   - the obvious local cleanup optimizations have mostly been harvested
+
+The current recommendation is therefore:
+
+- do not weaken async completion semantics just to reduce `SEND_ROUND`
+- do not spend more time on sender-side local thread scheduling
+- if sender round-complete time becomes important again, the next meaningful
+  work should target control-plane round trips around:
+  - ack confirmation
+  - `unpublish(message_key)`
+
+Work that is currently lower priority:
+
+- batch `unpublish` support
+- control-plane transport redesign
+- explicit multi-NIC sender logic
+
+Those may still matter later, but they are no longer the best immediate return
+on engineering time compared with simply keeping the sender path stable and
+using async mode when caller-thread release matters.
+
 ### VM1/VM2 Validation Snapshot
 
 The current `afcdf6c` layering/rename state was revalidated on the local QEMU
