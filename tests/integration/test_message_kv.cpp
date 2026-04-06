@@ -509,3 +509,43 @@ TEST_F(KvIntegrationTest, SendRegionAsyncFailsIfStoppedBeforeAck) {
 
     server->stop();
 }
+
+TEST_F(KvIntegrationTest, AsyncSendCleanupCompletesByAckArrivalOrder) {
+    auto server = zerokv::core::KVServer::create(cfg);
+    ASSERT_TRUE(server->start({"127.0.0.1:0"}).ok());
+
+    auto sender = zerokv::KV::create(cfg);
+    auto receiver = zerokv::KV::create(cfg);
+    sender->start({server->address(), "127.0.0.1:0", "sender"});
+    receiver->start({server->address(), "127.0.0.1:0", "receiver"});
+
+    auto region_a = sender->allocate_send_region(8);
+    auto region_b = sender->allocate_send_region(8);
+    ASSERT_NE(region_a, nullptr);
+    ASSERT_NE(region_b, nullptr);
+    std::memcpy(region_a->address(), "aaaaaaa", 7);
+    std::memcpy(region_b->address(), "bbbbbbb", 7);
+
+    auto recv_region = zerokv::transport::MemoryRegion::allocate(
+        zerokv::Context::create(cfg), 16);
+    ASSERT_NE(recv_region, nullptr);
+
+    auto future_a = sender->send_region_async("async-a", region_a, 7);
+    auto future_b = sender->send_region_async("async-b", region_b, 7);
+
+    receiver->recv("async-b", recv_region, 7, 0, std::chrono::seconds(5));
+
+    EXPECT_TRUE(future_b.get(std::chrono::milliseconds(500)).has_value());
+    EXPECT_TRUE(future_b.status().ok());
+
+    EXPECT_FALSE(future_a.get(std::chrono::milliseconds(50)).has_value());
+    EXPECT_EQ(future_a.status().code(), zerokv::ErrorCode::kInProgress);
+
+    receiver->recv("async-a", recv_region, 7, 8, std::chrono::seconds(5));
+    future_a.get();
+    EXPECT_TRUE(future_a.status().ok());
+
+    sender->stop();
+    receiver->stop();
+    server->stop();
+}
