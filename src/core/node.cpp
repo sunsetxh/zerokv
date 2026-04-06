@@ -1,5 +1,6 @@
 #include "zerokv/core/kv_node.h"
 
+#include "internal/logging.h"
 #include "zerokv/transport/endpoint.h"
 #include "zerokv/transport/worker.h"
 
@@ -67,10 +68,15 @@ bool kv_trace_enabled() {
     return enabled;
 }
 
-void trace_kv(const std::string& line) {
-    if (kv_trace_enabled()) {
-        ::zerokv::detail::write_trace_line(line);
+bool kv_log_enabled() {
+    return kv_trace_enabled() || ::zerokv::detail::log_enabled(::zerokv::detail::LogLevel::kTrace);
+}
+
+void trace_kv(std::string_view component, const std::string& line) {
+    if (!kv_log_enabled()) {
+        return;
     }
+    ::zerokv::detail::write_log_line(::zerokv::detail::LogLevel::kTrace, component, line);
 }
 
 std::string make_ephemeral_bind_addr(const std::string& addr) {
@@ -1342,8 +1348,11 @@ std::optional<SubscriptionEvent> KVNode::wait_for_any_subscription_event(
         wanted.insert(key);
     }
 
-    trace_kv("KV_WAIT_ANY_BEGIN keys=" + std::to_string(wanted.size()) +
-             " timeout_ms=" + std::to_string(timeout.count()));
+    if (kv_log_enabled()) {
+        trace_kv("core.kv_node",
+                 "KV_WAIT_ANY_BEGIN keys=" + std::to_string(wanted.size()) +
+                     " timeout_ms=" + std::to_string(timeout.count()));
+    }
 
     auto matches = [&](const SubscriptionEvent& event) {
         return wanted.count(event.key) &&
@@ -1365,9 +1374,11 @@ std::optional<SubscriptionEvent> KVNode::wait_for_any_subscription_event(
 
     std::unique_lock<std::mutex> lock(impl_->subscription_mu_);
     if (auto event = consume_matching_event()) {
-        trace_kv("KV_WAIT_ANY_MATCH key=" + event->key +
-                 " type=" + std::to_string(static_cast<int>(event->type)) +
-                 " status=0");
+        if (kv_log_enabled()) {
+            trace_kv("core.kv_node",
+                     "KV_WAIT_ANY_MATCH key=" + event->key + " type=" +
+                         std::to_string(static_cast<int>(event->type)) + " status=0");
+        }
         return event;
     }
 
@@ -1379,9 +1390,11 @@ std::optional<SubscriptionEvent> KVNode::wait_for_any_subscription_event(
                                    matches);
             })) {
             if (auto event = consume_matching_event()) {
-                trace_kv("KV_WAIT_ANY_MATCH key=" + event->key +
-                         " type=" + std::to_string(static_cast<int>(event->type)) +
-                         " status=0");
+                if (kv_log_enabled()) {
+                    trace_kv("core.kv_node",
+                             "KV_WAIT_ANY_MATCH key=" + event->key + " type=" +
+                                 std::to_string(static_cast<int>(event->type)) + " status=0");
+                }
                 return event;
             }
         }
@@ -1393,9 +1406,12 @@ std::optional<SubscriptionEvent> KVNode::wait_for_any_subscription_event(
     if (!impl_->running_.load()) {
         Status(ErrorCode::kConnectionRefused, "KVNode is not running").throw_if_error();
     }
-    trace_kv("KV_WAIT_ANY_TIMEOUT keys=" + std::to_string(wanted.size()) +
-             " timeout_ms=" + std::to_string(timeout.count()) +
-             " status=" + std::to_string(static_cast<int>(ErrorCode::kTimeout)));
+    if (kv_log_enabled()) {
+        trace_kv("core.kv_node",
+                 "KV_WAIT_ANY_TIMEOUT keys=" + std::to_string(wanted.size()) +
+                     " timeout_ms=" + std::to_string(timeout.count()) + " status=" +
+                     std::to_string(static_cast<int>(ErrorCode::kTimeout)));
+    }
     return std::nullopt;
 }
 
@@ -1407,15 +1423,23 @@ Status KVNode::wait_for_key(const std::string& key, std::chrono::milliseconds ti
         return Status(ErrorCode::kInvalidArgument, "key is required");
     }
 
-    trace_kv("KV_WAIT_KEY_BEGIN key=" + key +
-             " timeout_ms=" + std::to_string(timeout.count()));
+    if (kv_log_enabled()) {
+        trace_kv("core.kv_node",
+                 "KV_WAIT_KEY_BEGIN key=" + key +
+                     " timeout_ms=" + std::to_string(timeout.count()));
+    }
     auto result = wait_for_keys({key}, timeout);
     if (result.completed) {
-        trace_kv("KV_WAIT_KEY_DONE key=" + key + " status=0");
+        if (kv_log_enabled()) {
+            trace_kv("core.kv_node", "KV_WAIT_KEY_DONE key=" + key + " status=0");
+        }
         return Status::OK();
     }
-    trace_kv("KV_WAIT_KEY_DONE key=" + key +
-             " status=" + std::to_string(static_cast<int>(ErrorCode::kTimeout)));
+    if (kv_log_enabled()) {
+        trace_kv("core.kv_node",
+                 "KV_WAIT_KEY_DONE key=" + key + " status=" +
+                     std::to_string(static_cast<int>(ErrorCode::kTimeout)));
+    }
     return Status(ErrorCode::kTimeout, "timed out waiting for key");
 }
 
