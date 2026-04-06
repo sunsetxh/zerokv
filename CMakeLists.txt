@@ -125,6 +125,7 @@ set(ZEROKV_SOURCES
     src/status.cpp
     src/cluster.cpp
     src/config.cpp
+    src/internal/logging.cpp
     src/transport/worker.cpp
     src/transport/endpoint.cpp
     src/transport/future.cpp
@@ -204,6 +205,11 @@ if(ZEROKV_BUILD_TESTS)
     add_executable(test_status tests/unit/test_status.cpp)
     target_link_libraries(test_status PRIVATE zerokv GTest::gtest GTest::gtest_main)
     add_test(NAME UnitStatus COMMAND test_status)
+
+    add_executable(test_logging tests/unit/test_logging.cpp)
+    target_link_libraries(test_logging PRIVATE zerokv GTest::gtest GTest::gtest_main)
+    target_include_directories(test_logging PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME UnitLogging COMMAND test_logging)
 
     add_executable(test_future tests/unit/test_future.cpp)
     target_link_libraries(test_future PRIVATE zerokv GTest::gtest GTest::gtest_main)

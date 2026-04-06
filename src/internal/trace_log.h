@@ -1,19 +1,13 @@
 #pragma once
 
-#include <iostream>
-#include <mutex>
+#include "internal/logging.h"
+
 #include <string>
 
 namespace zerokv::detail {
 
-inline std::mutex& trace_log_mutex() {
-    static std::mutex mu;
-    return mu;
-}
-
 inline void write_trace_line(const std::string& line) {
-    std::lock_guard<std::mutex> lock(trace_log_mutex());
-    std::cerr << line << '\n';
+    write_raw_log_line(line);
 }
 
 }  // namespace zerokv::detail
