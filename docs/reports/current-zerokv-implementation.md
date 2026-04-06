@@ -249,6 +249,55 @@ Interpretation:
 - current large-payload optimization work should therefore focus more on sender
   control-path cost than on receiver data-path correctness
 
+### Async Sender Mode Interpretation
+
+`KV` now also exposes:
+
+- `send_async()`
+- `send_region_async()`
+
+These return `zerokv::transport::Future<void>`. A future completes only after:
+
+1. the receiver-side ack has arrived
+2. the sender has successfully `unpublish`ed the message key
+
+The two-node demo therefore reports two different sender-side measurements:
+
+- `SEND_OK ... send_us=...`
+  - in `sync` mode: this is the full blocking send latency seen by the sender thread
+  - in `async` mode: this is the time until `send_region_async()` returns to the
+    sender thread (publish + enqueue), not the final cleanup-complete latency
+- `SEND_ROUND ... send_total_us=...`
+  - always includes the full round barrier
+  - in `async` mode the demo still waits for all returned futures before ending
+    the round, so this metric still includes ack and metadata cleanup
+
+This means `async` mode is expected to improve sender-thread return latency even
+when the aggregate `SEND_ROUND` total does not improve.
+
+VM1/VM2 `64K,1MiB` comparison:
+
+| transport | mode | size | sender `send_us` | sender `SEND_ROUND total_us` |
+|---|---|---:|---|---:|
+| tcp | sync | 64K | `1883..4802 us` | `4847 us` |
+| tcp | async | 64K | `524..636 us` | `6150 us` |
+| tcp | sync | 1M | `4785..17474 us` | `18271 us` |
+| tcp | async | 1M | `306..416 us` | `19412 us` |
+| rdma (`rxe0`) | sync | 64K | `1972..4000 us` | `4072 us` |
+| rdma (`rxe0`) | async | 64K | `743..942 us` | `7875 us` |
+| rdma (`rxe0`) | sync | 1M | `8317..17046 us` | `18466 us` |
+| rdma (`rxe0`) | async | 1M | `3351..4351 us` | `22283 us` |
+
+Interpretation of that table:
+
+- `async` mode clearly lowers the time until sender worker threads are released
+- `SEND_ROUND` is not a pure enqueue benchmark, because the demo deliberately
+  waits for all futures before declaring the round complete
+- `async` mode is therefore best used to answer:
+  - how quickly can sender threads hand work back to the application?
+- `sync` mode is best used to answer:
+  - how long does a full publish + ack + metadata cleanup cycle take?
+
 ### VM1/VM2 Validation Snapshot
 
 The current `afcdf6c` layering/rename state was revalidated on the local QEMU
