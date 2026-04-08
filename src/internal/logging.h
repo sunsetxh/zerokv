@@ -18,6 +18,7 @@ const char* log_level_name(LogLevel level) noexcept;
 LogLevel parse_log_level(std::string_view value) noexcept;
 LogLevel current_log_level();
 bool log_enabled(LogLevel level);
+bool log_component_enabled(std::string_view component);
 void reset_log_level_for_tests();
 
 std::mutex& log_output_mutex();

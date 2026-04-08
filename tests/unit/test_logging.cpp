@@ -63,5 +63,34 @@ TEST_F(LoggingTest, TraceEnablesAllLevels) {
     EXPECT_TRUE(log_enabled(LogLevel::kTrace));
 }
 
+TEST_F(LoggingTest, ComponentsDefaultToAllEnabled) {
+    setenv("ZEROKV_LOG_LEVEL", "trace", 1);
+    reset_log_level_for_tests();
+
+    EXPECT_TRUE(log_component_enabled("core.kv_node"));
+    EXPECT_TRUE(log_component_enabled("transport.endpoint"));
+}
+
+TEST_F(LoggingTest, ComponentsFilterByExactMatch) {
+    setenv("ZEROKV_LOG_LEVEL", "trace", 1);
+    setenv("ZEROKV_LOG_COMPONENTS", "core.kv_node,transport.endpoint", 1);
+    reset_log_level_for_tests();
+
+    EXPECT_TRUE(log_component_enabled("core.kv_node"));
+    EXPECT_TRUE(log_component_enabled("transport.endpoint"));
+    EXPECT_FALSE(log_component_enabled("kv.sender"));
+}
+
+TEST_F(LoggingTest, ComponentsFilterByPrefix) {
+    setenv("ZEROKV_LOG_LEVEL", "trace", 1);
+    setenv("ZEROKV_LOG_COMPONENTS", "core,transport.endpoint", 1);
+    reset_log_level_for_tests();
+
+    EXPECT_TRUE(log_component_enabled("core.kv_node"));
+    EXPECT_TRUE(log_component_enabled("core.tcp"));
+    EXPECT_TRUE(log_component_enabled("transport.endpoint"));
+    EXPECT_FALSE(log_component_enabled("kv.cleanup"));
+}
+
 }  // namespace
 }  // namespace zerokv::detail
