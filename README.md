@@ -90,6 +90,69 @@ creating the archive.
 | `ZEROKV_BUILD_BENCHMARK` | ON | Build benchmarks |
 | `ZEROKV_BUILD_PYTHON` | ON | Build Python bindings |
 
+## Logging
+
+ZeroKV now has one unified internal logger for library diagnostics. It covers:
+
+- `KV` sender/receiver/cleanup trace paths
+- `core` control-plane and wait paths
+- `transport` endpoint/worker fault paths
+
+The logger is controlled entirely by environment variables:
+
+```bash
+export ZEROKV_LOG_LEVEL=error   # error|warn|info|debug|trace
+export ZEROKV_LOG_COMPONENTS=core.kv_node,transport.endpoint
+```
+
+Behavior:
+
+- `ZEROKV_LOG_LEVEL` defaults to `error`
+- `ZEROKV_LOG_COMPONENTS` is optional
+- if `ZEROKV_LOG_COMPONENTS` is unset or empty, all components are enabled
+- component filters support exact match and prefix match
+  - `core` enables `core.kv_node`, `core.tcp`, etc.
+
+Current component names include:
+
+- `kv.sender`
+- `kv.receiver`
+- `kv.cleanup`
+- `core.kv_node`
+- `core.tcp`
+- `transport.endpoint`
+- `transport.worker`
+
+Examples:
+
+```bash
+# See all perf trace and fault logs
+ZEROKV_LOG_LEVEL=trace ./build/message_kv_demo ...
+
+# Only see control-plane and endpoint faults
+ZEROKV_LOG_LEVEL=error \
+ZEROKV_LOG_COMPONENTS=core.kv_node,transport.endpoint \
+./build/message_kv_demo ...
+
+# Only see TCP control-path faults
+ZEROKV_LOG_LEVEL=error \
+ZEROKV_LOG_COMPONENTS=core.tcp \
+./build/message_kv_demo ...
+```
+
+Output format:
+
+```text
+[zerokv][trace][kv.sender] KV_SEND_ASYNC_ENQUEUE key=...
+[zerokv][error][transport.endpoint] ucp_get_nbx failed: ...
+```
+
+Compatibility:
+
+- existing perf-trace env vars still work during migration:
+  - `ZEROKV_MESSAGE_KV_TRACE`
+  - `ZEROKV_KV_TRACE`
+
 ## Quick Start
 
 ### Transport examples

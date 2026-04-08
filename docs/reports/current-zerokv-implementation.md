@@ -426,6 +426,72 @@ the VM sender trace returned to normal. In the same `64K,1MiB` TCP check, the
 `1MiB` sender `event_wait_us` dropped from roughly `2,009,614~2,031,509 us` to
 roughly `5,091~18,001 us`.
 
+## Unified Logger
+
+The library now has one unified internal logger for diagnostics across:
+
+- `KV`
+- `core`
+- `transport`
+
+Current environment variables:
+
+- `ZEROKV_LOG_LEVEL`
+  - `error|warn|info|debug|trace`
+  - default: `error`
+- `ZEROKV_LOG_COMPONENTS`
+  - optional comma-separated component filter list
+  - unset/empty means all components are enabled
+
+Current component names in active use:
+
+- `kv.sender`
+- `kv.receiver`
+- `kv.cleanup`
+- `core.kv_node`
+- `core.tcp`
+- `transport.endpoint`
+- `transport.worker`
+
+Component filtering supports both exact and prefix matches. For example:
+
+- `ZEROKV_LOG_COMPONENTS=core.kv_node,transport.endpoint`
+  enables exactly those two components
+- `ZEROKV_LOG_COMPONENTS=core`
+  enables `core.kv_node`, `core.tcp`, and any future `core.*` component
+
+Representative usage:
+
+```bash
+# full library trace
+ZEROKV_LOG_LEVEL=trace ./build/message_kv_demo ...
+
+# only KVNode + endpoint diagnostics
+ZEROKV_LOG_LEVEL=debug \
+ZEROKV_LOG_COMPONENTS=core.kv_node,transport.endpoint \
+./build/message_kv_demo ...
+
+# only TCP control-path failures
+ZEROKV_LOG_LEVEL=error \
+ZEROKV_LOG_COMPONENTS=core.tcp \
+./build/message_kv_demo ...
+```
+
+Current output format is:
+
+```text
+[zerokv][trace][kv.sender] KV_SEND_ASYNC_ENQUEUE key=...
+[zerokv][warn][core.kv_node] push inbox busy for incoming push reservation
+[zerokv][error][transport.endpoint] ucp_get_nbx failed: ...
+```
+
+Migration note:
+
+- performance trace helpers are already routed through the unified logger
+- legacy env vars remain temporarily supported:
+  - `ZEROKV_MESSAGE_KV_TRACE`
+  - `ZEROKV_KV_TRACE`
+
 ## Known Gaps and Unimplemented Items
 
 ### Public API Present but Not Implemented
