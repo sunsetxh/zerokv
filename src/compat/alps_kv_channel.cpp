@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <thread>
 
 namespace zerokv::compat {
 
@@ -10,6 +11,27 @@ namespace {
 
 constexpr std::uint64_t kFnvOffsetBasis = 1469598103934665603ULL;
 constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
+
+// Spin-wait on a future without calling ucp_worker_progress().
+// Safe to use when a progress thread is already driving the worker.
+// Returns true if the future became ready before the deadline.
+template <typename F>
+bool SpinUntilReady(F& future, std::chrono::steady_clock::time_point deadline) {
+    while (!future.ready()) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return false;
+        }
+        std::this_thread::yield();
+    }
+    return true;
+}
+
+template <typename F>
+void SpinUntilReady(F& future) {
+    while (!future.ready()) {
+        std::this_thread::yield();
+    }
+}
 
 void HashUint32(std::uint64_t* hash, std::uint32_t value) {
     *hash ^= value;
@@ -171,49 +193,39 @@ AlpsKvChannel::PerThreadState* AlpsKvChannel::GetOrCreateThreadState() {
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::milliseconds(connect_timeout_ms_);
 
-    while (running_) {
-        const auto now = std::chrono::steady_clock::now();
-        if (now >= deadline) {
-            std::cerr << "AlpsKvChannel: timed out connecting to " << remote_address_ << std::endl;
-            break;
-        }
-        const auto remaining =
-            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
-        auto result = future.get(remaining);
-        if (!result.has_value()) {
-            if (!future.status().in_progress()) {
-                std::cerr << "AlpsKvChannel: connect failed: "
-                          << future.status().message() << std::endl;
-                break;
-            }
-            continue;
-        }
-        if (!future.status().ok() || *result == nullptr) {
-            std::cerr << "AlpsKvChannel: connect failed: "
-                      << future.status().message() << std::endl;
-            break;
-        }
-
-        // Flush to confirm the connection is live.
-        auto flush = (*result)->flush();
-        flush.get(std::chrono::milliseconds(connect_timeout_ms_));
-        if (!flush.status().ok()) {
-            std::cerr << "AlpsKvChannel: endpoint flush failed: "
-                      << flush.status().message() << std::endl;
-            break;
-        }
-
-        auto state = std::make_shared<PerThreadState>();
-        state->worker = std::move(worker);
-        state->endpoint = std::move(*result);
-
-        std::lock_guard<std::mutex> lock(per_thread_mutex_);
-        per_thread_states_[tid] = state;
-        return state.get();
+    if (!SpinUntilReady(future, deadline)) {
+        std::cerr << "AlpsKvChannel: timed out connecting to " << remote_address_ << std::endl;
+        worker->stop_progress_thread();
+        return nullptr;
+    }
+    auto conn_result = future.get();
+    if (!future.status().ok() || conn_result == nullptr) {
+        std::cerr << "AlpsKvChannel: connect failed: " << future.status().message() << std::endl;
+        worker->stop_progress_thread();
+        return nullptr;
     }
 
-    worker->stop_progress_thread();
-    return nullptr;
+    // Flush to confirm the connection is live.
+    auto flush = conn_result->flush();
+    if (!SpinUntilReady(flush, deadline)) {
+        std::cerr << "AlpsKvChannel: endpoint flush timed out." << std::endl;
+        worker->stop_progress_thread();
+        return nullptr;
+    }
+    if (!flush.status().ok()) {
+        std::cerr << "AlpsKvChannel: endpoint flush failed: " << flush.status().message()
+                  << std::endl;
+        worker->stop_progress_thread();
+        return nullptr;
+    }
+
+    auto state = std::make_shared<PerThreadState>();
+    state->worker = std::move(worker);
+    state->endpoint = std::move(conn_result);
+
+    std::lock_guard<std::mutex> lock(per_thread_mutex_);
+    per_thread_states_[tid] = state;
+    return state.get();
 }
 
 // ============================================================================
@@ -294,7 +306,8 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
     auto future = region
         ? state->endpoint->tag_send(region, 0, size, MakeMessageTag(tag, index, src, dst))
         : state->endpoint->tag_send(data, size, MakeMessageTag(tag, index, src, dst));
-    future.get();
+    // Passive wait: the per-thread progress thread drives completion; we only check status.
+    SpinUntilReady(future);
     if (!future.status().ok()) {
         std::cerr << "AlpsKvChannel::WriteBytes: send failed: "
                   << future.status().message() << std::endl;
@@ -322,7 +335,7 @@ void AlpsKvChannel::ReadBytes(void* data, size_t size, int tag, int index, int s
     }
 
     auto future = ep->tag_recv(data, size, MakeMessageTag(tag, index, src, dst));
-    future.get();
+    SpinUntilReady(future);
     if (!future.status().ok()) {
         std::cerr << "AlpsKvChannel::ReadBytes: recv failed: "
                   << future.status().message() << std::endl;
@@ -357,7 +370,8 @@ void AlpsKvChannel::ReadBytesBatch(std::vector<void*>& data,
         return;
     }
 
-    // Post all recvs in parallel, then wait for all.
+    // Post all recvs in parallel, then passively wait for all to complete.
+    // The recv_worker_'s progress thread drives all completions; we only check status.
     using RecvFuture = zerokv::transport::Future<std::pair<size_t, zerokv::Tag>>;
     std::vector<RecvFuture> futures;
     futures.reserve(count);
@@ -366,7 +380,7 @@ void AlpsKvChannel::ReadBytesBatch(std::vector<void*>& data,
             ep->tag_recv(data[i], sizes[i], MakeMessageTag(tags[i], indices[i], srcs[i], dsts[i])));
     }
     for (size_t i = 0; i < count; ++i) {
-        futures[i].get();
+        SpinUntilReady(futures[i]);
         if (!futures[i].status().ok()) {
             std::cerr << "AlpsKvChannel::ReadBytesBatch: recv[" << i
                       << "] failed: " << futures[i].status().message() << std::endl;
