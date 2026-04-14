@@ -240,6 +240,59 @@ object-style workflows where the application already owns unique keys.
 - `recv()` / `recv_batch()` wait for message keys and fetch into caller-owned memory
 - internal ack markers stay hidden from callers
 
+## ALPS Compatibility Wrapper
+
+This repository also provides an ALPS-style compatibility package that keeps the
+`SetClient` / `WriteBytes` / `ReadBytes` / `ReadBytesBatch` call shape while
+using ZeroKV send/recv transport underneath.
+
+Installed artifacts:
+
+- `include/yr/alps_kv_api.h`
+- `lib/libalps_kv_wrap.so`
+- `bin/alps_kv_bench`
+- `share/doc/alps_kv_wrap/README.md`
+
+Build targets:
+
+```bash
+cmake --build build --target alps_kv_wrap alps_kv_bench
+```
+
+See [docs/alps_kv_wrap/README.md](docs/alps_kv_wrap/README.md)
+for usage, connection modes, transport configuration, and benchmark examples.
+
+The ALPS wrapper benchmark defaults to a medium/large payload sweep:
+`256K,512K,1M,2M,4M,8M,16M,32M,64M`.
+
+### Transport selection (ALPS wrapper)
+
+The transport is controlled entirely by environment variables; no rebuild is
+needed to switch between TCP and RDMA:
+
+| Variable | Example | Purpose |
+|---|---|---|
+| `UCX_NET_DEVICES` | `rocep23s0f0:1` | Restrict to a specific NIC port |
+| `UCX_TLS` | `rc,sm,self` | UCX transport list (RC = RoCE, tcp = TCP) |
+| `ZEROKV_TRANSPORT` | `rdma` | High-level preset (`rdma` → `rc,sm,self`) |
+
+**RoCE quick start:**
+
+```bash
+# Server
+UCX_NET_DEVICES=rocep23s0f0:1 UCX_TLS=rc,sm,self \
+./alps_kv_bench --mode server --port 16000
+
+# Client
+UCX_NET_DEVICES=rocep23s0f0:1 UCX_TLS=rc,sm,self \
+./alps_kv_bench --mode client --host <server_ip> --port 16000
+```
+
+> **Note**: setting `UCX_NET_DEVICES` to a RoCE/IB device without specifying
+> `UCX_TLS` (or with `UCX_TLS=tcp`) causes UCX to fail with
+> "no able transports/devices". Always pair a RoCE device with an RDMA TLS such
+> as `rc,sm,self`.
+
 ### KV two-node demo
 
 `message_kv_demo` sweeps message sizes with `--sizes` across the two-node
