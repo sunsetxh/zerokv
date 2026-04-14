@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(zerokv VERSION 1.0.0 LANGUAGES CXX)
 
 include(CMakePackageConfigHelpers)
+find_package(Threads REQUIRED)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -148,6 +149,27 @@ target_include_directories(zerokv
 target_compile_features(zerokv PUBLIC cxx_std_20)
 target_link_libraries(zerokv PUBLIC PkgConfig::UCX pthread)
 
+add_library(alps_kv_wrap_core STATIC
+    src/compat/alps_kv_channel.cpp
+)
+target_include_directories(alps_kv_wrap_core
+    PUBLIC  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    PRIVATE ${CMAKE_SOURCE_DIR}/src
+)
+target_compile_features(alps_kv_wrap_core PUBLIC cxx_std_20)
+target_link_libraries(alps_kv_wrap_core PUBLIC zerokv pthread)
+
+add_library(alps_kv_wrap SHARED
+    src/compat/alps_kv_api.cpp
+)
+target_include_directories(alps_kv_wrap
+    PUBLIC  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    PRIVATE ${CMAKE_SOURCE_DIR}/src
+)
+target_compile_features(alps_kv_wrap PUBLIC cxx_std_20)
+target_link_libraries(alps_kv_wrap PRIVATE alps_kv_wrap_core)
+
 # Static library variant
 if(ZEROKV_BUILD_STATIC)
     add_library(zerokv_static STATIC ${ZEROKV_SOURCES})
@@ -188,6 +210,9 @@ if(ZEROKV_BUILD_EXAMPLES)
     )
     target_link_libraries(kv_bench PRIVATE zerokv)
     target_include_directories(kv_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+    add_executable(alps_kv_bench examples/alps_kv_bench.cpp)
+    target_link_libraries(alps_kv_bench PRIVATE alps_kv_wrap Threads::Threads)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -288,6 +313,17 @@ if(ZEROKV_BUILD_TESTS)
     target_compile_definitions(test_message_kv_demo PRIVATE MESSAGE_KV_DEMO_BUILD_TESTS)
     target_link_libraries(test_message_kv_demo PRIVATE zerokv GTest::gtest GTest::gtest_main)
     add_test(NAME IntegrationMessageKvDemo COMMAND test_message_kv_demo)
+
+    add_executable(test_alps_kv_wrap tests/integration/test_alps_kv_wrap.cpp)
+    target_link_libraries(test_alps_kv_wrap PRIVATE alps_kv_wrap_core GTest::gtest GTest::gtest_main)
+    target_include_directories(test_alps_kv_wrap PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME IntegrationAlpsKvWrap COMMAND test_alps_kv_wrap)
+
+    add_executable(test_alps_kv_bench tests/integration/test_alps_kv_bench.cpp)
+    target_sources(test_alps_kv_bench PRIVATE examples/alps_kv_bench.cpp)
+    target_compile_definitions(test_alps_kv_bench PRIVATE ALPS_KV_BENCH_BUILD_TESTS)
+    target_link_libraries(test_alps_kv_bench PRIVATE alps_kv_wrap GTest::gtest GTest::gtest_main)
+    add_test(NAME IntegrationAlpsKvBench COMMAND test_alps_kv_bench)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -331,12 +367,21 @@ endif()
 # ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
-install(TARGETS zerokv EXPORT zerokvTargets
+install(TARGETS zerokv alps_kv_wrap EXPORT zerokvTargets
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin
 )
 install(DIRECTORY include/zerokv DESTINATION include)
+install(DIRECTORY include/yr DESTINATION include)
+if(TARGET alps_kv_bench)
+    install(TARGETS alps_kv_bench
+        RUNTIME DESTINATION bin
+    )
+endif()
+install(FILES "${CMAKE_SOURCE_DIR}/docs/alps_kv_wrap/README.md"
+    DESTINATION share/doc/alps_kv_wrap
+)
 configure_package_config_file(
     "${CMAKE_SOURCE_DIR}/cmake/zerokvConfig.cmake.in"
     "${CMAKE_BINARY_DIR}/zerokvConfig.cmake"

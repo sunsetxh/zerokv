@@ -42,12 +42,28 @@ YR::SetClient("0.0.0.0", 16000, 5000);   // start listener
 YR::SetClient("127.0.0.1", 16000, 5000); // connect to peer
 ```
 
+## Multi-thread Usage
+
+`AlpsKvChannel` (the implementation behind `YR::`) supports the RANK0-receives /
+RANK1-sends-N-threads pattern natively:
+
+- **RANK0 (listener / receiver)**: one `Worker` accepts all incoming connections.
+  `ReadBytesBatch` posts all N receive futures simultaneously, so messages from
+  N concurrent senders are drained in parallel.
+- **RANK1 (connector / sender)**: each OS thread that calls `WriteBytes` gets a
+  dedicated `Worker + Endpoint` created on demand.  Sends from different threads
+  never share a UCX worker, so there is zero cross-thread contention on the hot
+  path.
+
+There is no API change needed — the thread-safety is built into the
+implementation.
+
 ## Semantics
 
 - The backend is message transport, not persistent KV storage.
-- `WriteBytes()` sends one framed message.
+- `WriteBytes()` sends one framed message (thread-safe; each thread gets its own connection).
 - `ReadBytes()` blocks until the matching `(tag, index, src, dst)` message arrives.
-- `ReadBytesBatch()` performs sequential blocking reads for each requested message.
+- `ReadBytesBatch()` posts all N recvs in parallel then waits for all to complete.
 - Messages are consumed after a successful read.
 - Repeated use of the same `(tag, index, src, dst)` is not handled as a stable multi-message queue. The benchmark and recommended usage keep each tuple unique.
 
@@ -134,17 +150,30 @@ Client:
 ./alps_kv_bench --mode client --host 127.0.0.1 --port 16000 --sizes 256K,512K,1M,2M,4M,8M,16M,32M,64M --iters 100
 ```
 
+### Multi-thread benchmark (RANK0 recv / RANK1 N-thread send)
+
+```bash
+# RANK0: receive 4 messages per iter (one per sender thread)
+./alps_kv_bench --mode server --port 16000 --threads 4 --iters 100
+
+# RANK1: 4 independent sender threads, each with its own connection
+./alps_kv_bench --mode client --host <server_ip> --port 16000 --threads 4 --iters 100
+```
+
+`total_bytes` in the output equals `size × iters × threads`, reflecting the
+aggregate data moved across all threads.
+
 ### RoCE two-node benchmark
 
 ```bash
 # Node A (server / receiver)
 UCX_NET_DEVICES=rocep23s0f0:1 UCX_TLS=rc,sm,self \
-./alps_kv_bench --mode server --port 16000 \
+./alps_kv_bench --mode server --port 16000 --threads 4 \
     --sizes 256K,512K,1M,2M,4M,8M,16M,32M,64M --iters 100
 
-# Node B (client / sender)
+# Node B (client / sender, 4 threads)
 UCX_NET_DEVICES=rocep23s0f0:1 UCX_TLS=rc,sm,self \
-./alps_kv_bench --mode client --host <server_ip> --port 16000 \
+./alps_kv_bench --mode client --host <server_ip> --port 16000 --threads 4 \
     --sizes 256K,512K,1M,2M,4M,8M,16M,32M,64M --iters 100
 ```
 
