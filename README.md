@@ -291,6 +291,12 @@ On RoCE hosts, `ibdev2netdev` is the most useful mapping command. On
 Soft-RoCE/QEMU setups, `ucx_info -d` and `rdma link show` should expose
 `rxe0`, which is then used as `UCX_NET_DEVICES=rxe0:1`.
 
+> **Important**: the current ALPS wrapper uses UCX `sockaddr` client-server
+> connection setup for the RDMA endpoint. When `UCX_NET_DEVICES` is pinned to a
+> specific RDMA device, the server listen address and the client `--host` must
+> use the IP on that same RDMA NIC. Using a management/TCP IP from another NIC
+> causes UCX connect/flush failures.
+
 **RoCE quick start:**
 
 ```bash
@@ -300,13 +306,14 @@ UCX_NET_DEVICES=rocep23s0f0:1 UCX_TLS=rc,sm,self \
 
 # Client
 UCX_NET_DEVICES=rocep23s0f0:1 UCX_TLS=rc,sm,self \
-./alps_kv_bench --mode client --host <server_ip> --port 16000
+./alps_kv_bench --mode client --host <server_rdma_ip> --port 16000
 ```
 
 > **Note**: setting `UCX_NET_DEVICES` to a RoCE/IB device without specifying
 > `UCX_TLS` (or with `UCX_TLS=tcp`) causes UCX to fail with
 > "no able transports/devices". Always pair a RoCE device with an RDMA TLS such
-> as `rc,sm,self`.
+> as `rc,sm,self`. Also make sure `<server_rdma_ip>` is the IP configured on
+> the same NIC selected by `UCX_NET_DEVICES`.
 
 ### KV two-node demo
 

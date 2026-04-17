@@ -48,6 +48,10 @@ Current transport mapping:
 - `rdma` -> `UCX_TLS=rc,sm,self`
 - `rdma_ud` -> `UCX_TLS=ud,sm,self`
 
+Current limitation for the ALPS wrapper: when `UCX_NET_DEVICES` is pinned, the
+server/client address used for UCX `sockaddr` connection setup must be on that
+same RDMA NIC; a management IP on another NIC is not supported.
+
 ### 2. Worker and Listener
 
 Files:
