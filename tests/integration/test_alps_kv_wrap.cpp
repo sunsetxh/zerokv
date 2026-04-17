@@ -105,3 +105,26 @@ TEST(AlpsKvWrapTest, ShutdownCompletesAfterPeerDisconnect) {
     });
     EXPECT_EQ(shutdown_future.wait_for(std::chrono::seconds(2)), std::future_status::ready);
 }
+
+TEST(AlpsKvWrapTest, WriteBytesUsesRmaPutInsteadOfPayloadTagSend) {
+    std::unique_ptr<AlpsKvChannel> server;
+    std::unique_ptr<AlpsKvChannel> client;
+    ASSERT_TRUE(MakeConnectedServerClient(&server, &client));
+    ASSERT_NE(server, nullptr);
+    ASSERT_NE(client, nullptr);
+
+    const std::string payload = "put-path-check";
+    std::vector<char> recv_buffer(payload.size(), '\0');
+
+    std::thread reader([&]() {
+        server->ReadBytes(recv_buffer.data(), recv_buffer.size(), 5, 1, 8, 9);
+    });
+
+    ASSERT_TRUE(client->WriteBytes(payload.data(), payload.size(), 5, 1, 8, 9));
+    reader.join();
+
+    EXPECT_EQ(std::memcmp(recv_buffer.data(), payload.data(), payload.size()), 0);
+    const auto stats = client->debug_stats();
+    EXPECT_EQ(stats.payload_tag_send_ops, 0u);
+    EXPECT_GT(stats.rma_put_ops, 0u);
+}

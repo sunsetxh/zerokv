@@ -2,18 +2,22 @@
 
 #include "zerokv/common.h"
 #include "zerokv/config.h"
+#include "zerokv/transport/future.h"
 #include "zerokv/transport/endpoint.h"
 #include "zerokv/transport/memory.h"
 #include "zerokv/transport/worker.h"
 
+#include <atomic>
 #include <condition_variable>
 #include <chrono>
+#include <cstdint>
 #include <cstddef>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
@@ -34,6 +38,13 @@ namespace zerokv::compat {
 //     any cross-thread locking on the hot path.
 class AlpsKvChannel {
 public:
+#ifdef ZEROKV_ALPS_TEST_HOOKS
+    struct DebugStats {
+        size_t payload_tag_send_ops = 0;
+        size_t rma_put_ops = 0;
+    };
+#endif
+
     AlpsKvChannel();
     ~AlpsKvChannel();
 
@@ -54,6 +65,10 @@ public:
                         const std::vector<int>& dsts);
 
     [[nodiscard]] std::string local_address() const;
+
+#ifdef ZEROKV_ALPS_TEST_HOOKS
+    [[nodiscard]] DebugStats debug_stats() const;
+#endif
 
 private:
     // ---- key helpers -------------------------------------------------------
@@ -76,6 +91,9 @@ private:
     static zerokv::Tag MakeMessageTag(int tag, int index, int src, int dst);
     zerokv::transport::MemoryRegion::Ptr GetOrRegisterSendRegion(
         SendCache& cache, const void* data, size_t size);
+    static std::string ExtractHost(const std::string& address);
+    static std::string MakeAddress(const std::string& host, uint16_t port);
+    static uint16_t ExtractPort(const std::string& address);
 
     // ---- context -----------------------------------------------------------
     enum class Mode { kUninitialized, kListen, kConnect };
@@ -86,6 +104,7 @@ private:
     Mode mode_ = Mode::kUninitialized;
     bool running_ = false;
     std::string local_address_;
+    std::string control_address_;
 
     // ---- listen-mode state (RANK0) -----------------------------------------
     // One worker drives UCX progress for all accepted connections.
@@ -95,8 +114,55 @@ private:
     mutable std::mutex endpoints_mutex_;
     std::condition_variable endpoints_cv_;
     std::vector<zerokv::transport::Endpoint::Ptr> endpoints_;
+    struct PendingBootstrapSend {
+        zerokv::transport::Future<void> future;
+        zerokv::transport::MemoryRegion::Ptr region;
+    };
+    std::vector<PendingBootstrapSend> pending_bootstrap_sends_;
 
     zerokv::transport::Endpoint::Ptr WaitForAnyEndpoint(std::chrono::milliseconds timeout);
+    bool InitControlListener(const std::string& bind_address);
+    void QueueBootstrapControlPort(const zerokv::transport::Endpoint::Ptr& ep);
+    void ReapBootstrapSends();
+    void ControlAcceptLoop();
+    void ControlConnectionLoop(int fd);
+
+    struct ReceiveSlot {
+        zerokv::transport::MemoryRegion::Ptr region;
+        zerokv::transport::RemoteKey remote_key;
+        size_t size = 0;
+        uint64_t reservation_id = 0;
+        bool reserved = false;
+        bool done = false;
+        bool success = false;
+        std::string error;
+        std::mutex mutex;
+        std::condition_variable cv;
+    };
+    mutable std::mutex receive_slots_mutex_;
+    std::condition_variable receive_slots_cv_;
+    std::unordered_map<zerokv::Tag, std::shared_ptr<ReceiveSlot>> receive_slots_;
+    struct BufferedMessage {
+        zerokv::transport::MemoryRegion::Ptr region;
+        zerokv::transport::RemoteKey remote_key;
+        size_t size = 0;
+        uint64_t reservation_id = 0;
+        bool completed = false;
+    };
+    std::unordered_map<zerokv::Tag, std::shared_ptr<BufferedMessage>> staged_messages_;
+    std::atomic<uint64_t> next_reservation_id_{1};
+    int control_listen_fd_ = -1;
+    std::thread control_accept_thread_;
+    mutable std::mutex control_threads_mutex_;
+    std::vector<std::thread> control_threads_;
+    mutable std::mutex active_control_fds_mutex_;
+    std::unordered_set<int> active_control_fds_;
+
+    std::shared_ptr<ReceiveSlot> RegisterReceiveSlot(void* data, size_t size, zerokv::Tag message_tag);
+    void FinishReceiveSlot(const std::shared_ptr<ReceiveSlot>& slot, const std::string& error);
+    void RemoveReceiveSlot(zerokv::Tag message_tag, const std::shared_ptr<ReceiveSlot>& slot);
+    bool WaitForSlotCompletion(const std::shared_ptr<ReceiveSlot>& slot);
+    void TryDeliverBufferedMessage(zerokv::Tag message_tag);
 
     // ---- connect-mode state (RANK1) ----------------------------------------
     // Each OS thread gets its own Worker+Endpoint so sends are fully parallel.
@@ -107,11 +173,23 @@ private:
         zerokv::transport::Worker::Ptr worker;
         zerokv::transport::Endpoint::Ptr endpoint;
         SendCache send_cache;
+        std::string control_address;
+        int control_fd = -1;
+        uint64_t next_request_id = 1;
     };
     mutable std::mutex per_thread_mutex_;
     std::map<std::thread::id, std::shared_ptr<PerThreadState>> per_thread_states_;
 
     PerThreadState* GetOrCreateThreadState();
+    bool BootstrapControlAddress(PerThreadState* state,
+                                 std::chrono::steady_clock::time_point deadline);
+    bool EnsureControlConnection(PerThreadState* state);
+    static void CloseControlFd(int* fd);
+
+#ifdef ZEROKV_ALPS_TEST_HOOKS
+    std::atomic<size_t> payload_tag_send_ops_{0};
+    std::atomic<size_t> rma_put_ops_{0};
+#endif
 };
 
 }  // namespace zerokv::compat

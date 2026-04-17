@@ -158,6 +158,9 @@ target_include_directories(alps_kv_wrap_core
 )
 target_compile_features(alps_kv_wrap_core PUBLIC cxx_std_20)
 target_link_libraries(alps_kv_wrap_core PUBLIC zerokv pthread)
+if(ZEROKV_BUILD_TESTS)
+    target_compile_definitions(alps_kv_wrap_core PUBLIC ZEROKV_ALPS_TEST_HOOKS)
+endif()
 
 add_library(alps_kv_wrap SHARED
     src/compat/alps_kv_api.cpp
