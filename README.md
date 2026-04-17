@@ -276,6 +276,21 @@ needed to switch between TCP and RDMA:
 | `UCX_TLS` | `rc,sm,self` | UCX transport list (RC = RoCE, tcp = TCP) |
 | `ZEROKV_TRANSPORT` | `rdma` | High-level preset (`rdma` → `rc,sm,self`) |
 
+Before setting `UCX_NET_DEVICES`, first identify the RDMA device and its netdev
+mapping:
+
+```bash
+ucx_info -d
+ibv_devices
+ibdev2netdev
+rdma link show
+ip -br addr
+```
+
+On RoCE hosts, `ibdev2netdev` is the most useful mapping command. On
+Soft-RoCE/QEMU setups, `ucx_info -d` and `rdma link show` should expose
+`rxe0`, which is then used as `UCX_NET_DEVICES=rxe0:1`.
+
 **RoCE quick start:**
 
 ```bash

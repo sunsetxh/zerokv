@@ -206,6 +206,9 @@ cmake --install build --prefix /tmp/alps_kv_wrap_pkg
 cd /tmp
 cp /tmp/alps_kv_wrap_pkg/share/doc/alps_kv_wrap/README.md /tmp/alps_kv_wrap_pkg/README.md
 printf '%s\n' "${COMMIT_ID}" > /tmp/alps_kv_wrap_pkg/COMMIT_ID
+printf '%s\n' "$(uname -m)" > /tmp/alps_kv_wrap_pkg/ARCH
+cp /usr/local/bin/ucx_info /tmp/alps_kv_wrap_pkg/bin/ucx_info
+cp /usr/local/bin/ucp_info /tmp/alps_kv_wrap_pkg/bin/ucp_info
 tar -czf /tmp/alps_kv_wrap_pkg.tar.gz alps_kv_wrap_pkg
 
 echo "== remote compiler string =="
@@ -251,8 +254,14 @@ inspect_local_package() {
     done
     echo "== packaged commit id =="
     cat "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/COMMIT_ID"
+    echo "== packaged arch =="
+    cat "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/ARCH"
     echo "== packaged readme =="
     ls -lh "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/README.md"
+    echo "== packaged ucx tools =="
+    ls -lh \
+        "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/bin/ucx_info" \
+        "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/bin/ucp_info"
     ls -lh "${OUTPUT_TARBALL}"
 }
 
