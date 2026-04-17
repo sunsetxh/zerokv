@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 COMMIT_ID="$(git -C "${ROOT_DIR}" rev-parse --short HEAD)"
+OUT_DIR="${ROOT_DIR}/out/packages"
 WORK_DIR="/Volumes/data/axon-focal-build"
 BASE_IMAGE="${WORK_DIR}/ubuntu-20.04-server-cloudimg-arm64.img"
 OVERLAY="${WORK_DIR}/build-overlay.qcow2"
@@ -19,8 +20,8 @@ REMOTE_BUILD_SCRIPT="/tmp/axon_focal_remote_build.sh"
 REMOTE_UCX_TARBALL="/tmp/ucx-v1.20.0.tar.gz"
 REMOTE_SRC_TARBALL="/tmp/alps_kv_wrap_src.tar.gz"
 REMOTE_CMAKE_TARBALL="/tmp/cmake-4.3.1-linux-aarch64.tar.gz"
-OUTPUT_TARBALL="${ROOT_DIR}/alps_kv_wrap_pkg-${COMMIT_ID}.tar.gz"
-LATEST_OUTPUT_TARBALL="${ROOT_DIR}/alps_kv_wrap_pkg.tar.gz"
+OUTPUT_TARBALL="${OUT_DIR}/alps_kv_wrap_pkg-${COMMIT_ID}.tar.gz"
+LATEST_OUTPUT_TARBALL="${OUT_DIR}/alps_kv_wrap_pkg.tar.gz"
 LOCAL_INSPECT_DIR="/tmp/alps_kv_wrap_pkg_inspect_focal"
 CMAKE_ARCHIVE="${WORK_DIR}/cmake-4.3.1-linux-aarch64.tar.gz"
 CMAKE_URL="https://github.com/Kitware/CMake/releases/download/v4.3.1/cmake-4.3.1-linux-aarch64.tar.gz"
@@ -57,6 +58,7 @@ cleanup_vm() {
 trap cleanup_vm EXIT
 
 prepare_base_image() {
+    mkdir -p "${OUT_DIR}"
     mkdir -p "${WORK_DIR}"
     if [[ ! -f "${BASE_IMAGE}" ]]; then
         echo "==> Downloading Ubuntu 20.04 ARM64 cloud image..."
