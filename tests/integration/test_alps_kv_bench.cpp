@@ -13,6 +13,7 @@ std::string render_round_summary(const char* role,
                                  int iters,
                                  size_t total_bytes,
                                  uint64_t elapsed_us);
+std::string render_listen_address_line(const std::string& address);
 }  // namespace zerokv::examples::alps_kv_bench
 
 TEST(AlpsKvBenchHelpersTest, ParsesSizeCsvWithBinarySuffixes) {
@@ -44,4 +45,10 @@ TEST(AlpsKvBenchHelpersTest, RoundSummaryIncludesRoundAndSize) {
     EXPECT_NE(line.find("round=2"), std::string::npos);
     EXPECT_NE(line.find("size=4194304"), std::string::npos);
     EXPECT_NE(line.find("iters=10"), std::string::npos);
+}
+
+TEST(AlpsKvBenchHelpersTest, ListenAddressLineIncludesResolvedAddress) {
+    const auto line = zerokv::examples::alps_kv_bench::render_listen_address_line("10.0.2.15:16000");
+    EXPECT_NE(line.find("ALPS_KV_LISTEN"), std::string::npos);
+    EXPECT_NE(line.find("address=10.0.2.15:16000"), std::string::npos);
 }

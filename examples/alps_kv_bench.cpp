@@ -93,6 +93,10 @@ std::string render_round_summary(const char* role,
     return out.str();
 }
 
+std::string render_listen_address_line(const std::string& address) {
+    return "ALPS_KV_LISTEN address=" + address;
+}
+
 }  // namespace zerokv::examples::alps_kv_bench
 
 #ifndef ALPS_KV_BENCH_BUILD_TESTS
@@ -189,6 +193,9 @@ int main(int argc, char** argv) {
             std::cerr << "server failed to listen on port " << args.port << std::endl;
             return 1;
         }
+        std::cout << zerokv::examples::alps_kv_bench::render_listen_address_line(
+                         YR::GetLocalAddress())
+                  << std::endl;
 
         // Allocate one buffer per thread slot.
         std::vector<std::vector<char>> bufs(static_cast<size_t>(args.threads),

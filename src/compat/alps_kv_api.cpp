@@ -49,6 +49,13 @@ void ShutdownClient() {
     }
 }
 
+std::string GetLocalAddress() {
+    if (!g_channel) {
+        return {};
+    }
+    return g_channel->local_address();
+}
+
 int WriteBytes(const void* data, size_t size, int tag, int index, int src, int dst) {
     if (!g_channel) {
         std::cerr << "YR::WriteBytes: channel not initialized, call YR::SetClient first." << std::endl;

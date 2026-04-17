@@ -1,12 +1,14 @@
 #pragma once
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
 namespace YR {
 
 int SetClient(const char* host, int port, int connect_timeout_ms);
 void ShutdownClient();
+std::string GetLocalAddress();
 
 int WriteBytes(const void* data, size_t size, int tag, int index, int src, int dst);
 void ReadBytes(void* data, size_t size, int tag, int index, int src, int dst);

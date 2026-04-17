@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 COMMIT_ID="$(git -C "${ROOT_DIR}" rev-parse --short HEAD)"
+ARCH="aarch64"
 OUT_DIR="${ROOT_DIR}/out/packages"
 WORK_DIR="/Volumes/data/axon-focal-build"
 BASE_IMAGE="${WORK_DIR}/ubuntu-20.04-server-cloudimg-arm64.img"
@@ -20,9 +21,10 @@ REMOTE_BUILD_SCRIPT="/tmp/axon_focal_remote_build.sh"
 REMOTE_UCX_TARBALL="/tmp/ucx-v1.20.0.tar.gz"
 REMOTE_SRC_TARBALL="/tmp/alps_kv_wrap_src.tar.gz"
 REMOTE_CMAKE_TARBALL="/tmp/cmake-4.3.1-linux-aarch64.tar.gz"
-OUTPUT_TARBALL="${OUT_DIR}/alps_kv_wrap_pkg-${COMMIT_ID}.tar.gz"
-LATEST_OUTPUT_TARBALL="${OUT_DIR}/alps_kv_wrap_pkg.tar.gz"
-LOCAL_INSPECT_DIR="/tmp/alps_kv_wrap_pkg_inspect_focal"
+PKG_DIR_NAME="alps_kv_wrap_pkg-${ARCH}-${COMMIT_ID}"
+OUTPUT_TARBALL="${OUT_DIR}/${PKG_DIR_NAME}.tar.gz"
+LATEST_OUTPUT_TARBALL="${OUT_DIR}/alps_kv_wrap_pkg-${ARCH}.tar.gz"
+LOCAL_INSPECT_DIR="/tmp/${PKG_DIR_NAME}-inspect"
 CMAKE_ARCHIVE="${WORK_DIR}/cmake-4.3.1-linux-aarch64.tar.gz"
 CMAKE_URL="https://github.com/Kitware/CMake/releases/download/v4.3.1/cmake-4.3.1-linux-aarch64.tar.gz"
 
@@ -153,6 +155,8 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 : "${COMMIT_ID:=unknown}"
+ARCH="aarch64"
+PKG_DIR_NAME="alps_kv_wrap_pkg-${ARCH}-${COMMIT_ID}"
 sudo apt-get update -o Acquire::Retries=5 -o Acquire::https::Timeout=30 -qq
 sudo apt-get install -y \
     gcc-10 g++-10 cmake git pkg-config make \
@@ -169,6 +173,8 @@ export CC=gcc-10
 export CXX=g++-10
 UCX_VER=1.20.0
 UCX_PREFIX="/usr/local/ucx-static-pic"
+UCX_INFO_STATIC_BUILD="/tmp/ucx-tools-static"
+UCX_INFO_STATIC_BIN="${UCX_INFO_STATIC_BUILD}/src/tools/info/ucx_info"
 CMAKE_DIR=/opt/cmake-4.3.1-linux-aarch64
 
 cd /tmp
@@ -192,7 +198,31 @@ if [[ ! -x "${UCX_PREFIX}/bin/ucp_info" ]] || ! "${UCX_PREFIX}/bin/ucp_info" -v 
     sudo ldconfig
 fi
 
-rm -rf /tmp/axon-build /tmp/alps_kv_wrap_pkg /tmp/alps_kv_wrap_pkg.tar.gz
+rm -rf "${UCX_INFO_STATIC_BUILD}"
+mkdir -p "${UCX_INFO_STATIC_BUILD}"
+tar xzf /tmp/ucx-v1.20.0.tar.gz -C "${UCX_INFO_STATIC_BUILD}" --strip-components=1
+cd "${UCX_INFO_STATIC_BUILD}"
+if [[ ! -x ./configure ]]; then
+    ./autogen.sh >/tmp/ucx-static-tools-autogen.log 2>&1
+fi
+./contrib/configure-release \
+    --prefix="${UCX_INFO_STATIC_BUILD}/install" \
+    --disable-shared \
+    --enable-static \
+    --with-rdmcm \
+    --enable-mt \
+    --with-go=no \
+    --with-java=no \
+    --enable-gtest=no \
+    >/tmp/ucx-static-tools-config.log 2>&1
+make -j"$(nproc)" -k >/tmp/ucx-static-tools-make.log 2>&1 || true
+if [[ ! -x "${UCX_INFO_STATIC_BIN}" ]]; then
+    echo "Failed to build static ucx_info" >&2
+    tail -n 80 /tmp/ucx-static-tools-make.log >&2 || true
+    exit 1
+fi
+
+rm -rf /tmp/axon-build "/tmp/${PKG_DIR_NAME}" "/tmp/${PKG_DIR_NAME}.tar.gz"
 mkdir -p /tmp/axon-build
 cd /tmp/axon-build
 tar xzf /tmp/alps_kv_wrap_src.tar.gz
@@ -204,29 +234,31 @@ cmake -S . -B build \
     -DZEROKV_BUILD_TESTS=OFF \
     -DZEROKV_BUILD_EXAMPLES=ON \
     -DZEROKV_BUILD_BENCHMARK=OFF \
-    -DZEROKV_BUILD_PYTHON=OFF
+    -DZEROKV_BUILD_PYTHON=OFF \
+    -DCMAKE_SHARED_LINKER_FLAGS='-static-libstdc++ -static-libgcc' \
+    -DCMAKE_EXE_LINKER_FLAGS='-static-libstdc++ -static-libgcc'
 cmake --build build --target zerokv alps_kv_wrap alps_kv_bench -j"$(nproc)"
-cmake --install build --prefix /tmp/alps_kv_wrap_pkg
+cmake --install build --prefix "/tmp/${PKG_DIR_NAME}"
 
 cd /tmp
-cp /tmp/alps_kv_wrap_pkg/share/doc/alps_kv_wrap/README.md /tmp/alps_kv_wrap_pkg/README.md
-printf '%s\n' "${COMMIT_ID}" > /tmp/alps_kv_wrap_pkg/COMMIT_ID
-printf '%s\n' "$(uname -m)" > /tmp/alps_kv_wrap_pkg/ARCH
-cp "${UCX_PREFIX}/bin/ucx_info" /tmp/alps_kv_wrap_pkg/bin/ucx_info
+cp "/tmp/${PKG_DIR_NAME}/share/doc/alps_kv_wrap/README.md" "/tmp/${PKG_DIR_NAME}/README.md"
+printf '%s\n' "${COMMIT_ID}" > "/tmp/${PKG_DIR_NAME}/COMMIT_ID"
+printf '%s\n' "${ARCH}" > "/tmp/${PKG_DIR_NAME}/ARCH"
+cp "${UCX_INFO_STATIC_BIN}" "/tmp/${PKG_DIR_NAME}/bin/ucx_info"
 if [[ -x "${UCX_PREFIX}/bin/ucp_info" ]]; then
-    cp "${UCX_PREFIX}/bin/ucp_info" /tmp/alps_kv_wrap_pkg/bin/ucp_info
+    cp "${UCX_PREFIX}/bin/ucp_info" "/tmp/${PKG_DIR_NAME}/bin/ucp_info"
 fi
-tar -czf /tmp/alps_kv_wrap_pkg.tar.gz alps_kv_wrap_pkg
+tar -czf "/tmp/${PKG_DIR_NAME}.tar.gz" "${PKG_DIR_NAME}"
 
 echo "== remote compiler string =="
-strings /tmp/alps_kv_wrap_pkg/lib/libalps_kv_wrap.so | \
+strings "/tmp/${PKG_DIR_NAME}/lib/libalps_kv_wrap.so" | \
     grep 'GCC: (Ubuntu 10.5.0-1ubuntu1~20.04) 10.5.0' | head -n 1
 
 echo "== remote GLIBCXX max =="
 for f in \
-    /tmp/alps_kv_wrap_pkg/lib/libalps_kv_wrap.so \
-    /tmp/alps_kv_wrap_pkg/lib/libzerokv.so \
-    /tmp/alps_kv_wrap_pkg/bin/alps_kv_bench; do
+    "/tmp/${PKG_DIR_NAME}/lib/libalps_kv_wrap.so" \
+    "/tmp/${PKG_DIR_NAME}/lib/libzerokv.so" \
+    "/tmp/${PKG_DIR_NAME}/bin/alps_kv_bench"; do
     echo "-- ${f}"
     objdump -T "${f}" | sed -n 's/.*\(GLIBCXX_[0-9.]*\).*/\1/p' | sort -Vu | tail -n 10
 done
@@ -236,15 +268,7 @@ EOF
 
 package_source_tree() {
     rm -f "${SRC_TARBALL}"
-    tar -C "${ROOT_DIR}" \
-        --exclude='.git' \
-        --exclude='build' \
-        --exclude='.vm_work' \
-        --exclude='scripts/qemu_rdma/.vm_work' \
-        --exclude='.omx' \
-        --exclude='*.o' \
-        --exclude='*.a' \
-        -czf "${SRC_TARBALL}" .
+    git -C "${ROOT_DIR}" archive --format=tar.gz -o "${SRC_TARBALL}" HEAD
 }
 
 inspect_local_package() {
@@ -252,23 +276,23 @@ inspect_local_package() {
     mkdir -p "${LOCAL_INSPECT_DIR}"
     tar -xzf "${OUTPUT_TARBALL}" -C "${LOCAL_INSPECT_DIR}"
     for f in \
-        "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/lib/libalps_kv_wrap.so" \
-        "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/lib/libzerokv.so" \
-        "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/bin/alps_kv_bench"; do
+        "${LOCAL_INSPECT_DIR}/${PKG_DIR_NAME}/lib/libalps_kv_wrap.so" \
+        "${LOCAL_INSPECT_DIR}/${PKG_DIR_NAME}/lib/libzerokv.so" \
+        "${LOCAL_INSPECT_DIR}/${PKG_DIR_NAME}/bin/alps_kv_bench"; do
         echo "== local ${f} =="
         objdump -T "${f}" | sed -n 's/.*\(GLIBCXX_[0-9.]*\).*/\1/p' | sort -Vu | tail -n 10
         strings "${f}" | rg 'GCC: \(Ubuntu .*\\) 10\\.' | tail -n 1 || true
     done
     echo "== packaged commit id =="
-    cat "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/COMMIT_ID"
+    cat "${LOCAL_INSPECT_DIR}/${PKG_DIR_NAME}/COMMIT_ID"
     echo "== packaged arch =="
-    cat "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/ARCH"
+    cat "${LOCAL_INSPECT_DIR}/${PKG_DIR_NAME}/ARCH"
     echo "== packaged readme =="
-    ls -lh "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/README.md"
+    ls -lh "${LOCAL_INSPECT_DIR}/${PKG_DIR_NAME}/README.md"
     echo "== packaged ucx tools =="
-    ls -lh "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/bin/ucx_info"
-    if [[ -e "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/bin/ucp_info" ]]; then
-        ls -lh "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/bin/ucp_info"
+    ls -lh "${LOCAL_INSPECT_DIR}/${PKG_DIR_NAME}/bin/ucx_info"
+    if [[ -e "${LOCAL_INSPECT_DIR}/${PKG_DIR_NAME}/bin/ucp_info" ]]; then
+        ls -lh "${LOCAL_INSPECT_DIR}/${PKG_DIR_NAME}/bin/ucp_info"
     fi
     ls -lh "${OUTPUT_TARBALL}"
 }
@@ -288,7 +312,7 @@ vm_copy_to "${ROOT_DIR}/ucx-v1.20.0.tar.gz" "${REMOTE_UCX_TARBALL}"
 vm_copy_to "${CMAKE_ARCHIVE}" "${REMOTE_CMAKE_TARBALL}"
 vm_copy_to /tmp/axon_focal_remote_build.sh "${REMOTE_BUILD_SCRIPT}"
 vm_ssh "COMMIT_ID='${COMMIT_ID}' bash ${REMOTE_BUILD_SCRIPT}"
-vm_copy_from /tmp/alps_kv_wrap_pkg.tar.gz "${OUTPUT_TARBALL}"
+vm_copy_from "/tmp/${PKG_DIR_NAME}.tar.gz" "${OUTPUT_TARBALL}"
 cp "${OUTPUT_TARBALL}" "${LATEST_OUTPUT_TARBALL}"
 
 inspect_local_package
