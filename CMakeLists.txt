@@ -53,9 +53,13 @@ endif()
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(UCX REQUIRED IMPORTED_TARGET ucx)
+get_target_property(ZEROKV_UCX_IMPORTED_INCLUDE_DIRS PkgConfig::UCX INTERFACE_INCLUDE_DIRECTORIES)
+if(NOT ZEROKV_UCX_IMPORTED_INCLUDE_DIRS)
+    set(ZEROKV_UCX_IMPORTED_INCLUDE_DIRS ${UCX_INCLUDE_DIRS})
+endif()
 
 add_library(zerokv_ucx INTERFACE)
-target_include_directories(zerokv_ucx INTERFACE ${UCX_INCLUDE_DIRS})
+target_include_directories(zerokv_ucx INTERFACE ${ZEROKV_UCX_IMPORTED_INCLUDE_DIRS})
 
 if(ZEROKV_LINK_UCX_STATIC)
     execute_process(
@@ -186,7 +190,7 @@ set(ZEROKV_SOURCES
 add_library(zerokv SHARED ${ZEROKV_SOURCES})
 target_include_directories(zerokv
     PUBLIC  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-            ${UCX_INCLUDE_DIRS}
+            ${ZEROKV_UCX_IMPORTED_INCLUDE_DIRS}
             $<INSTALL_INTERFACE:include>
     PRIVATE ${CMAKE_SOURCE_DIR}/src
 )
@@ -222,7 +226,7 @@ if(ZEROKV_BUILD_STATIC)
     add_library(zerokv_static STATIC ${ZEROKV_SOURCES})
     target_include_directories(zerokv_static
         PUBLIC  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-                ${UCX_INCLUDE_DIRS}
+                ${ZEROKV_UCX_IMPORTED_INCLUDE_DIRS}
         PRIVATE ${CMAKE_SOURCE_DIR}/src
     )
     target_compile_features(zerokv_static PUBLIC cxx_std_20)
