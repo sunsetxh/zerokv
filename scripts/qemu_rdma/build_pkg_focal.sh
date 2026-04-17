@@ -196,6 +196,7 @@ tar xzf /tmp/alps_kv_wrap_src.tar.gz
 cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_CXX_COMPILER=g++-10 \
+    -DZEROKV_LINK_UCX_STATIC=ON \
     -DZEROKV_BUILD_TESTS=OFF \
     -DZEROKV_BUILD_EXAMPLES=ON \
     -DZEROKV_BUILD_BENCHMARK=OFF \

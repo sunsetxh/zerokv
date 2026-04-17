@@ -22,6 +22,7 @@ option(ZEROKV_BUILD_EXAMPLES   "Build examples"                           ON)
 option(ZEROKV_BUILD_TESTS      "Build tests (requires GTest)"             ON)
 option(ZEROKV_BUILD_BENCHMARK  "Build benchmarks (requires Google Benchmark)"   ON)
 option(ZEROKV_BUILD_PYTHON     "Build Python bindings (requires nanobind)" ON)
+option(ZEROKV_LINK_UCX_STATIC  "Statically link UCX into zerokv shared libraries" OFF)
 set(UCX_ROOT "" CACHE PATH "Root directory of a UCX installation")
 set(ZEROKV_THIRD_PARTY_DIR "${CMAKE_SOURCE_DIR}/third_party" CACHE PATH "Root directory for vendored third-party dependencies")
 
@@ -52,6 +53,48 @@ endif()
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(UCX REQUIRED IMPORTED_TARGET ucx)
+
+add_library(zerokv_ucx INTERFACE)
+target_include_directories(zerokv_ucx INTERFACE ${UCX_INCLUDE_DIRS})
+
+if(ZEROKV_LINK_UCX_STATIC)
+    execute_process(
+        COMMAND "${PKG_CONFIG_EXECUTABLE}" --libs --static ucx
+        OUTPUT_VARIABLE UCX_STATIC_LINK_LINE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE UCX_STATIC_RESULT
+    )
+    if(NOT UCX_STATIC_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to resolve static UCX link flags with pkg-config --static")
+    endif()
+
+    separate_arguments(UCX_STATIC_ARGS NATIVE_COMMAND "${UCX_STATIC_LINK_LINE}")
+    set(UCX_STATIC_LINK_DIRS "")
+    set(UCX_STATIC_LINK_OPTIONS "")
+    set(UCX_STATIC_LINK_LIBS "")
+    foreach(arg IN LISTS UCX_STATIC_ARGS)
+        if(arg MATCHES "^-L(.+)")
+            list(APPEND UCX_STATIC_LINK_DIRS "${CMAKE_MATCH_1}")
+        elseif(arg MATCHES "^-Wl,")
+            list(APPEND UCX_STATIC_LINK_OPTIONS "${arg}")
+        else()
+            list(APPEND UCX_STATIC_LINK_LIBS "${arg}")
+        endif()
+    endforeach()
+
+    target_link_directories(zerokv_ucx INTERFACE ${UCX_STATIC_LINK_DIRS})
+    target_link_libraries(zerokv_ucx INTERFACE ${UCX_STATIC_LINK_LIBS})
+    target_link_options(zerokv_ucx INTERFACE ${UCX_STATIC_LINK_OPTIONS})
+    if(UNIX AND NOT APPLE)
+        target_link_options(
+            zerokv_ucx
+            INTERFACE
+                "-Wl,--exclude-libs,libucp.a:libuct.a:libucs.a:libucm.a"
+        )
+    endif()
+else()
+    target_link_libraries(zerokv_ucx INTERFACE PkgConfig::UCX)
+endif()
 
 # Optional: Google Test
 if(ZEROKV_BUILD_TESTS)
@@ -147,7 +190,7 @@ target_include_directories(zerokv
     PRIVATE ${CMAKE_SOURCE_DIR}/src
 )
 target_compile_features(zerokv PUBLIC cxx_std_20)
-target_link_libraries(zerokv PUBLIC PkgConfig::UCX pthread)
+target_link_libraries(zerokv PRIVATE zerokv_ucx Threads::Threads)
 
 add_library(alps_kv_wrap_core STATIC
     src/compat/alps_kv_channel.cpp
@@ -157,7 +200,7 @@ target_include_directories(alps_kv_wrap_core
     PRIVATE ${CMAKE_SOURCE_DIR}/src
 )
 target_compile_features(alps_kv_wrap_core PUBLIC cxx_std_20)
-target_link_libraries(alps_kv_wrap_core PUBLIC zerokv pthread)
+target_link_libraries(alps_kv_wrap_core PUBLIC zerokv Threads::Threads)
 if(ZEROKV_BUILD_TESTS)
     target_compile_definitions(alps_kv_wrap_core PUBLIC ZEROKV_ALPS_TEST_HOOKS)
 endif()
@@ -181,7 +224,7 @@ if(ZEROKV_BUILD_STATIC)
         PRIVATE ${CMAKE_SOURCE_DIR}/src
     )
     target_compile_features(zerokv_static PUBLIC cxx_std_20)
-    target_link_libraries(zerokv_static PUBLIC PkgConfig::UCX pthread)
+    target_link_libraries(zerokv_static PUBLIC zerokv_ucx Threads::Threads)
     set_target_properties(zerokv_static PROPERTIES OUTPUT_NAME zerokv)
 endif()
 
@@ -385,6 +428,11 @@ endif()
 install(FILES "${CMAKE_SOURCE_DIR}/docs/alps_kv_wrap/README.md"
     DESTINATION share/doc/alps_kv_wrap
 )
+if(ZEROKV_LINK_UCX_STATIC)
+    set(ZEROKV_PACKAGE_NEEDS_UCX_PKGCONFIG OFF)
+else()
+    set(ZEROKV_PACKAGE_NEEDS_UCX_PKGCONFIG ON)
+endif()
 configure_package_config_file(
     "${CMAKE_SOURCE_DIR}/cmake/zerokvConfig.cmake.in"
     "${CMAKE_BINARY_DIR}/zerokvConfig.cmake"
