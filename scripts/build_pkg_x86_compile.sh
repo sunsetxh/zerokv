@@ -53,7 +53,7 @@ CONTAINER_SRC="/tmp/zerokv-src.tar.gz"
 CONTAINER_UCX="/tmp/ucx-v1.20.0.tar.gz"
 CONTAINER_SCRIPT="/tmp/build_alps_inside_compile.sh"
 CONTAINER_BUILD_ROOT="/tmp/alps-x86-build"
-CONTAINER_UCX_PREFIX="/opt/ucx-1.20.0"
+CONTAINER_UCX_PREFIX="/opt/ucx-1.20.0-static-pic"
 PKG_DIR_NAME="__PKG_DIR_NAME__"
 CONTAINER_PKG_ROOT="/tmp/${PKG_DIR_NAME}"
 HOST_OUTPUT="/tmp/${PKG_DIR_NAME}.tar.gz"
@@ -85,6 +85,8 @@ if [ ! -x "${CONTAINER_UCX_PREFIX}/bin/ucp_info" ]; then
   if [ ! -x ./configure ]; then
     ./autogen.sh >/tmp/ucx-autogen-x86.log 2>&1
   fi
+  export CFLAGS="${CFLAGS:-} -fPIC"
+  export CXXFLAGS="${CXXFLAGS:-} -fPIC"
   ./contrib/configure-release \
     --prefix="${CONTAINER_UCX_PREFIX}" \
     --with-go=no \

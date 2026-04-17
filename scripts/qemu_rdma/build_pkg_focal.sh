@@ -168,6 +168,7 @@ sudo update-alternatives --set g++ /usr/bin/g++-10
 export CC=gcc-10
 export CXX=g++-10
 UCX_VER=1.20.0
+UCX_PREFIX="/usr/local/ucx-static-pic"
 CMAKE_DIR=/opt/cmake-4.3.1-linux-aarch64
 
 cd /tmp
@@ -175,14 +176,16 @@ sudo rm -rf "${CMAKE_DIR}"
 sudo tar -C /opt -xzf /tmp/cmake-4.3.1-linux-aarch64.tar.gz
 export PATH="${CMAKE_DIR}/bin:${PATH}"
 
-if ! command -v ucp_info >/dev/null 2>&1 || ! ucp_info -v 2>/dev/null | grep -q "${UCX_VER}"; then
+if [[ ! -x "${UCX_PREFIX}/bin/ucp_info" ]] || ! "${UCX_PREFIX}/bin/ucp_info" -v 2>/dev/null | grep -q "${UCX_VER}"; then
     rm -rf "ucx-${UCX_VER}"
     tar xzf /tmp/ucx-v1.20.0.tar.gz
     cd "ucx-${UCX_VER}"
     if [[ ! -x ./configure ]]; then
         ./autogen.sh >/tmp/ucx-autogen.log 2>&1
     fi
-    ./contrib/configure-release --prefix=/usr/local --with-rdmcm --enable-mt \
+    export CFLAGS="${CFLAGS:-} -fPIC"
+    export CXXFLAGS="${CXXFLAGS:-} -fPIC"
+    ./contrib/configure-release --prefix="${UCX_PREFIX}" --with-rdmcm --enable-mt --with-go=no --with-java=no --enable-gtest=no \
         >/tmp/ucx-config.log 2>&1
     make -j"$(nproc)" >/tmp/ucx-make.log 2>&1
     sudo make install >/tmp/ucx-install.log 2>&1
@@ -196,6 +199,7 @@ tar xzf /tmp/alps_kv_wrap_src.tar.gz
 cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_CXX_COMPILER=g++-10 \
+    -DUCX_ROOT="${UCX_PREFIX}" \
     -DZEROKV_LINK_UCX_STATIC=ON \
     -DZEROKV_BUILD_TESTS=OFF \
     -DZEROKV_BUILD_EXAMPLES=ON \
@@ -208,9 +212,9 @@ cd /tmp
 cp /tmp/alps_kv_wrap_pkg/share/doc/alps_kv_wrap/README.md /tmp/alps_kv_wrap_pkg/README.md
 printf '%s\n' "${COMMIT_ID}" > /tmp/alps_kv_wrap_pkg/COMMIT_ID
 printf '%s\n' "$(uname -m)" > /tmp/alps_kv_wrap_pkg/ARCH
-cp /usr/local/bin/ucx_info /tmp/alps_kv_wrap_pkg/bin/ucx_info
-if [[ -x /usr/local/bin/ucp_info ]]; then
-    cp /usr/local/bin/ucp_info /tmp/alps_kv_wrap_pkg/bin/ucp_info
+cp "${UCX_PREFIX}/bin/ucx_info" /tmp/alps_kv_wrap_pkg/bin/ucx_info
+if [[ -x "${UCX_PREFIX}/bin/ucp_info" ]]; then
+    cp "${UCX_PREFIX}/bin/ucp_info" /tmp/alps_kv_wrap_pkg/bin/ucp_info
 fi
 tar -czf /tmp/alps_kv_wrap_pkg.tar.gz alps_kv_wrap_pkg
 
