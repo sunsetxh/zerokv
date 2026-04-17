@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+COMMIT_ID="$(git -C "${ROOT_DIR}" rev-parse --short HEAD)"
 WORK_DIR="/Volumes/data/axon-focal-build"
 BASE_IMAGE="${WORK_DIR}/ubuntu-20.04-server-cloudimg-arm64.img"
 OVERLAY="${WORK_DIR}/build-overlay.qcow2"
@@ -18,7 +19,8 @@ REMOTE_BUILD_SCRIPT="/tmp/axon_focal_remote_build.sh"
 REMOTE_UCX_TARBALL="/tmp/ucx-v1.20.0.tar.gz"
 REMOTE_SRC_TARBALL="/tmp/alps_kv_wrap_src.tar.gz"
 REMOTE_CMAKE_TARBALL="/tmp/cmake-4.3.1-linux-aarch64.tar.gz"
-OUTPUT_TARBALL="${ROOT_DIR}/alps_kv_wrap_pkg.tar.gz"
+OUTPUT_TARBALL="${ROOT_DIR}/alps_kv_wrap_pkg-${COMMIT_ID}.tar.gz"
+LATEST_OUTPUT_TARBALL="${ROOT_DIR}/alps_kv_wrap_pkg.tar.gz"
 LOCAL_INSPECT_DIR="/tmp/alps_kv_wrap_pkg_inspect_focal"
 CMAKE_ARCHIVE="${WORK_DIR}/cmake-4.3.1-linux-aarch64.tar.gz"
 CMAKE_URL="https://github.com/Kitware/CMake/releases/download/v4.3.1/cmake-4.3.1-linux-aarch64.tar.gz"
@@ -148,6 +150,7 @@ write_remote_build_script() {
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
+: "${COMMIT_ID:=unknown}"
 sudo apt-get update -o Acquire::Retries=5 -o Acquire::https::Timeout=30 -qq
 sudo apt-get install -y \
     gcc-10 g++-10 cmake git pkg-config make \
@@ -199,6 +202,8 @@ cmake --build build --target zerokv alps_kv_wrap alps_kv_bench -j"$(nproc)"
 cmake --install build --prefix /tmp/alps_kv_wrap_pkg
 
 cd /tmp
+cp /tmp/alps_kv_wrap_pkg/share/doc/alps_kv_wrap/README.md /tmp/alps_kv_wrap_pkg/README.md
+printf '%s\n' "${COMMIT_ID}" > /tmp/alps_kv_wrap_pkg/COMMIT_ID
 tar -czf /tmp/alps_kv_wrap_pkg.tar.gz alps_kv_wrap_pkg
 
 echo "== remote compiler string =="
@@ -242,6 +247,10 @@ inspect_local_package() {
         objdump -T "${f}" | sed -n 's/.*\(GLIBCXX_[0-9.]*\).*/\1/p' | sort -Vu | tail -n 10
         strings "${f}" | rg 'GCC: \(Ubuntu .*\\) 10\\.' | tail -n 1 || true
     done
+    echo "== packaged commit id =="
+    cat "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/COMMIT_ID"
+    echo "== packaged readme =="
+    ls -lh "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/README.md"
     ls -lh "${OUTPUT_TARBALL}"
 }
 
@@ -253,12 +262,14 @@ wait_for_ssh
 write_remote_build_script
 package_source_tree
 rm -f "${OUTPUT_TARBALL}"
+rm -f "${LATEST_OUTPUT_TARBALL}"
 
 vm_copy_to "${SRC_TARBALL}" "${REMOTE_SRC_TARBALL}"
 vm_copy_to "${ROOT_DIR}/ucx-v1.20.0.tar.gz" "${REMOTE_UCX_TARBALL}"
 vm_copy_to "${CMAKE_ARCHIVE}" "${REMOTE_CMAKE_TARBALL}"
 vm_copy_to /tmp/axon_focal_remote_build.sh "${REMOTE_BUILD_SCRIPT}"
-vm_ssh "bash ${REMOTE_BUILD_SCRIPT}"
+vm_ssh "COMMIT_ID='${COMMIT_ID}' bash ${REMOTE_BUILD_SCRIPT}"
 vm_copy_from /tmp/alps_kv_wrap_pkg.tar.gz "${OUTPUT_TARBALL}"
+cp "${OUTPUT_TARBALL}" "${LATEST_OUTPUT_TARBALL}"
 
 inspect_local_package
