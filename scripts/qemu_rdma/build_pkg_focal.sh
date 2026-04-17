@@ -208,7 +208,9 @@ cp /tmp/alps_kv_wrap_pkg/share/doc/alps_kv_wrap/README.md /tmp/alps_kv_wrap_pkg/
 printf '%s\n' "${COMMIT_ID}" > /tmp/alps_kv_wrap_pkg/COMMIT_ID
 printf '%s\n' "$(uname -m)" > /tmp/alps_kv_wrap_pkg/ARCH
 cp /usr/local/bin/ucx_info /tmp/alps_kv_wrap_pkg/bin/ucx_info
-cp /usr/local/bin/ucp_info /tmp/alps_kv_wrap_pkg/bin/ucp_info
+if [[ -x /usr/local/bin/ucp_info ]]; then
+    cp /usr/local/bin/ucp_info /tmp/alps_kv_wrap_pkg/bin/ucp_info
+fi
 tar -czf /tmp/alps_kv_wrap_pkg.tar.gz alps_kv_wrap_pkg
 
 echo "== remote compiler string =="
@@ -259,9 +261,10 @@ inspect_local_package() {
     echo "== packaged readme =="
     ls -lh "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/README.md"
     echo "== packaged ucx tools =="
-    ls -lh \
-        "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/bin/ucx_info" \
-        "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/bin/ucp_info"
+    ls -lh "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/bin/ucx_info"
+    if [[ -e "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/bin/ucp_info" ]]; then
+        ls -lh "${LOCAL_INSPECT_DIR}/alps_kv_wrap_pkg/bin/ucp_info"
+    fi
     ls -lh "${OUTPUT_TARBALL}"
 }
 
