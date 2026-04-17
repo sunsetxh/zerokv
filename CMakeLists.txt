@@ -186,6 +186,7 @@ set(ZEROKV_SOURCES
 add_library(zerokv SHARED ${ZEROKV_SOURCES})
 target_include_directories(zerokv
     PUBLIC  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+            ${UCX_INCLUDE_DIRS}
             $<INSTALL_INTERFACE:include>
     PRIVATE ${CMAKE_SOURCE_DIR}/src
 )
@@ -221,6 +222,7 @@ if(ZEROKV_BUILD_STATIC)
     add_library(zerokv_static STATIC ${ZEROKV_SOURCES})
     target_include_directories(zerokv_static
         PUBLIC  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+                ${UCX_INCLUDE_DIRS}
         PRIVATE ${CMAKE_SOURCE_DIR}/src
     )
     target_compile_features(zerokv_static PUBLIC cxx_std_20)
