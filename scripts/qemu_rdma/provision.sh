@@ -5,6 +5,7 @@
 # This script handles:
 #   - Switching to tuna mirror for faster downloads (China region)
 #   - Installing all packages including linux-modules-extra (for rdma_rxe)
+#   - Pinning GCC/G++ 10.3.0 toolchains for reproducible VM builds
 #   - Loading Soft-RoCE and creating rxe0 on both VMs
 #   - Configuring static IPs for inter-VM communication
 #   - Transferring and compiling zerokv
@@ -18,6 +19,7 @@ VM2_SSH_PORT=2223
 SSH_USER="axon"
 SSH_PASS="axon"
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+GCC10_VERSION="10.3.0-15ubuntu1"
 
 # --- SSH helper ---
 vm_ssh() {
@@ -60,17 +62,20 @@ provision_vm() {
     echo "==> Provisioning ${vm_name} (SSH port ${port})..."
 
     # 1. Switch to tuna mirror for faster downloads
-    echo "    Switching to tuna mirror..."
+    echo "    Switching to apt mirror..."
     vm_ssh "${port}" \
-        "sudo sed -i 's|http://ports.ubuntu.com/ubuntu-ports|https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports|g' /etc/apt/sources.list" 2>/dev/null
+        "sudo sed -i \
+            -e 's|https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports|https://mirrors.aliyun.com/ubuntu-ports|g' \
+            -e 's|http://ports.ubuntu.com/ubuntu-ports|https://mirrors.aliyun.com/ubuntu-ports|g' \
+            /etc/apt/sources.list" 2>/dev/null
 
     # 2. Install all dependencies
     # Note: linux-modules-extra is required for rdma_rxe kernel module
     echo "    Installing packages (this takes a while in QEMU)..."
-    vm_ssh "${port}" bash -s <<'INSTALL'
+    vm_ssh "${port}" GCC10_VERSION="${GCC10_VERSION}" bash -s <<'INSTALL'
 #!/bin/bash
 set -e
-sudo apt-get update -qq
+sudo apt-get update -o Acquire::Retries=5 -o Acquire::https::Timeout=30 -qq
 sudo apt-get install -y -qq \
     rdma-core ibverbs-utils \
     build-essential cmake git pkg-config \
@@ -79,6 +84,24 @@ sudo apt-get install -y -qq \
     linux-modules-extra-$(uname -r) \
     autoconf automake libtool \
     libnuma-dev
+
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades \
+    gcc-10="${GCC10_VERSION}" \
+    g++-10="${GCC10_VERSION}" \
+    cpp-10="${GCC10_VERSION}" \
+    gcc-10-base="${GCC10_VERSION}" \
+    libgcc-10-dev="${GCC10_VERSION}" \
+    libstdc++-10-dev="${GCC10_VERSION}" \
+    -o Acquire::Retries=5 \
+    -o Acquire::https::Timeout=30 \
+    --fix-missing
+
+sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100
+sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100
+sudo update-alternatives --set gcc /usr/bin/gcc-10
+sudo update-alternatives --set g++ /usr/bin/g++-10
+gcc -dumpfullversion -dumpversion
+g++ -dumpfullversion -dumpversion
 INSTALL
 
     # 2b. Build UCX >= 1.14 from source (Ubuntu 22.04 ships UCX 1.12 which
@@ -89,6 +112,8 @@ INSTALL
 set -e
 UCX_VER="1.18.0"
 UCX_PREFIX="/usr/local"
+export CC=gcc-10
+export CXX=g++-10
 
 # Check if already installed
 if ucp_info -v 2>/dev/null | grep -q "${UCX_VER}"; then
@@ -167,8 +192,12 @@ CREATE_RXE
 set -e
 cd /tmp/zerokv
 tar xzf /tmp/zerokv-src.tar.gz
+export CC=gcc-10
+export CXX=g++-10
 cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_COMPILER=gcc-10 \
+    -DCMAKE_CXX_COMPILER=g++-10 \
     -DZEROKV_BUILD_TESTS=OFF \
     -DZEROKV_BUILD_EXAMPLES=ON \
     -DZEROKV_BUILD_BENCHMARK=OFF \
