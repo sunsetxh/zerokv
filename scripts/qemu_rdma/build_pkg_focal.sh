@@ -173,8 +173,6 @@ export CC=gcc-10
 export CXX=g++-10
 UCX_VER=1.20.0
 UCX_PREFIX="/usr/local/ucx-static-pic"
-UCX_INFO_STATIC_BUILD="/tmp/ucx-tools-static"
-UCX_INFO_STATIC_BIN="${UCX_INFO_STATIC_BUILD}/src/tools/info/ucx_info"
 CMAKE_DIR=/opt/cmake-4.3.1-linux-aarch64
 
 cd /tmp
@@ -198,30 +196,6 @@ if [[ ! -x "${UCX_PREFIX}/bin/ucp_info" ]] || ! "${UCX_PREFIX}/bin/ucp_info" -v 
     sudo ldconfig
 fi
 
-rm -rf "${UCX_INFO_STATIC_BUILD}"
-mkdir -p "${UCX_INFO_STATIC_BUILD}"
-tar xzf /tmp/ucx-v1.20.0.tar.gz -C "${UCX_INFO_STATIC_BUILD}" --strip-components=1
-cd "${UCX_INFO_STATIC_BUILD}"
-if [[ ! -x ./configure ]]; then
-    ./autogen.sh >/tmp/ucx-static-tools-autogen.log 2>&1
-fi
-./contrib/configure-release \
-    --prefix="${UCX_INFO_STATIC_BUILD}/install" \
-    --disable-shared \
-    --enable-static \
-    --with-rdmcm \
-    --enable-mt \
-    --with-go=no \
-    --with-java=no \
-    --enable-gtest=no \
-    >/tmp/ucx-static-tools-config.log 2>&1
-make -j"$(nproc)" -k >/tmp/ucx-static-tools-make.log 2>&1 || true
-if [[ ! -x "${UCX_INFO_STATIC_BIN}" ]]; then
-    echo "Failed to build static ucx_info" >&2
-    tail -n 80 /tmp/ucx-static-tools-make.log >&2 || true
-    exit 1
-fi
-
 rm -rf /tmp/axon-build "/tmp/${PKG_DIR_NAME}" "/tmp/${PKG_DIR_NAME}.tar.gz"
 mkdir -p /tmp/axon-build
 cd /tmp/axon-build
@@ -230,7 +204,6 @@ cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_CXX_COMPILER=g++-10 \
     -DUCX_ROOT="${UCX_PREFIX}" \
-    -DZEROKV_LINK_UCX_STATIC=ON \
     -DZEROKV_BUILD_TESTS=OFF \
     -DZEROKV_BUILD_EXAMPLES=ON \
     -DZEROKV_BUILD_BENCHMARK=OFF \
@@ -240,11 +213,32 @@ cmake -S . -B build \
 cmake --build build --target zerokv alps_kv_wrap alps_kv_bench -j"$(nproc)"
 cmake --install build --prefix "/tmp/${PKG_DIR_NAME}"
 
+mkdir -p "/tmp/${PKG_DIR_NAME}/lib" "/tmp/${PKG_DIR_NAME}/lib/ucx"
+shopt -s nullglob
+found_shared=0
+found_modules=0
+for dir in "${UCX_PREFIX}/lib" "${UCX_PREFIX}/lib64"; do
+    [[ -d "${dir}" ]] || continue
+    for lib in "${dir}"/libuc*.so*; do
+        cp -a "${lib}" "/tmp/${PKG_DIR_NAME}/lib/"
+        found_shared=1
+    done
+    if [[ -d "${dir}/ucx" ]]; then
+        cp -a "${dir}/ucx/." "/tmp/${PKG_DIR_NAME}/lib/ucx/"
+        found_modules=1
+    fi
+done
+shopt -u nullglob
+if [[ "${found_shared}" != "1" ]] || [[ "${found_modules}" != "1" ]]; then
+    echo "Failed to stage packaged UCX runtime" >&2
+    exit 1
+fi
+
 cd /tmp
 cp "/tmp/${PKG_DIR_NAME}/share/doc/alps_kv_wrap/README.md" "/tmp/${PKG_DIR_NAME}/README.md"
 printf '%s\n' "${COMMIT_ID}" > "/tmp/${PKG_DIR_NAME}/COMMIT_ID"
 printf '%s\n' "${ARCH}" > "/tmp/${PKG_DIR_NAME}/ARCH"
-cp "${UCX_INFO_STATIC_BIN}" "/tmp/${PKG_DIR_NAME}/bin/ucx_info"
+cp "${UCX_PREFIX}/bin/ucx_info" "/tmp/${PKG_DIR_NAME}/bin/ucx_info"
 if [[ -x "${UCX_PREFIX}/bin/ucp_info" ]]; then
     cp "${UCX_PREFIX}/bin/ucp_info" "/tmp/${PKG_DIR_NAME}/bin/ucp_info"
 fi
@@ -262,6 +256,12 @@ for f in \
     echo "-- ${f}"
     objdump -T "${f}" | sed -n 's/.*\(GLIBCXX_[0-9.]*\).*/\1/p' | sort -Vu | tail -n 10
 done
+
+echo "== packaged ucx runtime =="
+find "/tmp/${PKG_DIR_NAME}/lib/ucx" -maxdepth 1 -type f | sort | sed -n '1,40p'
+UCX_MODULE_DIR="/tmp/${PKG_DIR_NAME}/lib/ucx" \
+LD_LIBRARY_PATH="/tmp/${PKG_DIR_NAME}/lib:${LD_LIBRARY_PATH:-}" \
+    "/tmp/${PKG_DIR_NAME}/bin/ucx_info" -d | grep -E 'rc_verbs|rc_mlx5|mlx5|rdmacm' | sed -n '1,20p'
 EOF
     chmod +x /tmp/axon_focal_remote_build.sh
 }

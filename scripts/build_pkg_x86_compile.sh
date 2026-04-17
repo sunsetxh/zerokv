@@ -67,8 +67,6 @@ PKG_DIR_NAME="__PKG_DIR_NAME__"
 COMMIT_ID="__COMMIT_ID__"
 ARCH="__ARCH__"
 UCX_PREFIX="/opt/ucx-1.20.0-static-pic"
-UCX_INFO_STATIC_BUILD="/tmp/ucx-1.20.0-tools-static"
-UCX_INFO_STATIC_BIN="${UCX_INFO_STATIC_BUILD}/src/tools/info/ucx_info"
 BUILD_ROOT="/tmp/alps-x86-build"
 PKG_ROOT="/tmp/${PKG_DIR_NAME}"
 OUTPUT_TARBALL="/tmp/${PKG_DIR_NAME}.tar.gz"
@@ -116,7 +114,35 @@ source /opt/rh/gcc-toolset-12/enable
 export CC=gcc
 export CXX=g++
 
-rm -rf "${BUILD_ROOT}" "${PKG_ROOT}" "${OUTPUT_TARBALL}" /tmp/ucx-1.20.0 "${UCX_INFO_STATIC_BUILD}"
+copy_ucx_runtime() {
+    mkdir -p "${PKG_ROOT}/lib" "${PKG_ROOT}/lib/ucx"
+    shopt -s nullglob
+    local found_shared=0
+    local found_modules=0
+    for dir in "${UCX_PREFIX}/lib" "${UCX_PREFIX}/lib64"; do
+        [[ -d "${dir}" ]] || continue
+        for lib in "${dir}"/libuc*.so*; do
+            cp -a "${lib}" "${PKG_ROOT}/lib/"
+            found_shared=1
+        done
+        if [[ -d "${dir}/ucx" ]]; then
+            cp -a "${dir}/ucx/." "${PKG_ROOT}/lib/ucx/"
+            found_modules=1
+        fi
+    done
+    shopt -u nullglob
+
+    if [[ "${found_shared}" != "1" ]]; then
+        echo "Failed to stage UCX shared libraries from ${UCX_PREFIX}" >&2
+        exit 1
+    fi
+    if [[ "${found_modules}" != "1" ]]; then
+        echo "Failed to stage UCX provider modules from ${UCX_PREFIX}" >&2
+        exit 1
+    fi
+}
+
+rm -rf "${BUILD_ROOT}" "${PKG_ROOT}" "${OUTPUT_TARBALL}" /tmp/ucx-1.20.0
 mkdir -p "${BUILD_ROOT}"
 
 if [[ ! -x "${UCX_PREFIX}/bin/ucp_info" ]] || \
@@ -140,35 +166,12 @@ if [[ ! -x "${UCX_PREFIX}/bin/ucp_info" ]] || \
     make install >/tmp/ucx-install-x86.log 2>&1
 fi
 
-cd /tmp
-mkdir -p "${UCX_INFO_STATIC_BUILD}"
-tar xzf "${CONTAINER_UCX}" -C "${UCX_INFO_STATIC_BUILD}" --strip-components=1
-cd "${UCX_INFO_STATIC_BUILD}"
-if [[ ! -x ./configure ]]; then
-    ./autogen.sh >/tmp/ucx-autogen-static-tools-x86.log 2>&1
-fi
-./contrib/configure-release \
-    --prefix="${UCX_INFO_STATIC_BUILD}/install" \
-    --disable-shared \
-    --enable-static \
-    --with-go=no \
-    --with-java=no \
-    --enable-gtest=no \
-    >/tmp/ucx-config-static-tools-x86.log 2>&1
-make -j"$(nproc)" -k >/tmp/ucx-make-static-tools-x86.log 2>&1 || true
-if [[ ! -x "${UCX_INFO_STATIC_BIN}" ]]; then
-    echo "Failed to build static ucx_info" >&2
-    tail -n 80 /tmp/ucx-make-static-tools-x86.log >&2 || true
-    exit 1
-fi
-
 cd "${BUILD_ROOT}"
 tar xzf "${CONTAINER_SRC}"
 PKG_CONFIG_PATH="${UCX_PREFIX}/lib/pkgconfig:${UCX_PREFIX}/lib64/pkgconfig:${PKG_CONFIG_PATH:-}" \
 cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DUCX_ROOT="${UCX_PREFIX}" \
-    -DZEROKV_LINK_UCX_STATIC=ON \
     -DZEROKV_BUILD_TESTS=OFF \
     -DZEROKV_BUILD_BENCHMARK=OFF \
     -DZEROKV_BUILD_PYTHON=OFF \
@@ -178,10 +181,11 @@ cmake --build build --target zerokv alps_kv_wrap alps_kv_bench -j"$(nproc)" \
     >/tmp/alps-x86-build.log 2>&1
 cmake --install build --prefix "${PKG_ROOT}" >/tmp/alps-x86-install.log 2>&1
 
+copy_ucx_runtime
 cp "${PKG_ROOT}/share/doc/alps_kv_wrap/README.md" "${PKG_ROOT}/README.md"
 printf '%s\n' "${COMMIT_ID}" > "${PKG_ROOT}/COMMIT_ID"
 printf '%s\n' "${ARCH}" > "${PKG_ROOT}/ARCH"
-cp "${UCX_INFO_STATIC_BIN}" "${PKG_ROOT}/bin/ucx_info"
+cp "${UCX_PREFIX}/bin/ucx_info" "${PKG_ROOT}/bin/ucx_info"
 if [[ -x "${UCX_PREFIX}/bin/ucp_info" ]]; then
     cp "${UCX_PREFIX}/bin/ucp_info" "${PKG_ROOT}/bin/ucp_info"
 fi
@@ -192,9 +196,10 @@ find "${PKG_ROOT}" -maxdepth 2 -type f | sort
 check_no_dynamic_ucx() {
     local file="$1"
     if readelf -d "${file}" 2>/dev/null | grep -E 'Shared library: \[(libucp|libucs|libuct|libucm)\.so'; then
-        echo "Dynamic UCX dependency found in ${file}" >&2
-        exit 1
+        return 0
     fi
+    echo "Expected packaged UCX dependency missing in ${file}" >&2
+    exit 1
 }
 
 check_glibc_floor() {
@@ -217,6 +222,13 @@ for file in \
     ldd "${file}" || true
     check_no_dynamic_ucx "${file}"
 done
+
+echo "== UCX runtime verification =="
+find "${PKG_ROOT}/lib/ucx" -maxdepth 1 -type f | sort | sed -n '1,40p'
+UCX_MODULE_DIR="${PKG_ROOT}/lib/ucx" \
+LD_LIBRARY_PATH="${PKG_ROOT}/lib:${LD_LIBRARY_PATH:-}" \
+    "${PKG_ROOT}/bin/ucx_info" -d | grep -E 'rc_verbs|rc_mlx5|mlx5|rdmacm' >/tmp/alps-x86-ucx-runtime.log
+sed -n '1,20p' /tmp/alps-x86-ucx-runtime.log
 
 echo "== GLIBC floor verification =="
 for file in \
