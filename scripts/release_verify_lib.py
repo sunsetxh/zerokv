@@ -7,6 +7,10 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def source_archive_name(arch: str, commit: str) -> str:
+    return f"zerokv-src-{arch}-{commit}.tar.gz"
+
+
 def resolve_target_commit(
     head_sha: str,
     explicit_commit: str | None,

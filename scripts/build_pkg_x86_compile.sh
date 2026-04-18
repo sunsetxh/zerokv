@@ -4,7 +4,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 GIT_COMMON_DIR="$(git -C "${ROOT_DIR}" rev-parse --git-common-dir)"
 COMMON_ROOT="$(cd "$(dirname "${GIT_COMMON_DIR}")" && pwd)"
-COMMIT_ID="$(git -C "${ROOT_DIR}" rev-parse --short HEAD)"
+if [[ -n "${TARGET_COMMIT:-}" ]]; then
+    if [[ -z "${TARGET_COMMIT//[[:space:]]/}" ]] || [[ "${TARGET_COMMIT}" =~ [[:space:]] ]]; then
+        echo "TARGET_COMMIT must be non-empty and contain no whitespace" >&2
+        exit 1
+    fi
+    COMMIT_ID="${TARGET_COMMIT}"
+else
+    COMMIT_ID="$(git -C "${ROOT_DIR}" rev-parse --short HEAD)"
+fi
 ARCH="x86_64"
 IMAGE="${IMAGE:-rockylinux:8}"
 CONTAINER_NAME="${CONTAINER_NAME:-alps-pkg-x86-glibc228-${COMMIT_ID}}"
@@ -42,7 +50,11 @@ if [[ ! -f "${UCX_TARBALL}" ]]; then
 fi
 
 mkdir -p "${OUT_DIR}" "${SRC_OUT_DIR}"
-git -C "${ROOT_DIR}" archive --format=tar.gz -o "${SRC_ARCHIVE}" HEAD
+if [[ -n "${TARGET_COMMIT:-}" ]]; then
+    git -C "${ROOT_DIR}" archive --format=tar.gz -o "${SRC_ARCHIVE}" "${TARGET_COMMIT}"
+else
+    git -C "${ROOT_DIR}" archive --format=tar.gz -o "${SRC_ARCHIVE}" HEAD
+fi
 
 if ! docker image inspect "${IMAGE}" >/dev/null 2>&1; then
     docker pull "${IMAGE}" >/dev/null
