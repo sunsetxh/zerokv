@@ -267,7 +267,7 @@ if(ZEROKV_BUILD_EXAMPLES)
     target_link_libraries(kv_wait_fetch PRIVATE zerokv)
 
     add_executable(message_kv_demo examples/message_kv_demo.cpp)
-    target_link_libraries(message_kv_demo PRIVATE zerokv)
+    target_link_libraries(message_kv_demo PRIVATE zerokv Threads::Threads)
 
     add_executable(kv_bench
         examples/kv_bench.cpp
