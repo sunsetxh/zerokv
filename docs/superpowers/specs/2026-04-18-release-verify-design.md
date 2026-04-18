@@ -15,6 +15,7 @@ The release verification flow must:
 
 - build the latest `x86_64` package locally
 - build the latest `aarch64` package on VM1
+- pin every build and validation step to one explicit git commit
 - validate packaged runtime integrity for both architectures
 - run ARM package validation on VM1/VM2 with the existing Soft-RoCE setup
 - run ALPS end-to-end validation on VM1/VM2
@@ -94,7 +95,7 @@ Add `scripts/release_verify.sh` as the only user-facing command for release buil
 
 It will:
 
-- resolve the target commit and output directory
+- resolve one exact target commit and output directory
 - invoke the local `x86_64` package build flow
 - invoke the remote ARM package build flow
 - check VM readiness
@@ -102,13 +103,21 @@ It will:
 - write `summary.txt` and `summary.json`
 - stop on first failure and report where logs were written
 
+Commit identity is a hard invariant:
+
+- if `--commit <sha>` is provided, every build and validation step must use that SHA
+- if `--commit` is omitted, the script may use the current `HEAD` only when the tree is clean
+- dirty or ambiguous source state must fail closed instead of silently verifying the wrong revision
+
+Both the local `x86_64` package flow and the remote ARM package flow must therefore accept a target SHA instead of always packaging the caller's current `HEAD`.
+
 ### 2. ARM Remote Build Worker
 
 Add `scripts/build_pkg_arm_remote.sh`.
 
 It will:
 
-- archive the current `HEAD`
+- archive one explicit commit SHA, not an implicit moving `HEAD`
 - copy source and `ucx-v1.20.0.tar.gz` to VM1
 - build the `aarch64` package on VM1 using the same packaging shape as current manual remote flow
 - leave the package on VM1 for validation
@@ -122,12 +131,13 @@ Add `scripts/release_verify_examples.sh`.
 
 It will:
 
-- unpack the ARM package on VM1 and VM2
-- run the selected example regressions using the package contents
+- stage the exact target commit onto VM1 and VM2 in throwaway build trees
+- build only the example binaries needed for regression on each VM
+- run the selected example regressions from those build trees
 - store logs under the orchestrator output directory
 - return non-zero on the first failed example
 
-The intent is to keep release regression commands and log paths separate from the main orchestration logic.
+The intent is to keep release regression commands and log paths separate from the main orchestration logic. Example regression does not rely on packaged binaries except where the package actually ships the target, because the current release package only installs `zerokv`, `alps_kv_wrap`, and `alps_kv_bench`.
 
 ### 4. Perf Matrix Reuse
 
@@ -137,12 +147,12 @@ The release flow should run only a constrained default matrix:
 
 - sizes: `1K,1M,32M`
 - environment:
-  - `UCX_PROTO_ENABLE=y`
+  - `UCX_PROTO_ENABLE=n`
   - `UCX_MAX_RMA_RAILS=1`
   - `UCX_TLS=rc,sm,self`
   - `UCX_NET_DEVICES=rxe0:1`
 
-This step is a regression signal only, not a final performance certification.
+This default is intentionally specific to the current VM Soft-RoCE setup, where the documented workaround is to disable the UCX new protocol stack. This step is a regression signal only, not a final performance certification.
 
 ## Validation Layers
 
@@ -171,6 +181,12 @@ The remote ARM build script must check:
 
 ### Runtime Smoke
 
+All ARM validation commands that run on the VM Soft-RoCE pair must inherit one shared environment profile before any binary is launched:
+
+- `UCX_PROTO_ENABLE=n`
+- `UCX_NET_DEVICES=rxe0:1`
+- `UCX_TLS=rc,sm,self`
+
 #### Local `x86_64`
 
 Run unpacked:
@@ -193,13 +209,17 @@ Before ARM end-to-end validation, verify on both VMs:
 
 - `ibv_devices` shows `rxe0`
 - `ucx_info -d` exposes RDMA-capable transports
-- the expected RDMA IPs are reachable
+- `rdma link show` or equivalent sysfs inspection shows which netdev backs `rxe0`
+- the exact server/client RDMA IPs chosen for validation belong to that same netdev
+- the expected RDMA IPs are reachable over that interface
 
-Fail early if the simulated RDMA environment is not ready.
+Fail early if the simulated RDMA environment is not ready or if the advertised address does not match the NIC selected by `UCX_NET_DEVICES`.
 
 ### End-to-End ALPS Validation
 
 Run one packaged `alps_kv_bench` server on VM1 and one packaged client on VM2.
+
+Both sides must use the shared ARM Soft-RoCE environment profile.
 
 Pass criteria:
 
@@ -219,10 +239,14 @@ Default example regression set:
 - `alps_kv_bench`
 
 These checks protect the previously used interfaces and sample entrypoints from regressions caused by newer functionality.
+`alps_kv_bench` should run from the packaged artifact path; the other examples should run from throwaway build trees created from the same pinned commit on the target VMs.
+All example commands on VM1/VM2 must also use the shared ARM Soft-RoCE environment profile.
 
 ### Performance Spot Check
 
 Run the constrained ARM Soft-RoCE matrix through `scripts/perf_experiments.py`.
+
+The perf worker should start from the shared ARM Soft-RoCE environment profile and then add any perf-specific knobs on top.
 
 Artifacts must include:
 
@@ -273,6 +297,20 @@ out/release-verify/<commit>/
       summary.csv
 ```
 
+`summary.json` should use a stable minimal schema:
+
+- `commit`: validated git SHA
+- `started_at`
+- `finished_at`
+- `packages`: object keyed by architecture, with artifact path and status
+- `steps`: ordered list of objects containing:
+  - `name`
+  - `status`: `pass|fail|skip`
+  - `duration_ms`
+  - `log_path`
+  - `artifact_path` when relevant
+  - `reason` for failures and skips
+
 ## CLI
 
 The top-level entrypoint should support:
@@ -295,6 +333,8 @@ Defaults should match the current environment:
 - VM1: `192.168.3.9:2222`
 - VM2: `192.168.3.9:2223`
 - user/password: `axon/axon`
+
+If `--commit` is supplied, the summary and both package metadata files must report that exact SHA. If it is omitted, the script must resolve one SHA up front and reuse it everywhere.
 
 ## Failure Model
 
@@ -353,6 +393,9 @@ The work is complete when:
 
 - one command can build and validate both release packages
 - both package paths are recorded in the final summary
-- example regressions run from packaged artifacts, not just build trees
+- the same pinned commit SHA is used across local build, remote build, runtime validation, and regression validation
+- example regressions run from the correct source of truth:
+  - packaged artifacts for shipped package entrypoints
+  - throwaway build trees for examples not installed into the release package
 - ARM validation uses VM1/VM2 Soft-RoCE directly
 - failures are obvious and actionable from preserved logs
