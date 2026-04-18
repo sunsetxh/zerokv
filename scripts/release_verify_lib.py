@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 def utc_now() -> str:
@@ -9,6 +10,44 @@ def utc_now() -> str:
 
 def source_archive_name(arch: str, commit: str) -> str:
     return f"zerokv-src-{arch}-{commit}.tar.gz"
+
+
+def _split_host_port(vm1: str) -> tuple[str, str]:
+    if ":" in vm1:
+        host, port = vm1.rsplit(":", 1)
+        if host and port:
+            return host, port
+    return vm1, "22"
+
+
+def render_arm_remote_build(
+    *,
+    commit: str,
+    vm1: str,
+    vm_user: str,
+    vm_pass: str,
+    out_dir: str,
+) -> dict:
+    del vm_pass
+    host, port = _split_host_port(vm1)
+    out_root = Path(out_dir)
+    release_root = out_root / "release-verify" / commit / "arm"
+    return {
+        "commit": commit,
+        "arch": "aarch64",
+        "ssh_target": f"{vm_user}@{host}:{port}",
+        "ssh_host": host,
+        "ssh_port": port,
+        "remote_pkg_name": f"alps_kv_wrap_pkg-aarch64-{commit}",
+        "remote_src_archive": f"/tmp/{source_archive_name('aarch64', commit)}",
+        "remote_ucx_tarball": "/tmp/ucx-v1.20.0.tar.gz",
+        "remote_pkg_tarball": f"/tmp/alps_kv_wrap_pkg-aarch64-{commit}.tar.gz",
+        "remote_package_txt": f"/tmp/alps_kv_wrap_pkg-aarch64-{commit}.package.txt",
+        "local_src_archive": str(out_root / "src" / source_archive_name("aarch64", commit)),
+        "local_tarball": str(out_root / "packages" / f"alps_kv_wrap_pkg-aarch64-{commit}.tar.gz"),
+        "build_log": str(release_root / "build.log"),
+        "package_txt": str(release_root / "package.txt"),
+    }
 
 
 def resolve_target_commit(
