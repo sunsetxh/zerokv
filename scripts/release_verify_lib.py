@@ -12,6 +12,49 @@ def source_archive_name(arch: str, commit: str) -> str:
     return f"zerokv-src-{arch}-{commit}.tar.gz"
 
 
+def render_example_commands(commit: str, out_dir: str = "out") -> list[dict[str, object]]:
+    out_root = Path(out_dir) / "release-verify" / commit / "arm" / "examples"
+    entries: list[dict[str, object]] = [
+        {
+            "name": "ping_pong",
+            "source": "build_tree",
+            "build_targets": ["ping_pong"],
+            "log_dir": str(out_root / "ping_pong"),
+        },
+        {
+            "name": "rdma_put_get",
+            "source": "build_tree",
+            "build_targets": ["rdma_put_get"],
+            "log_dir": str(out_root / "rdma_put_get"),
+        },
+        {
+            "name": "kv_demo",
+            "source": "build_tree",
+            "build_targets": ["kv_demo"],
+            "log_dir": str(out_root / "kv_demo"),
+        },
+        {
+            "name": "kv_wait_fetch",
+            "source": "build_tree",
+            "build_targets": ["kv_wait_fetch", "kv_demo"],
+            "log_dir": str(out_root / "kv_wait_fetch"),
+        },
+        {
+            "name": "message_kv_demo",
+            "source": "build_tree",
+            "build_targets": ["message_kv_demo"],
+            "log_dir": str(out_root / "message_kv_demo"),
+        },
+        {
+            "name": "alps_kv_bench",
+            "source": "package",
+            "build_targets": [],
+            "log_dir": str(out_root / "alps_kv_bench"),
+        },
+    ]
+    return entries
+
+
 def _split_host_port(vm1: str) -> tuple[str, str]:
     if ":" in vm1:
         host, port = vm1.rsplit(":", 1)
