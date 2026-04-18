@@ -79,6 +79,12 @@ dependency source trees. If `third_party/{googletest,benchmark,nanobind,ucx}`
 is missing locally, the script downloads the matching release tarballs before
 creating the archive.
 
+To run the full pinned release verification flow:
+
+```bash
+./scripts/release_verify.sh --commit $(git rev-parse HEAD)
+```
+
 ## CMake Options
 
 | Option | Default | Description |

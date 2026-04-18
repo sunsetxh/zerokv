@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import pathlib
 import re
@@ -7,8 +8,10 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 import textwrap
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -307,6 +310,127 @@ class ReleaseVerifyLibTests(unittest.TestCase):
         self.assertEqual(result["package_txt"], "/tmp/release-output/release-verify/abc123/arm/package.txt")
         self.assertEqual(result["local_src_archive"], "/tmp/release-output/src/zerokv-src-aarch64-abc123.tar.gz")
         self.assertEqual(result["local_tarball"], "/tmp/release-output/packages/alps_kv_wrap_pkg-aarch64-abc123.tar.gz")
+
+    def test_default_step_order_includes_build_smoke_examples_and_perf(self):
+        module = load_module()
+
+        plan = module.default_step_plan(
+            skip_x86=False,
+            skip_arm=False,
+            skip_examples=False,
+            skip_perf=False,
+        )
+
+        self.assertEqual(
+            plan,
+            [
+                "x86_package",
+                "x86_runtime_smoke",
+                "arm_package",
+                "arm_softroce_ready",
+                "arm_runtime_smoke",
+                "arm_alps_e2e",
+                "arm_examples",
+                "arm_perf",
+            ],
+        )
+
+    def test_default_step_order_keeps_ready_check_before_e2e(self):
+        module = load_module()
+
+        plan = module.default_step_plan(
+            skip_x86=False,
+            skip_arm=False,
+            skip_examples=False,
+            skip_perf=False,
+        )
+
+        self.assertLess(plan.index("arm_softroce_ready"), plan.index("arm_alps_e2e"))
+
+    def test_failure_stops_later_steps_but_keeps_recorded_summary(self):
+        module = load_module()
+
+        summary = module.new_summary("abc123")
+        should_continue = module.record_step_result(
+            summary,
+            name="arm_alps_e2e",
+            status="fail",
+            duration_ms=50,
+            log_path="out/release-verify/abc123/arm/e2e/client.log",
+            reason="timeout",
+        )
+
+        self.assertFalse(should_continue)
+        self.assertEqual(summary["steps"][0]["status"], "fail")
+        self.assertEqual(
+            summary["steps"][0]["log_path"],
+            "out/release-verify/abc123/arm/e2e/client.log",
+        )
+
+    def test_release_perf_command_uses_constrained_softroce_matrix(self):
+        module = load_module()
+
+        cmd = module.render_release_perf_command(commit="abc123")
+
+        self.assertIn("run-alps-matrix", cmd)
+        self.assertIn("--sizes 1K,1M,32M", cmd)
+        self.assertIn("--proto-modes n", cmd)
+        self.assertIn("--rma-rails 1", cmd)
+        self.assertIn("--extra-env UCX_TLS=rc,sm,self", cmd)
+        self.assertIn("--extra-env UCX_NET_DEVICES=rxe0:1", cmd)
+        self.assertNotIn("UCX_PROTO_ENABLE", cmd)
+
+    def test_run_release_verify_returns_nonzero_and_pins_explicit_commit_ref(self):
+        module = load_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = pathlib.Path(tmpdir) / "out"
+            args = types.SimpleNamespace(
+                commit="HEAD~1",
+                skip_x86=False,
+                skip_arm=True,
+                skip_examples=False,
+                skip_perf=False,
+                vm1="192.168.3.9:2222",
+                vm2="192.168.3.9:2223",
+                vm_user="axon",
+                vm_pass="secret",
+                out_dir=str(out_dir),
+            )
+
+            def fake_git_output(*git_args):
+                mapping = {
+                    ("rev-parse", "HEAD"): "headsha",
+                    ("status", "--porcelain"): "",
+                    ("rev-parse", "HEAD~1"): "deadbeef",
+                }
+                return mapping[git_args]
+
+            def fail_step(name, command, summary, log_path, artifact_path=None, env=None):
+                del command, artifact_path, env
+                return module.record_step_result(
+                    summary,
+                    name=name,
+                    status="fail",
+                    duration_ms=1,
+                    log_path=str(log_path),
+                    reason="boom",
+                )
+
+            with mock.patch.object(module, "_git_output", side_effect=fake_git_output), mock.patch.object(
+                module,
+                "_run_step_command",
+                side_effect=fail_step,
+            ):
+                rc = module.run_release_verify(args)
+
+            self.assertEqual(rc, 1)
+            summary_path = out_dir / "release-verify" / "deadbeef" / "summary.json"
+            self.assertTrue(summary_path.exists())
+            summary = json.loads(summary_path.read_text())
+            self.assertEqual(summary["commit"], "deadbeef")
+            self.assertEqual(summary["steps"][0]["name"], "x86_package")
+            self.assertEqual(summary["steps"][0]["status"], "fail")
 
     def test_render_example_commands_contains_expected_examples(self):
         module = load_module()
