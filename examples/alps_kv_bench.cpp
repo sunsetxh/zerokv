@@ -12,6 +12,13 @@
 
 namespace zerokv::examples::alps_kv_bench {
 
+struct RoundTimingSummary {
+    uint64_t avg_control_request_grant_us = 0;
+    uint64_t avg_put_us = 0;
+    uint64_t avg_flush_us = 0;
+    uint64_t avg_write_done_ack_us = 0;
+};
+
 std::vector<size_t> parse_sizes_csv(const std::string& csv) {
     std::vector<size_t> sizes;
     std::stringstream stream(csv);
@@ -79,7 +86,8 @@ std::string render_round_summary(const char* role,
                                  size_t size,
                                  int iters,
                                  size_t total_bytes,
-                                 uint64_t elapsed_us) {
+                                 uint64_t elapsed_us,
+                                 const RoundTimingSummary* timing) {
     std::ostringstream out;
     out << "ALPS_KV_ROUND"
         << " role=" << role
@@ -90,7 +98,17 @@ std::string render_round_summary(const char* role,
         << " elapsed_us=" << elapsed_us
         << " throughput_MiBps="
         << throughput_mib_per_sec(total_bytes, std::chrono::microseconds(elapsed_us));
+    if (timing != nullptr) {
+        out << " avg_control_request_grant_us=" << timing->avg_control_request_grant_us
+            << " avg_put_us=" << timing->avg_put_us
+            << " avg_flush_us=" << timing->avg_flush_us
+            << " avg_write_done_ack_us=" << timing->avg_write_done_ack_us;
+    }
     return out.str();
+}
+
+std::string render_listen_address_line(const std::string& address) {
+    return "ALPS_KV_LISTEN address=" + address;
 }
 
 }  // namespace zerokv::examples::alps_kv_bench
@@ -189,6 +207,9 @@ int main(int argc, char** argv) {
             std::cerr << "server failed to listen on port " << args.port << std::endl;
             return 1;
         }
+        std::cout << zerokv::examples::alps_kv_bench::render_listen_address_line(
+                         YR::GetLocalAddress())
+                  << std::endl;
 
         // Allocate one buffer per thread slot.
         std::vector<std::vector<char>> bufs(static_cast<size_t>(args.threads),
@@ -229,7 +250,8 @@ int main(int argc, char** argv) {
                 std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count());
 
             std::cout << zerokv::examples::alps_kv_bench::render_round_summary(
-                             "server", round_index, size, args.iters, total_bytes, elapsed_us)
+                             "server", round_index, size, args.iters, total_bytes, elapsed_us,
+                             nullptr)
                       << " threads=" << args.threads << std::endl;
         }
 
@@ -288,6 +310,7 @@ int main(int argc, char** argv) {
                 return 1;
             }
 
+            YR::ResetWriteTimingStats();
             const auto begin = std::chrono::steady_clock::now();
             if (!run_phase(round_index, args.warmup, args.iters)) {
                 std::cerr << "send failed at round " << round_index << std::endl;
@@ -295,13 +318,22 @@ int main(int argc, char** argv) {
                 return 1;
             }
             const auto end = std::chrono::steady_clock::now();
+            const auto timing = YR::GetWriteTimingStats();
 
             const size_t total_bytes =
                 size * static_cast<size_t>(args.iters) * static_cast<size_t>(args.threads);
             const auto elapsed_us = static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count());
+            const uint64_t write_ops = timing.write_ops == 0 ? 1 : timing.write_ops;
+            const zerokv::examples::alps_kv_bench::RoundTimingSummary round_timing{
+                .avg_control_request_grant_us = timing.control_request_grant_us / write_ops,
+                .avg_put_us = timing.rdma_put_us / write_ops,
+                .avg_flush_us = timing.flush_us / write_ops,
+                .avg_write_done_ack_us = timing.write_done_ack_us / write_ops,
+            };
             std::cout << zerokv::examples::alps_kv_bench::render_round_summary(
-                             "client", round_index, size, args.iters, total_bytes, elapsed_us)
+                             "client", round_index, size, args.iters, total_bytes, elapsed_us,
+                             &round_timing)
                       << " threads=" << args.threads << std::endl;
         }
 

@@ -84,9 +84,14 @@ Installed layout:
 
 ```text
 /tmp/alps-kv-package/
+  README.md
+  COMMIT_ID
+  ARCH
   include/yr/alps_kv_api.h
   lib/libalps_kv_wrap.so
   bin/alps_kv_bench
+  bin/ucx_info
+  bin/ucp_info
   share/doc/alps_kv_wrap/README.md
 ```
 
@@ -104,6 +109,41 @@ required to switch between TCP and RDMA.
 
 When none of these are set the library uses UCX auto-selection, which picks the
 best available transport (RDMA if hardware is present, TCP otherwise).
+
+### Querying RDMA NICs
+
+Before setting `UCX_NET_DEVICES`, confirm both the RDMA device name and the
+Linux netdev that carries its traffic:
+
+```bash
+# Show the transports and RDMA devices UCX can use
+ucx_info -d
+
+# Show verbs devices
+ibv_devices
+
+# Map IB/RoCE device names to Linux netdev names
+ibdev2netdev
+
+# Show RDMA link state
+rdma link show
+
+# Show interface addresses
+ip -br addr
+```
+
+Practical guidance:
+
+- On RoCE hosts, use `ibdev2netdev` to map `mlx5_0:1`-style device names to the
+  Ethernet interface you actually configured.
+- On Soft-RoCE/QEMU setups, `ucx_info -d` and `rdma link show` should both
+  expose `rxe0`, which is then used as `UCX_NET_DEVICES=rxe0:1`.
+
+> **Important**: the current ALPS wrapper uses UCX `sockaddr` client-server
+> connection setup for the RDMA endpoint. When `UCX_NET_DEVICES` is pinned, the
+> server address and the client `--host` must use the IP configured on that
+> same RDMA NIC. A management/TCP IP from another NIC will fail during UCX
+> connect or endpoint flush.
 
 ### RoCE (25 GbE / InfiniBand over Ethernet)
 
@@ -157,7 +197,7 @@ Client:
 ./alps_kv_bench --mode server --port 16000 --threads 4 --iters 100
 
 # RANK1: 4 independent sender threads, each with its own connection
-./alps_kv_bench --mode client --host <server_ip> --port 16000 --threads 4 --iters 100
+./alps_kv_bench --mode client --host <server_rdma_ip> --port 16000 --threads 4 --iters 100
 ```
 
 `total_bytes` in the output equals `size × iters × threads`, reflecting the
@@ -173,9 +213,12 @@ UCX_NET_DEVICES=rocep23s0f0:1 UCX_TLS=rc,sm,self \
 
 # Node B (client / sender, 4 threads)
 UCX_NET_DEVICES=rocep23s0f0:1 UCX_TLS=rc,sm,self \
-./alps_kv_bench --mode client --host <server_ip> --port 16000 --threads 4 \
+./alps_kv_bench --mode client --host <server_rdma_ip> --port 16000 --threads 4 \
     --sizes 256K,512K,1M,2M,4M,8M,16M,32M,64M --iters 100
 ```
+
+`<server_rdma_ip>` must be the IP bound to the same NIC selected by
+`UCX_NET_DEVICES`.
 
 The benchmark uses unique `index` values for each iteration so it does not rely
 on duplicate tuple handling.

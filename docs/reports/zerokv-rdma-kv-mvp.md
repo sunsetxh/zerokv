@@ -537,6 +537,8 @@ then use the built-in metrics to inspect latency.
 - `ucx_info -d` shows the expected RDMA transport on both hosts
 - `kv_demo` is built from the current tree
 - `UCX_NET_DEVICES` is set to the target RDMA device when needed
+- the advertised server/client IP for UCX `sockaddr` connection setup is on the
+  same RDMA NIC selected by `UCX_NET_DEVICES`
 
 Unlike the QEMU Soft-RoCE setup, real NIC validation should start without the
 `UCX_PROTO_ENABLE=n` workaround. Only add environment workarounds if the real
@@ -823,6 +825,7 @@ The first end-to-end benchmark pass was run on the QEMU VM pair with:
 - `UCX_PROTO_ENABLE=n`
 - fixed `--iters 4`
 - TCP control plane, RDMA data plane
+- RDMA listen/connect addresses use the same NIC as `UCX_NET_DEVICES`
 
 This topology was chosen because it gives a real cross-VM RDMA fetch path while
 avoiding an instability seen when `hold-owner` runs on VM2.
