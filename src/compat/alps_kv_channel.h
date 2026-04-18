@@ -38,6 +38,14 @@ namespace zerokv::compat {
 //     any cross-thread locking on the hot path.
 class AlpsKvChannel {
 public:
+    struct WriteTimingStats {
+        uint64_t write_ops = 0;
+        uint64_t control_request_grant_us = 0;
+        uint64_t rdma_put_us = 0;
+        uint64_t flush_us = 0;
+        uint64_t write_done_ack_us = 0;
+    };
+
 #ifdef ZEROKV_ALPS_TEST_HOOKS
     struct DebugStats {
         size_t payload_tag_send_ops = 0;
@@ -65,6 +73,8 @@ public:
                         const std::vector<int>& dsts);
 
     [[nodiscard]] std::string local_address() const;
+    [[nodiscard]] WriteTimingStats write_timing_stats() const;
+    void reset_write_timing_stats();
 
 #ifdef ZEROKV_ALPS_TEST_HOOKS
     [[nodiscard]] DebugStats debug_stats() const;
@@ -185,6 +195,12 @@ private:
                                  std::chrono::steady_clock::time_point deadline);
     bool EnsureControlConnection(PerThreadState* state);
     static void CloseControlFd(int* fd);
+
+    std::atomic<uint64_t> write_ops_{0};
+    std::atomic<uint64_t> control_request_grant_us_{0};
+    std::atomic<uint64_t> rdma_put_us_{0};
+    std::atomic<uint64_t> flush_us_{0};
+    std::atomic<uint64_t> write_done_ack_us_{0};
 
 #ifdef ZEROKV_ALPS_TEST_HOOKS
     std::atomic<size_t> payload_tag_send_ops_{0};

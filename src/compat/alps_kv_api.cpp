@@ -56,6 +56,27 @@ std::string GetLocalAddress() {
     return g_channel->local_address();
 }
 
+WriteTimingStats GetWriteTimingStats() {
+    if (!g_channel) {
+        return {};
+    }
+    const auto stats = g_channel->write_timing_stats();
+    return WriteTimingStats{
+        .write_ops = stats.write_ops,
+        .control_request_grant_us = stats.control_request_grant_us,
+        .rdma_put_us = stats.rdma_put_us,
+        .flush_us = stats.flush_us,
+        .write_done_ack_us = stats.write_done_ack_us,
+    };
+}
+
+void ResetWriteTimingStats() {
+    if (!g_channel) {
+        return;
+    }
+    g_channel->reset_write_timing_stats();
+}
+
 int WriteBytes(const void* data, size_t size, int tag, int index, int src, int dst) {
     if (!g_channel) {
         std::cerr << "YR::WriteBytes: channel not initialized, call YR::SetClient first." << std::endl;

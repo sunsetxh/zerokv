@@ -43,6 +43,13 @@ struct WriteDonePayload {
     uint64_t reservation_id = 0;
 };
 
+using SteadyClock = std::chrono::steady_clock;
+
+uint64_t elapsed_us(SteadyClock::time_point begin, SteadyClock::time_point end) {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count());
+}
+
 // Spin-wait on a future without calling ucp_worker_progress().
 // Safe to use when a progress thread is already driving the worker.
 template <typename F>
@@ -904,6 +911,7 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
         .message_tag = message_tag,
         .size = size,
     });
+    const auto control_request_begin = SteadyClock::now();
     if (!SendControlFrame(state->control_fd, AlpsControlType::kWriteRequest,
                           request_id, write_request)) {
         CloseControlFd(&state->control_fd);
@@ -941,6 +949,8 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
         std::cerr << "AlpsKvChannel::WriteBytes: failed to decode write grant." << std::endl;
         return false;
     }
+    control_request_grant_us_.fetch_add(
+        elapsed_us(control_request_begin, SteadyClock::now()), std::memory_order_relaxed);
 
     auto region = GetOrRegisterSendRegion(state->send_cache, data, size);
     if (!region) {
@@ -951,6 +961,7 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
 
     zerokv::transport::RemoteKey remote_key;
     remote_key.data = grant->rkey;
+    const auto put_begin = SteadyClock::now();
     auto put = state->endpoint->put(region, 0, grant->remote_addr, remote_key, size);
     SpinUntilReady(put);
     if (!put.status().ok()) {
@@ -959,7 +970,9 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
                   << std::endl;
         return false;
     }
+    rdma_put_us_.fetch_add(elapsed_us(put_begin, SteadyClock::now()), std::memory_order_relaxed);
 
+    const auto flush_begin = SteadyClock::now();
     auto flush = state->endpoint->flush();
     SpinUntilReady(flush);
     if (!flush.status().ok()) {
@@ -968,10 +981,12 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
                   << std::endl;
         return false;
     }
+    flush_us_.fetch_add(elapsed_us(flush_begin, SteadyClock::now()), std::memory_order_relaxed);
 
     const auto write_done = EncodeWriteDone(WriteDonePayload{
         .reservation_id = grant->reservation_id,
     });
+    const auto write_done_begin = SteadyClock::now();
     if (!SendControlFrame(state->control_fd, AlpsControlType::kWriteDone,
                           request_id, write_done)) {
         CloseControlFd(&state->control_fd);
@@ -1002,6 +1017,9 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
         std::cerr << "AlpsKvChannel::WriteBytes: unexpected write completion ack frame." << std::endl;
         return false;
     }
+    write_done_ack_us_.fetch_add(
+        elapsed_us(write_done_begin, SteadyClock::now()), std::memory_order_relaxed);
+    write_ops_.fetch_add(1, std::memory_order_relaxed);
 
 #ifdef ZEROKV_ALPS_TEST_HOOKS
     ++rma_put_ops_;
@@ -1086,6 +1104,24 @@ void AlpsKvChannel::ReadBytesBatch(std::vector<void*>& data,
 std::string AlpsKvChannel::local_address() const {
     std::lock_guard<std::mutex> lock(endpoints_mutex_);
     return local_address_;
+}
+
+AlpsKvChannel::WriteTimingStats AlpsKvChannel::write_timing_stats() const {
+    return WriteTimingStats{
+        .write_ops = write_ops_.load(std::memory_order_relaxed),
+        .control_request_grant_us = control_request_grant_us_.load(std::memory_order_relaxed),
+        .rdma_put_us = rdma_put_us_.load(std::memory_order_relaxed),
+        .flush_us = flush_us_.load(std::memory_order_relaxed),
+        .write_done_ack_us = write_done_ack_us_.load(std::memory_order_relaxed),
+    };
+}
+
+void AlpsKvChannel::reset_write_timing_stats() {
+    write_ops_.store(0, std::memory_order_relaxed);
+    control_request_grant_us_.store(0, std::memory_order_relaxed);
+    rdma_put_us_.store(0, std::memory_order_relaxed);
+    flush_us_.store(0, std::memory_order_relaxed);
+    write_done_ack_us_.store(0, std::memory_order_relaxed);
 }
 
 #ifdef ZEROKV_ALPS_TEST_HOOKS

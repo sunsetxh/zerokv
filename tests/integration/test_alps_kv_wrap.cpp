@@ -128,3 +128,27 @@ TEST(AlpsKvWrapTest, WriteBytesUsesRmaPutInsteadOfPayloadTagSend) {
     EXPECT_EQ(stats.payload_tag_send_ops, 0u);
     EXPECT_GT(stats.rma_put_ops, 0u);
 }
+
+TEST(AlpsKvWrapTest, WriteBytesCollectsTimingBreakdown) {
+    std::unique_ptr<AlpsKvChannel> server;
+    std::unique_ptr<AlpsKvChannel> client;
+    ASSERT_TRUE(MakeConnectedServerClient(&server, &client));
+    ASSERT_NE(server, nullptr);
+    ASSERT_NE(client, nullptr);
+
+    const std::string payload = "timing-breakdown";
+    std::vector<char> recv_buffer(payload.size(), '\0');
+
+    client->reset_write_timing_stats();
+    std::thread reader([&]() {
+        server->ReadBytes(recv_buffer.data(), recv_buffer.size(), 6, 1, 4, 5);
+    });
+
+    ASSERT_TRUE(client->WriteBytes(payload.data(), payload.size(), 6, 1, 4, 5));
+    reader.join();
+
+    const auto timing = client->write_timing_stats();
+    EXPECT_EQ(timing.write_ops, 1u);
+    EXPECT_GT(timing.control_request_grant_us, 0u);
+    EXPECT_GT(timing.write_done_ack_us, 0u);
+}
