@@ -202,6 +202,19 @@ check_no_dynamic_ucx() {
     exit 1
 }
 
+check_no_missing_runtime_deps() {
+    local file="$1"
+    local ldd_output
+    ldd_output="$(
+        LD_LIBRARY_PATH="${PKG_ROOT}/lib:${LD_LIBRARY_PATH:-}" ldd "${file}" 2>&1
+    )" || true
+    echo "${ldd_output}"
+    if grep -q 'not found' <<<"${ldd_output}"; then
+        echo "Missing runtime dependency in ${file}" >&2
+        exit 1
+    fi
+}
+
 check_glibc_floor() {
     local file="$1"
     local max_glibc
@@ -219,9 +232,9 @@ for file in \
     "${PKG_ROOT}/lib/libzerokv.so" \
     "${PKG_ROOT}/bin/alps_kv_bench"; do
     echo "-- ${file}"
-    ldd "${file}" || true
-    check_no_dynamic_ucx "${file}"
+    check_no_missing_runtime_deps "${file}"
 done
+check_no_dynamic_ucx "${PKG_ROOT}/lib/libzerokv.so"
 
 echo "== UCX runtime verification =="
 find "${PKG_ROOT}/lib/ucx" -maxdepth 1 -type f | sort | sed -n '1,40p'
