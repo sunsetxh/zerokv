@@ -257,7 +257,11 @@ Installed artifacts:
 - `include/yr/alps_kv_api.h`
 - `lib/libalps_kv_wrap.so`
 - `bin/alps_kv_bench`
-- `share/doc/alps_kv_wrap/README.md`
+- `bin/ping_pong`, `bin/send_recv`, `bin/rdma_put_get`
+- `bin/kv_demo`, `bin/kv_wait_fetch`, `bin/message_kv_demo`, `bin/kv_bench`
+- `README.md`
+- `docs/alps_kv_wrap/README.md`
+- `examples/*.cpp`, `examples/*.py`
 
 Build targets:
 

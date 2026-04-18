@@ -9,13 +9,15 @@ if [[ -n "${TARGET_COMMIT:-}" ]]; then
         echo "TARGET_COMMIT must be non-empty and contain no whitespace" >&2
         exit 1
     fi
-    COMMIT_ID="${TARGET_COMMIT}"
+    COMMIT_ID="$(git -C "${ROOT_DIR}" rev-parse "${TARGET_COMMIT}")"
+    PACKAGE_TAG="$(git -C "${ROOT_DIR}" rev-parse --short "${TARGET_COMMIT}")"
 else
-    COMMIT_ID="$(git -C "${ROOT_DIR}" rev-parse --short HEAD)"
+    COMMIT_ID="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
+    PACKAGE_TAG="$(git -C "${ROOT_DIR}" rev-parse --short HEAD)"
 fi
 ARCH="x86_64"
 IMAGE="${IMAGE:-rockylinux:8}"
-CONTAINER_NAME="${CONTAINER_NAME:-alps-pkg-x86-glibc228-${COMMIT_ID}}"
+CONTAINER_NAME="${CONTAINER_NAME:-zerokv-pkg-x86-glibc228-${PACKAGE_TAG}}"
 KEEP_CONTAINER="${KEEP_CONTAINER:-0}"
 OUT_DIR="${ROOT_DIR}/out/packages"
 SRC_OUT_DIR="${ROOT_DIR}/out/src"
@@ -27,9 +29,9 @@ fi
 CONTAINER_SRC="/tmp/zerokv-src-${ARCH}-${COMMIT_ID}.tar.gz"
 CONTAINER_UCX="/tmp/ucx-v1.20.0.tar.gz"
 CONTAINER_SCRIPT="/tmp/build_alps_inside_glibc228.sh"
-PKG_DIR_NAME="alps_kv_wrap_pkg-${ARCH}-${COMMIT_ID}"
+PKG_DIR_NAME="zerokv-${ARCH}-${PACKAGE_TAG}"
 OUTPUT_TARBALL="${OUT_DIR}/${PKG_DIR_NAME}.tar.gz"
-LATEST_OUTPUT_TARBALL="${OUT_DIR}/alps_kv_wrap_pkg-${ARCH}.tar.gz"
+LATEST_OUTPUT_TARBALL="${OUT_DIR}/zerokv-${ARCH}.tar.gz"
 LOCAL_SCRIPT="$(mktemp)"
 
 cleanup() {
@@ -189,12 +191,22 @@ cmake -S . -B build \
     -DZEROKV_BUILD_PYTHON=OFF \
     -DZEROKV_BUILD_EXAMPLES=ON \
     >/tmp/alps-x86-cmake.log 2>&1
-cmake --build build --target zerokv alps_kv_wrap alps_kv_bench -j"$(nproc)" \
+cmake --build build --target \
+    zerokv \
+    alps_kv_wrap \
+    ping_pong \
+    send_recv \
+    rdma_put_get \
+    kv_demo \
+    kv_wait_fetch \
+    message_kv_demo \
+    kv_bench \
+    alps_kv_bench \
+    -j"$(nproc)" \
     >/tmp/alps-x86-build.log 2>&1
 cmake --install build --prefix "${PKG_ROOT}" >/tmp/alps-x86-install.log 2>&1
 
 copy_ucx_runtime
-cp "${PKG_ROOT}/share/doc/alps_kv_wrap/README.md" "${PKG_ROOT}/README.md"
 printf '%s\n' "${COMMIT_ID}" > "${PKG_ROOT}/COMMIT_ID"
 printf '%s\n' "${ARCH}" > "${PKG_ROOT}/ARCH"
 cp "${UCX_PREFIX}/bin/ucx_info" "${PKG_ROOT}/bin/ucx_info"
@@ -204,6 +216,30 @@ fi
 
 echo "== packaged files =="
 find "${PKG_ROOT}" -maxdepth 2 -type f | sort
+
+for rel in \
+    COMMIT_ID \
+    ARCH \
+    README.md \
+    docs/alps_kv_wrap/README.md \
+    examples/cpp_usage.cpp \
+    examples/python_usage.py \
+    bin/alps_kv_bench \
+    bin/ping_pong \
+    bin/send_recv \
+    bin/rdma_put_get \
+    bin/kv_demo \
+    bin/kv_wait_fetch \
+    bin/message_kv_demo \
+    bin/kv_bench \
+    bin/ucx_info \
+    lib/libalps_kv_wrap.so \
+    lib/libzerokv.so; do
+    [[ -e "${PKG_ROOT}/${rel}" ]] || {
+        echo "Missing required package file: ${rel}" >&2
+        exit 1
+    }
+done
 
 check_no_dynamic_ucx() {
     local file="$1"
@@ -242,7 +278,14 @@ echo "== ELF dependency verification =="
 for file in \
     "${PKG_ROOT}/lib/libalps_kv_wrap.so" \
     "${PKG_ROOT}/lib/libzerokv.so" \
-    "${PKG_ROOT}/bin/alps_kv_bench"; do
+    "${PKG_ROOT}/bin/alps_kv_bench" \
+    "${PKG_ROOT}/bin/ping_pong" \
+    "${PKG_ROOT}/bin/send_recv" \
+    "${PKG_ROOT}/bin/rdma_put_get" \
+    "${PKG_ROOT}/bin/kv_demo" \
+    "${PKG_ROOT}/bin/kv_wait_fetch" \
+    "${PKG_ROOT}/bin/message_kv_demo" \
+    "${PKG_ROOT}/bin/kv_bench"; do
     echo "-- ${file}"
     check_no_missing_runtime_deps "${file}"
 done
@@ -259,7 +302,14 @@ echo "== GLIBC floor verification =="
 for file in \
     "${PKG_ROOT}/lib/libalps_kv_wrap.so" \
     "${PKG_ROOT}/lib/libzerokv.so" \
-    "${PKG_ROOT}/bin/alps_kv_bench"; do
+    "${PKG_ROOT}/bin/alps_kv_bench" \
+    "${PKG_ROOT}/bin/ping_pong" \
+    "${PKG_ROOT}/bin/send_recv" \
+    "${PKG_ROOT}/bin/rdma_put_get" \
+    "${PKG_ROOT}/bin/kv_demo" \
+    "${PKG_ROOT}/bin/kv_wait_fetch" \
+    "${PKG_ROOT}/bin/message_kv_demo" \
+    "${PKG_ROOT}/bin/kv_bench"; do
     check_glibc_floor "${file}"
 done
 

@@ -55,6 +55,9 @@ if [[ -z "${COMMIT}" || -z "${VM1}" || -z "${VM_USER}" || -z "${VM_PASS}" ]]; th
     exit 1
 fi
 
+COMMIT="$(git -C "${ROOT_DIR}" rev-parse "${COMMIT}")"
+PACKAGE_TAG="$(git -C "${ROOT_DIR}" rev-parse --short "${COMMIT}")"
+
 if [[ "${VM1}" == *:* ]]; then
     VM_HOST="${VM1%:*}"
     VM_PORT="${VM1##*:}"
@@ -82,12 +85,13 @@ PACKAGE_DIR="${OUT_DIR%/}/packages"
 BUILD_LOG="${RELEASE_DIR}/build.log"
 PACKAGE_TXT="${RELEASE_DIR}/package.txt"
 SRC_ARCHIVE="${SRC_DIR}/zerokv-src-${ARCH}-${COMMIT}.tar.gz"
-LOCAL_TARBALL="${PACKAGE_DIR}/alps_kv_wrap_pkg-${ARCH}-${COMMIT}.tar.gz"
+LOCAL_TARBALL="${PACKAGE_DIR}/zerokv-${ARCH}-${PACKAGE_TAG}.tar.gz"
+LATEST_TARBALL="${PACKAGE_DIR}/zerokv-${ARCH}.tar.gz"
 
 REMOTE_SRC_ARCHIVE="/tmp/zerokv-src-${ARCH}-${COMMIT}.tar.gz"
 REMOTE_UCX_TARBALL="/tmp/ucx-v1.20.0.tar.gz"
-REMOTE_TARBALL="/tmp/alps_kv_wrap_pkg-${ARCH}-${COMMIT}.tar.gz"
-REMOTE_PACKAGE_TXT="/tmp/alps_kv_wrap_pkg-${ARCH}-${COMMIT}.package.txt"
+REMOTE_TARBALL="/tmp/zerokv-${ARCH}-${PACKAGE_TAG}.tar.gz"
+REMOTE_PACKAGE_TXT="/tmp/zerokv-${ARCH}-${PACKAGE_TAG}.package.txt"
 REMOTE_SCRIPT="$(mktemp)"
 ASKPASS_SCRIPT=""
 
@@ -150,13 +154,14 @@ cat > "${REMOTE_SCRIPT}" <<'EOF'
 set -euo pipefail
 
 : "${COMMIT_ID:?}"
+: "${PACKAGE_TAG:?}"
 : "${REMOTE_SRC_ARCHIVE:?}"
 : "${REMOTE_UCX_TARBALL:?}"
 : "${REMOTE_TARBALL:?}"
 : "${REMOTE_PACKAGE_TXT:?}"
 
 ARCH="aarch64"
-PKG_DIR_NAME="alps_kv_wrap_pkg-${ARCH}-${COMMIT_ID}"
+PKG_DIR_NAME="zerokv-${ARCH}-${PACKAGE_TAG}"
 WORK_ROOT="/tmp/arm-release-verify-${COMMIT_ID}"
 PKG_DIR="/tmp/${PKG_DIR_NAME}"
 UCX_PREFIX="${HOME}/.local/ucx-static-pic"
@@ -210,7 +215,17 @@ validate_pkg() {
         COMMIT_ID \
         ARCH \
         README.md \
+        docs/alps_kv_wrap/README.md \
+        examples/cpp_usage.cpp \
+        examples/python_usage.py \
         bin/alps_kv_bench \
+        bin/ping_pong \
+        bin/send_recv \
+        bin/rdma_put_get \
+        bin/kv_demo \
+        bin/kv_wait_fetch \
+        bin/message_kv_demo \
+        bin/kv_bench \
         bin/ucx_info \
         lib/libalps_kv_wrap.so \
         lib/libzerokv.so
@@ -254,7 +269,14 @@ validate_pkg() {
     for file in \
         "${PKG_DIR}/lib/libalps_kv_wrap.so" \
         "${PKG_DIR}/lib/libzerokv.so" \
-        "${PKG_DIR}/bin/alps_kv_bench"
+        "${PKG_DIR}/bin/alps_kv_bench" \
+        "${PKG_DIR}/bin/ping_pong" \
+        "${PKG_DIR}/bin/send_recv" \
+        "${PKG_DIR}/bin/rdma_put_get" \
+        "${PKG_DIR}/bin/kv_demo" \
+        "${PKG_DIR}/bin/kv_wait_fetch" \
+        "${PKG_DIR}/bin/message_kv_demo" \
+        "${PKG_DIR}/bin/kv_bench"
     do
         local glibcxx
         glibcxx="$(max_glibcxx "${file}")"
@@ -307,11 +329,21 @@ cmake -S . -B build \
     -DZEROKV_BUILD_PYTHON=OFF \
     -DCMAKE_SHARED_LINKER_FLAGS='-static-libstdc++ -static-libgcc' \
     -DCMAKE_EXE_LINKER_FLAGS='-static-libstdc++ -static-libgcc'
-cmake --build build --target zerokv alps_kv_wrap alps_kv_bench -j"$(nproc)"
+cmake --build build --target \
+    zerokv \
+    alps_kv_wrap \
+    ping_pong \
+    send_recv \
+    rdma_put_get \
+    kv_demo \
+    kv_wait_fetch \
+    message_kv_demo \
+    kv_bench \
+    alps_kv_bench \
+    -j"$(nproc)"
 cmake --install build --prefix "${PKG_DIR}"
 
 stage_ucx_runtime
-cp "${PKG_DIR}/share/doc/alps_kv_wrap/README.md" "${PKG_DIR}/README.md"
 printf '%s\n' "${COMMIT_ID}" > "${PKG_DIR}/COMMIT_ID"
 printf '%s\n' "${ARCH}" > "${PKG_DIR}/ARCH"
 cp "${UCX_PREFIX}/bin/ucx_info" "${PKG_DIR}/bin/ucx_info"
@@ -329,7 +361,7 @@ EOF
 vm_scp_to "${REMOTE_SCRIPT}" "/tmp/build_pkg_arm_remote.sh"
 
 if ! vm_ssh \
-    "COMMIT_ID='${COMMIT}' REMOTE_SRC_ARCHIVE='${REMOTE_SRC_ARCHIVE}' REMOTE_UCX_TARBALL='${REMOTE_UCX_TARBALL}' REMOTE_TARBALL='${REMOTE_TARBALL}' REMOTE_PACKAGE_TXT='${REMOTE_PACKAGE_TXT}' bash /tmp/build_pkg_arm_remote.sh" \
+    "COMMIT_ID='${COMMIT}' PACKAGE_TAG='${PACKAGE_TAG}' REMOTE_SRC_ARCHIVE='${REMOTE_SRC_ARCHIVE}' REMOTE_UCX_TARBALL='${REMOTE_UCX_TARBALL}' REMOTE_TARBALL='${REMOTE_TARBALL}' REMOTE_PACKAGE_TXT='${REMOTE_PACKAGE_TXT}' bash /tmp/build_pkg_arm_remote.sh" \
     |& tee "${BUILD_LOG}"; then
     echo "ARM remote build failed" >&2
     exit 1
@@ -337,7 +369,9 @@ fi
 
 vm_scp_from "${REMOTE_PACKAGE_TXT}" "${PACKAGE_TXT}"
 vm_scp_from "${REMOTE_TARBALL}" "${LOCAL_TARBALL}"
+cp "${LOCAL_TARBALL}" "${LATEST_TARBALL}"
 
 echo "Created: ${LOCAL_TARBALL}"
+echo "Updated: ${LATEST_TARBALL}"
 echo "Wrote: ${BUILD_LOG}"
 echo "Recorded: ${PACKAGE_TXT}"

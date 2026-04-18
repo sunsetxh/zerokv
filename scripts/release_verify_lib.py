@@ -36,6 +36,18 @@ def source_archive_name(arch: str, commit: str) -> str:
     return f"zerokv-src-{arch}-{commit}.tar.gz"
 
 
+def package_tag(commit: str) -> str:
+    return commit[:7]
+
+
+def package_dir_name(arch: str, commit: str) -> str:
+    return f"zerokv-{arch}-{package_tag(commit)}"
+
+
+def package_tarball_name(arch: str, commit: str) -> str:
+    return f"{package_dir_name(arch, commit)}.tar.gz"
+
+
 def render_example_commands(commit: str, out_dir: str = "out") -> list[dict[str, object]]:
     out_root = Path(out_dir) / "release-verify" / commit / "arm" / "examples"
     return [
@@ -104,13 +116,13 @@ def render_arm_remote_build(
         "ssh_target": f"{vm_user}@{host}:{port}",
         "ssh_host": host,
         "ssh_port": port,
-        "remote_pkg_name": f"alps_kv_wrap_pkg-aarch64-{commit}",
+        "remote_pkg_name": package_dir_name("aarch64", commit),
         "remote_src_archive": f"/tmp/{source_archive_name('aarch64', commit)}",
         "remote_ucx_tarball": "/tmp/ucx-v1.20.0.tar.gz",
-        "remote_pkg_tarball": f"/tmp/alps_kv_wrap_pkg-aarch64-{commit}.tar.gz",
-        "remote_package_txt": f"/tmp/alps_kv_wrap_pkg-aarch64-{commit}.package.txt",
+        "remote_pkg_tarball": f"/tmp/{package_tarball_name('aarch64', commit)}",
+        "remote_package_txt": f"/tmp/{package_dir_name('aarch64', commit)}.package.txt",
         "local_src_archive": str(out_root / "src" / source_archive_name("aarch64", commit)),
-        "local_tarball": str(out_root / "packages" / f"alps_kv_wrap_pkg-aarch64-{commit}.tar.gz"),
+        "local_tarball": str(out_root / "packages" / package_tarball_name("aarch64", commit)),
         "build_log": str(release_root / "build.log"),
         "package_txt": str(release_root / "package.txt"),
     }
@@ -199,7 +211,7 @@ def render_release_perf_command(
     vm1_host, vm1_port = _split_host_port(vm1)
     vm2_host, vm2_port = _split_host_port(vm2)
     perf_out = Path(out_dir) / "release-verify" / commit / "arm" / "perf"
-    remote_root = f"/tmp/alps_kv_wrap_pkg-aarch64-{commit}"
+    remote_root = f"/tmp/{package_dir_name('aarch64', commit)}"
     command = [
         "./scripts/perf_experiments.py",
         "run-alps-matrix",
@@ -400,7 +412,7 @@ def time_now() -> float:
 
 
 def _local_smoke_x86(commit: str, out_dir: Path, summary: dict) -> bool:
-    tarball = out_dir / "packages" / f"alps_kv_wrap_pkg-x86_64-{commit}.tar.gz"
+    tarball = out_dir / "packages" / package_tarball_name("x86_64", commit)
     log_dir = out_dir / "release-verify" / commit / "x86" / "runtime"
     log_dir.mkdir(parents=True, exist_ok=True)
     stage_root = _extract_package(tarball, log_dir / "unpacked")
@@ -449,9 +461,9 @@ def _local_smoke_x86(commit: str, out_dir: Path, summary: dict) -> bool:
 
 def _stage_arm_package(commit: str, out_dir: Path, vm: str, vm_user: str, vm_pass: str, log_path: Path) -> tuple[bool, str]:
     host, port = _split_host_port(vm)
-    tarball = out_dir / "packages" / f"alps_kv_wrap_pkg-aarch64-{commit}.tar.gz"
-    remote_tarball = f"/tmp/alps_kv_wrap_pkg-aarch64-{commit}.tar.gz"
-    remote_root = f"/tmp/alps_kv_wrap_pkg-aarch64-{commit}"
+    tarball = out_dir / "packages" / package_tarball_name("aarch64", commit)
+    remote_tarball = f"/tmp/{package_tarball_name('aarch64', commit)}"
+    remote_root = f"/tmp/{package_dir_name('aarch64', commit)}"
     copy_result = _run_password_logged(
         [
             "scp",
@@ -701,11 +713,11 @@ def run_release_verify(args: argparse.Namespace) -> int:
                     [str(ROOT / "scripts" / "build_pkg_x86_compile.sh")],
                     summary,
                     x86_log,
-                    artifact_path=out_dir / "packages" / f"alps_kv_wrap_pkg-x86_64-{commit}.tar.gz",
+                    artifact_path=out_dir / "packages" / package_tarball_name("x86_64", commit),
                     env=env,
                 )
                 if ok:
-                    summary["packages"]["x86"] = str(out_dir / "packages" / f"alps_kv_wrap_pkg-x86_64-{commit}.tar.gz")
+                    summary["packages"]["x86"] = str(out_dir / "packages" / package_tarball_name("x86_64", commit))
                 else:
                     success = False
                     break
@@ -732,10 +744,10 @@ def run_release_verify(args: argparse.Namespace) -> int:
                     ],
                     summary,
                     arm_log,
-                    artifact_path=out_dir / "packages" / f"alps_kv_wrap_pkg-aarch64-{commit}.tar.gz",
+                    artifact_path=out_dir / "packages" / package_tarball_name("aarch64", commit),
                 )
                 if ok:
-                    summary["packages"]["arm"] = str(out_dir / "packages" / f"alps_kv_wrap_pkg-aarch64-{commit}.tar.gz")
+                    summary["packages"]["arm"] = str(out_dir / "packages" / package_tarball_name("aarch64", commit))
                 else:
                     success = False
                     break

@@ -35,7 +35,7 @@ class ReleaseVerifyLibTests(unittest.TestCase):
         remote_root.mkdir()
         log_file = tmp / "calls.log"
 
-        package_tarball = out_dir / "packages" / f"alps_kv_wrap_pkg-aarch64-{commit}.tar.gz"
+        package_tarball = out_dir / "packages" / f"zerokv-aarch64-{commit}.tar.gz"
         package_tarball.parent.mkdir(parents=True, exist_ok=True)
         package_tarball.write_bytes(b"fake-package")
 
@@ -46,6 +46,14 @@ class ReleaseVerifyLibTests(unittest.TestCase):
                 #!/usr/bin/env bash
                 set -euo pipefail
                 printf '%s\\n' "git $*" >> "{log_file}"
+                if [[ "$1" == "-C" && "$3" == "rev-parse" && "$4" == "deadbee" ]]; then
+                    printf 'deadbee\\n'
+                    exit 0
+                fi
+                if [[ "$1" == "-C" && "$3" == "rev-parse" && "$4" == "--short" && "$5" == "deadbee" ]]; then
+                    printf 'deadbee\\n'
+                    exit 0
+                fi
                 if [[ "$1" == "-C" && "$3" == "archive" ]]; then
                     out=""
                     commit=""
@@ -265,7 +273,7 @@ class ReleaseVerifyLibTests(unittest.TestCase):
             status="pass",
             duration_ms=12,
             log_path="out/release-verify/abc123/x86/build.log",
-            artifact_path="out/packages/alps_kv_wrap_pkg-x86_64-abc123.tar.gz",
+            artifact_path="out/packages/zerokv-x86_64-abc123.tar.gz",
         )
 
         self.assertEqual(summary["commit"], "abc123")
@@ -304,12 +312,12 @@ class ReleaseVerifyLibTests(unittest.TestCase):
             out_dir="/tmp/release-output",
         )
 
-        self.assertEqual(result["remote_pkg_name"], "alps_kv_wrap_pkg-aarch64-abc123")
+        self.assertEqual(result["remote_pkg_name"], "zerokv-aarch64-abc123")
         self.assertEqual(result["ssh_target"], "axon@192.168.3.9:2222")
         self.assertEqual(result["build_log"], "/tmp/release-output/release-verify/abc123/arm/build.log")
         self.assertEqual(result["package_txt"], "/tmp/release-output/release-verify/abc123/arm/package.txt")
         self.assertEqual(result["local_src_archive"], "/tmp/release-output/src/zerokv-src-aarch64-abc123.tar.gz")
-        self.assertEqual(result["local_tarball"], "/tmp/release-output/packages/alps_kv_wrap_pkg-aarch64-abc123.tar.gz")
+        self.assertEqual(result["local_tarball"], "/tmp/release-output/packages/zerokv-aarch64-abc123.tar.gz")
 
     def test_default_step_order_includes_build_smoke_examples_and_perf(self):
         module = load_module()
@@ -377,11 +385,11 @@ class ReleaseVerifyLibTests(unittest.TestCase):
         self.assertIn("--sizes 1K,1M,32M", cmd)
         self.assertIn("--proto-modes n", cmd)
         self.assertIn("--rma-rails 1", cmd)
-        self.assertIn("--server-workdir /tmp/alps_kv_wrap_pkg-aarch64-abc123", cmd)
-        self.assertIn("--client-workdir /tmp/alps_kv_wrap_pkg-aarch64-abc123", cmd)
+        self.assertIn("--server-workdir /tmp/zerokv-aarch64-abc123", cmd)
+        self.assertIn("--client-workdir /tmp/zerokv-aarch64-abc123", cmd)
         self.assertIn("--extra-env UCX_TLS=rc,sm,self", cmd)
         self.assertIn("--extra-env UCX_NET_DEVICES=rxe0:1", cmd)
-        self.assertIn("--extra-env LD_LIBRARY_PATH=/tmp/alps_kv_wrap_pkg-aarch64-abc123/lib", cmd)
+        self.assertIn("--extra-env LD_LIBRARY_PATH=/tmp/zerokv-aarch64-abc123/lib", cmd)
         self.assertNotIn("UCX_PROTO_ENABLE", cmd)
 
     def test_run_release_verify_returns_nonzero_and_pins_explicit_commit_ref(self):
@@ -644,6 +652,14 @@ class ReleaseVerifyLibTests(unittest.TestCase):
                         printf '.git\\n'
                         exit 0
                     fi
+                    if [[ "$1" == "-C" && "$3" == "rev-parse" && "$4" == "deadbee" ]]; then
+                        printf 'deadbee\\n'
+                        exit 0
+                    fi
+                    if [[ "$1" == "-C" && "$3" == "rev-parse" && "$4" == "--short" && "$5" == "deadbee" ]]; then
+                        printf 'deadbee\\n'
+                        exit 0
+                    fi
                     if [[ "$1" == "-C" && "$3" == "archive" ]]; then
                         out=""
                         commit=""
@@ -803,7 +819,7 @@ class ReleaseVerifyLibTests(unittest.TestCase):
             self.assertIn(f"COMMIT_ID='{commit}'", log_text)
 
             local_package_txt = out_dir / "release-verify" / commit / "arm" / "package.txt"
-            local_tarball = out_dir / "packages" / f"alps_kv_wrap_pkg-aarch64-{commit}.tar.gz"
+            local_tarball = out_dir / "packages" / f"zerokv-aarch64-{commit}.tar.gz"
             self.assertTrue(local_package_txt.exists())
             self.assertTrue(local_tarball.exists())
             self.assertIn(f"commit={commit}", local_package_txt.read_text())
@@ -820,7 +836,7 @@ class ReleaseVerifyLibTests(unittest.TestCase):
 
         self.assertRegex(
             script_text,
-            re.compile(r'if \[\[ -n "\$\{TARGET_COMMIT:-\}" \]\]; then.*?COMMIT_ID="\$\{TARGET_COMMIT\}"', re.S),
+            re.compile(r'if \[\[ -n "\$\{TARGET_COMMIT:-\}" \]\]; then.*?COMMIT_ID="\$\(git -C "\$\{ROOT_DIR\}" rev-parse "\$\{TARGET_COMMIT\}"\)"', re.S),
         )
         self.assertIn(
             'git -C "${ROOT_DIR}" archive --format=tar.gz -o "${SRC_ARCHIVE}" "${TARGET_COMMIT}"',
@@ -840,7 +856,7 @@ class ReleaseVerifyLibTests(unittest.TestCase):
             bin_dir = tmp / "bin"
             bin_dir.mkdir()
             log_file = tmp / "calls.log"
-            output_tarball = ROOT / "out" / "packages" / f"alps_kv_wrap_pkg-x86_64-{target_commit}.tar.gz"
+            output_tarball = ROOT / "out" / "packages" / f"zerokv-x86_64-{target_commit}.tar.gz"
             source_archive = ROOT / "out" / "src" / f"zerokv-src-x86_64-{target_commit}.tar.gz"
             ucx_tarball = ROOT / "ucx-v1.20.0.tar.gz"
             created_ucx = False
@@ -886,6 +902,18 @@ class ReleaseVerifyLibTests(unittest.TestCase):
                         done
                         printf '%s\\n' "$commit" >> "{log_file}"
                         : > "$out"
+                        exit 0
+                    fi
+                    if [[ "$1" == "-C" && "$3" == "rev-parse" && "$4" == "$TARGET_COMMIT" ]]; then
+                        printf '%s\\n' "$TARGET_COMMIT"
+                        exit 0
+                    fi
+                    if [[ "$1" == "-C" && "$3" == "rev-parse" && "$4" == "--short" && "$5" == "$TARGET_COMMIT" ]]; then
+                        printf '%s\\n' "$TARGET_COMMIT"
+                        exit 0
+                    fi
+                    if [[ "$1" == "-C" && "$3" == "rev-parse" && "$4" == "HEAD" ]]; then
+                        printf 'unreachable\\n'
                         exit 0
                     fi
                     if [[ "$1" == "-C" && "$3" == "rev-parse" && "$4" == "--short" && "$5" == "HEAD" ]]; then
@@ -957,9 +985,9 @@ class ReleaseVerifyLibTests(unittest.TestCase):
 
                 log_text = log_file.read_text()
                 self.assertIn(f"git -C {ROOT} archive --format=tar.gz -o {source_archive} {target_commit}", log_text)
-                self.assertIn(f"docker create --name alps-pkg-x86-glibc228-{target_commit}", log_text)
+                self.assertIn(f"docker create --name zerokv-pkg-x86-glibc228-{target_commit}", log_text)
                 self.assertIn(
-                    f"docker cp alps-pkg-x86-glibc228-{target_commit}:/tmp/alps_kv_wrap_pkg-x86_64-{target_commit}.tar.gz {output_tarball}",
+                    f"docker cp zerokv-pkg-x86-glibc228-{target_commit}:/tmp/zerokv-x86_64-{target_commit}.tar.gz {output_tarball}",
                     log_text,
                 )
                 self.assertTrue(source_archive.exists())

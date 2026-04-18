@@ -59,6 +59,9 @@ if [[ -z "${COMMIT}" || -z "${VM1}" || -z "${VM2}" || -z "${VM_USER}" || -z "${V
     exit 1
 fi
 
+COMMIT="$(git -C "${ROOT_DIR}" rev-parse "${COMMIT}")"
+PACKAGE_TAG="$(git -C "${ROOT_DIR}" rev-parse --short "${COMMIT}")"
+
 if [[ "${VM1}" == *:* ]]; then
     VM1_HOST="${VM1%:*}"
     VM1_PORT="${VM1##*:}"
@@ -91,15 +94,15 @@ KV_WAIT_FETCH_PORT=$((26000 + PORT_OFFSET))
 MESSAGE_KV_PORT=$((27000 + PORT_OFFSET))
 ALPS_BENCH_PORT=$((28000 + PORT_OFFSET))
 REMOTE_SOURCE_ARCHIVE="/tmp/zerokv-src-aarch64-${COMMIT}.tar.gz"
-REMOTE_PACKAGE_TARBALL="/tmp/alps_kv_wrap_pkg-aarch64-${COMMIT}.tar.gz"
-REMOTE_PACKAGE_ROOT="/tmp/alps_kv_wrap_pkg-aarch64-${COMMIT}"
+REMOTE_PACKAGE_TARBALL="/tmp/zerokv-aarch64-${PACKAGE_TAG}.tar.gz"
+REMOTE_PACKAGE_ROOT="/tmp/zerokv-aarch64-${PACKAGE_TAG}"
 REMOTE_VM1_TREE="/tmp/release-verify-${COMMIT}-vm1"
 REMOTE_VM2_TREE="/tmp/release-verify-${COMMIT}-vm2"
 LOCAL_RELEASE_DIR="${OUT_DIR%/}/release-verify/${COMMIT}/arm"
 LOCAL_EXAMPLES_DIR="${LOCAL_RELEASE_DIR}/examples"
 LOCAL_SETUP_DIR="${LOCAL_EXAMPLES_DIR}/_setup"
 LOCAL_SRC_ARCHIVE="${OUT_DIR%/}/src/zerokv-src-aarch64-${COMMIT}.tar.gz"
-LOCAL_PACKAGE_TARBALL="${OUT_DIR%/}/packages/alps_kv_wrap_pkg-aarch64-${COMMIT}.tar.gz"
+LOCAL_PACKAGE_TARBALL="${OUT_DIR%/}/packages/zerokv-aarch64-${PACKAGE_TAG}.tar.gz"
 LOCAL_VM1_BUILD_LOG="${LOCAL_SETUP_DIR}/vm1-build.log"
 LOCAL_VM2_BUILD_LOG="${LOCAL_SETUP_DIR}/vm2-build.log"
 LOCAL_VM1_PACKAGE_LOG="${LOCAL_SETUP_DIR}/vm1-package.log"

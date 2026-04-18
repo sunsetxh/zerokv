@@ -439,13 +439,31 @@ install(TARGETS zerokv alps_kv_wrap EXPORT zerokvTargets
 )
 install(DIRECTORY include/zerokv DESTINATION include)
 install(DIRECTORY include/yr DESTINATION include)
-if(TARGET alps_kv_bench)
-    install(TARGETS alps_kv_bench
+if(ZEROKV_BUILD_EXAMPLES)
+    install(
+        TARGETS
+            ping_pong
+            send_recv
+            rdma_put_get
+            kv_demo
+            kv_wait_fetch
+            message_kv_demo
+            kv_bench
+            alps_kv_bench
         RUNTIME DESTINATION bin
     )
 endif()
+install(FILES "${CMAKE_SOURCE_DIR}/README.md"
+    DESTINATION .
+)
 install(FILES "${CMAKE_SOURCE_DIR}/docs/alps_kv_wrap/README.md"
-    DESTINATION share/doc/alps_kv_wrap
+    DESTINATION docs/alps_kv_wrap
+)
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/examples/"
+    DESTINATION examples
+    FILES_MATCHING
+        PATTERN "*.cpp"
+        PATTERN "*.py"
 )
 if(ZEROKV_LINK_UCX_STATIC)
     set(ZEROKV_PACKAGE_NEEDS_UCX_PKGCONFIG OFF)
