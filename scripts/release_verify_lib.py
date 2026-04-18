@@ -4,9 +4,11 @@ import argparse
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -197,6 +199,7 @@ def render_release_perf_command(
     vm1_host, vm1_port = _split_host_port(vm1)
     vm2_host, vm2_port = _split_host_port(vm2)
     perf_out = Path(out_dir) / "release-verify" / commit / "arm" / "perf"
+    remote_root = f"/tmp/alps_kv_wrap_pkg-aarch64-{commit}"
     command = [
         "./scripts/perf_experiments.py",
         "run-alps-matrix",
@@ -208,10 +211,12 @@ def render_release_perf_command(
         vm1_port,
         "--client-ssh-port",
         vm2_port,
+        "--alps-binary",
+        "./bin/alps_kv_bench",
         "--server-workdir",
-        str(ROOT),
+        remote_root,
         "--client-workdir",
-        str(ROOT),
+        remote_root,
         "--server-rdma-ip",
         VM1_RDMA_IP,
         "--rdma-device",
@@ -230,6 +235,8 @@ def render_release_perf_command(
         f"UCX_TLS={SOFTROCE_ENV['UCX_TLS']}",
         "--extra-env",
         f"UCX_NET_DEVICES={SOFTROCE_ENV['UCX_NET_DEVICES']}",
+        "--extra-env",
+        f"LD_LIBRARY_PATH={remote_root}/lib",
     ]
     del vm_pass
     return _shell_join(command)
@@ -255,10 +262,51 @@ def _run_logged(
             cwd=str(cwd or ROOT),
             env=env,
             text=True,
+            stdin=subprocess.DEVNULL,
             stdout=handle,
             stderr=subprocess.STDOUT,
             check=False,
         )
+
+
+def _with_password(command: Sequence[str], *, password: str, env: dict[str, str] | None = None) -> tuple[list[str], dict[str, str] | None, str | None]:
+    if shutil.which("sshpass"):
+        return ["sshpass", "-p", password, *command], env, None
+    askpass_fd, askpass_path = tempfile.mkstemp(prefix="codex-askpass-", text=True)
+    os.close(askpass_fd)
+    Path(askpass_path).write_text(
+        "#!/usr/bin/env bash\n" f"printf '%s\\n' {shlex.quote(password)}\n",
+        encoding="utf-8",
+    )
+    os.chmod(askpass_path, 0o700)
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
+    merged_env.update(
+        {
+            "SSH_ASKPASS": askpass_path,
+            "SSH_ASKPASS_REQUIRE": "force",
+            "DISPLAY": "codex",
+        }
+    )
+    return ["setsid", "-w", *command], merged_env, askpass_path
+
+
+def _run_password_logged(
+    command: Sequence[str],
+    *,
+    password: str,
+    log_path: Path,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    append: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    wrapped_cmd, wrapped_env, askpass_path = _with_password(command, password=password, env=env)
+    try:
+        return _run_logged(wrapped_cmd, log_path=log_path, cwd=cwd, env=wrapped_env, append=append)
+    finally:
+        if askpass_path:
+            Path(askpass_path).unlink(missing_ok=True)
 
 
 def _remote_command(
@@ -270,9 +318,6 @@ def _remote_command(
     remote_cmd: str,
 ) -> list[str]:
     return [
-        "sshpass",
-        "-p",
-        password,
         "ssh",
         "-p",
         port,
@@ -297,7 +342,10 @@ def _env_prefix(extra: dict[str, str] | None = None) -> str:
 def _extract_package(tarball: Path, destination: Path) -> Path:
     destination.mkdir(parents=True, exist_ok=True)
     with tarfile.open(tarball, "r:gz") as archive:
-        archive.extractall(destination)
+        try:
+            archive.extractall(destination, filter="data")
+        except TypeError:
+            archive.extractall(destination)
         names = [member.name.split("/", 1)[0] for member in archive.getmembers() if member.name]
     roots = [name for name in names if name and name != "."]
     return destination / roots[0]
@@ -404,11 +452,8 @@ def _stage_arm_package(commit: str, out_dir: Path, vm: str, vm_user: str, vm_pas
     tarball = out_dir / "packages" / f"alps_kv_wrap_pkg-aarch64-{commit}.tar.gz"
     remote_tarball = f"/tmp/alps_kv_wrap_pkg-aarch64-{commit}.tar.gz"
     remote_root = f"/tmp/alps_kv_wrap_pkg-aarch64-{commit}"
-    copy_result = _run_logged(
+    copy_result = _run_password_logged(
         [
-            "sshpass",
-            "-p",
-            vm_pass,
             "scp",
             "-P",
             port,
@@ -421,11 +466,12 @@ def _stage_arm_package(commit: str, out_dir: Path, vm: str, vm_user: str, vm_pas
             str(tarball),
             f"{vm_user}@{host}:{remote_tarball}",
         ],
+        password=vm_pass,
         log_path=log_path,
     )
     if copy_result.returncode != 0:
         return False, remote_root
-    stage = _run_logged(
+    stage = _run_password_logged(
         _remote_command(
             host=host,
             port=port,
@@ -433,6 +479,7 @@ def _stage_arm_package(commit: str, out_dir: Path, vm: str, vm_user: str, vm_pas
             password=vm_pass,
             remote_cmd=f"set -euo pipefail; rm -rf {shlex.quote(remote_root)}; tar xzf {shlex.quote(remote_tarball)} -C /tmp",
         ),
+        password=vm_pass,
         log_path=log_path,
         append=True,
     )
@@ -448,8 +495,9 @@ def _remote_softroce_ready(commit: str, out_dir: Path, vm1: str, vm2: str, vm_us
     def collect(vm: str, log_path: Path) -> tuple[int, str]:
         host, port = _split_host_port(vm)
         cmd = "set -euo pipefail; ibv_devices; echo '---'; ucx_info -d; echo '---'; rdma link show; echo '---'; ip -o addr show"
-        result = _run_logged(
+        result = _run_password_logged(
             _remote_command(host=host, port=port, user=vm_user, password=vm_pass, remote_cmd=cmd),
+            password=vm_pass,
             log_path=log_path,
         )
         return result.returncode, log_path.read_text(encoding="utf-8", errors="replace")
@@ -512,9 +560,9 @@ def _arm_runtime_smoke(commit: str, out_dir: Path, vm1: str, vm2: str, vm_user: 
         f"{_env_prefix({'LD_LIBRARY_PATH': f'{remote_root_vm1}/lib'})} "
         "timeout 5 ./bin/alps_kv_bench --mode server --port 17721 --sizes 1K --iters 1 --warmup 0 --threads 1"
     )
-    rc_vm1 = _run_logged(_remote_command(host=host1, port=port1, user=vm_user, password=vm_pass, remote_cmd=ucx_cmd_vm1), log_path=vm1_ucx_log).returncode
-    rc_vm2 = _run_logged(_remote_command(host=host2, port=port2, user=vm_user, password=vm_pass, remote_cmd=ucx_cmd_vm2), log_path=vm2_ucx_log).returncode
-    server_rc = _run_logged(_remote_command(host=host1, port=port1, user=vm_user, password=vm_pass, remote_cmd=server_cmd), log_path=vm1_server_log).returncode
+    rc_vm1 = _run_password_logged(_remote_command(host=host1, port=port1, user=vm_user, password=vm_pass, remote_cmd=ucx_cmd_vm1), password=vm_pass, log_path=vm1_ucx_log).returncode
+    rc_vm2 = _run_password_logged(_remote_command(host=host2, port=port2, user=vm_user, password=vm_pass, remote_cmd=ucx_cmd_vm2), password=vm_pass, log_path=vm2_ucx_log).returncode
+    server_rc = _run_password_logged(_remote_command(host=host1, port=port1, user=vm_user, password=vm_pass, remote_cmd=server_cmd), password=vm_pass, log_path=vm1_server_log).returncode
     server_text = vm1_server_log.read_text(encoding="utf-8", errors="replace")
     ok = rc_vm1 == 0 and rc_vm2 == 0 and server_rc in (0, 124) and "ALPS_KV_LISTEN address=" in server_text
     failure_log = vm1_ucx_log
@@ -557,11 +605,17 @@ def _arm_alps_e2e(commit: str, out_dir: Path, vm1: str, vm2: str, vm_user: str, 
         f"./bin/alps_kv_bench --mode client --host {VM1_RDMA_IP} --port 16000 --sizes 256K --iters 1 --warmup 0 --threads 1"
     )
     server_handle = server_log.open("w", encoding="utf-8")
-    server_proc = subprocess.Popen(
+    server_proc_cmd, server_proc_env, server_askpass_path = _with_password(
         _remote_command(host=host1, port=port1, user=vm_user, password=vm_pass, remote_cmd=server_cmd),
+        password=vm_pass,
+    )
+    server_proc = subprocess.Popen(
+        server_proc_cmd,
         stdout=server_handle,
         stderr=subprocess.STDOUT,
         text=True,
+        env=server_proc_env,
+        stdin=subprocess.DEVNULL,
     )
     client_rc = -1
     cleanup_error: str | None = None
@@ -589,6 +643,8 @@ def _arm_alps_e2e(commit: str, out_dir: Path, vm1: str, vm2: str, vm_user: str, 
             server_proc.wait(timeout=10)
         finally:
             server_handle.close()
+            if server_askpass_path:
+                Path(server_askpass_path).unlink(missing_ok=True)
 
     server_text = server_log.read_text(encoding="utf-8", errors="replace")
     client_text = client_log.read_text(encoding="utf-8", errors="replace")

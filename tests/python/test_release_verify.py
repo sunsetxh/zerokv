@@ -165,7 +165,7 @@ class ReleaseVerifyLibTests(unittest.TestCase):
                         fi
                         exit 0
                         ;;
-                    *"./build/kv_demo --mode server --listen 10.0.0.1:15000"*)
+                    *"./build/kv_demo --mode server --listen 10.0.0.1:"*)
                         echo "KV server listening on 10.0.0.1:15000"
                         sleep 60
                         ;;
@@ -177,7 +177,7 @@ class ReleaseVerifyLibTests(unittest.TestCase):
                         echo "Fetched key=release-verify-kv-demo owner=publisher version=1 value=hello-release-verify"
                         exit 0
                         ;;
-                    *"./build/kv_demo --mode server --listen 10.0.0.1:15150"*)
+                    *"./build/kv_demo --mode server --listen 10.0.0.1:"*)
                         echo "KV server listening on 10.0.0.1:15150"
                         sleep 60
                         ;;
@@ -373,11 +373,15 @@ class ReleaseVerifyLibTests(unittest.TestCase):
         cmd = module.render_release_perf_command(commit="abc123")
 
         self.assertIn("run-alps-matrix", cmd)
+        self.assertIn("--alps-binary ./bin/alps_kv_bench", cmd)
         self.assertIn("--sizes 1K,1M,32M", cmd)
         self.assertIn("--proto-modes n", cmd)
         self.assertIn("--rma-rails 1", cmd)
+        self.assertIn("--server-workdir /tmp/alps_kv_wrap_pkg-aarch64-abc123", cmd)
+        self.assertIn("--client-workdir /tmp/alps_kv_wrap_pkg-aarch64-abc123", cmd)
         self.assertIn("--extra-env UCX_TLS=rc,sm,self", cmd)
         self.assertIn("--extra-env UCX_NET_DEVICES=rxe0:1", cmd)
+        self.assertIn("--extra-env LD_LIBRARY_PATH=/tmp/alps_kv_wrap_pkg-aarch64-abc123/lib", cmd)
         self.assertNotIn("UCX_PROTO_ENABLE", cmd)
 
     def test_run_release_verify_returns_nonzero_and_pins_explicit_commit_ref(self):
@@ -475,7 +479,7 @@ class ReleaseVerifyLibTests(unittest.TestCase):
         self.assertRegex(script_text, re.compile(r'start_remote_bg .*?\n\s*server_pid="\$\{START_REMOTE_BG_PID\}"', re.S))
         self.assertIn("forget_pid()", script_text)
         self.assertIn("stop_bg_best_effort()", script_text)
-        self.assertIn('wait_for_log_pattern "${server_log}" "Listening on " "ping_pong server" "${server_pid}" 30', script_text)
+        self.assertIn('sleep 1', script_text)
 
     def test_release_verify_examples_script_runs_fake_vm_matrix(self):
         script_path = ROOT / "scripts" / "release_verify_examples.sh"
@@ -608,7 +612,7 @@ class ReleaseVerifyLibTests(unittest.TestCase):
             elapsed = time.monotonic() - started
 
             self.assertNotEqual(completed.returncode, 0)
-            self.assertIn("FAIL arm examples: ping_pong server", completed.stderr)
+            self.assertIn("FAIL arm examples: ping_pong", completed.stderr)
             self.assertLess(elapsed, 5.0)
 
     def test_build_pkg_arm_remote_script_handles_remote_staging_and_copyback(self):

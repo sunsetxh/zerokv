@@ -89,6 +89,7 @@ REMOTE_UCX_TARBALL="/tmp/ucx-v1.20.0.tar.gz"
 REMOTE_TARBALL="/tmp/alps_kv_wrap_pkg-${ARCH}-${COMMIT}.tar.gz"
 REMOTE_PACKAGE_TXT="/tmp/alps_kv_wrap_pkg-${ARCH}-${COMMIT}.package.txt"
 REMOTE_SCRIPT="$(mktemp)"
+ASKPASS_SCRIPT=""
 
 SSH_OPTS=(
     -o StrictHostKeyChecking=no
@@ -97,24 +98,44 @@ SSH_OPTS=(
 )
 
 cleanup() {
-    rm -f "${REMOTE_SCRIPT}"
+    rm -f "${REMOTE_SCRIPT}" "${ASKPASS_SCRIPT}"
 }
 trap cleanup EXIT
 
+build_password_prefix() {
+    if command -v sshpass >/dev/null 2>&1; then
+        PASSWORD_PREFIX=(sshpass -p "${VM_PASS}")
+        return
+    fi
+    ASKPASS_SCRIPT="$(mktemp)"
+    printf '%s\n' '#!/usr/bin/env bash' "printf '%s\n' $(printf '%q' "${VM_PASS}")" > "${ASKPASS_SCRIPT}"
+    chmod 700 "${ASKPASS_SCRIPT}"
+    PASSWORD_PREFIX=(
+        env
+        SSH_ASKPASS="${ASKPASS_SCRIPT}"
+        SSH_ASKPASS_REQUIRE=force
+        DISPLAY=codex
+        setsid
+        -w
+    )
+}
+
+build_password_prefix
+
 vm_ssh() {
-    sshpass -p "${VM_PASS}" ssh -p "${VM_PORT}" "${SSH_OPTS[@]}" "${VM_USER}@${VM_HOST}" "$@"
+    "${PASSWORD_PREFIX[@]}" ssh -p "${VM_PORT}" "${SSH_OPTS[@]}" "${VM_USER}@${VM_HOST}" "$@" < /dev/null
 }
 
 vm_scp_to() {
     local src="$1"
     local dst="$2"
-    sshpass -p "${VM_PASS}" scp -P "${VM_PORT}" "${SSH_OPTS[@]}" "${src}" "${VM_USER}@${VM_HOST}:${dst}"
+    "${PASSWORD_PREFIX[@]}" scp -P "${VM_PORT}" "${SSH_OPTS[@]}" "${src}" "${VM_USER}@${VM_HOST}:${dst}" < /dev/null
 }
 
 vm_scp_from() {
     local src="$1"
     local dst="$2"
-    sshpass -p "${VM_PASS}" scp -P "${VM_PORT}" "${SSH_OPTS[@]}" "${VM_USER}@${VM_HOST}:${src}" "${dst}"
+    "${PASSWORD_PREFIX[@]}" scp -P "${VM_PORT}" "${SSH_OPTS[@]}" "${VM_USER}@${VM_HOST}:${src}" "${dst}" < /dev/null
 }
 
 mkdir -p "${RELEASE_DIR}" "${SRC_DIR}" "${PACKAGE_DIR}"
@@ -138,7 +159,7 @@ ARCH="aarch64"
 PKG_DIR_NAME="alps_kv_wrap_pkg-${ARCH}-${COMMIT_ID}"
 WORK_ROOT="/tmp/arm-release-verify-${COMMIT_ID}"
 PKG_DIR="/tmp/${PKG_DIR_NAME}"
-UCX_PREFIX="/usr/local/ucx-static-pic"
+UCX_PREFIX="${HOME}/.local/ucx-static-pic"
 MAX_GLIBCXX="3.4.28"
 
 version_gt() {
@@ -247,8 +268,6 @@ validate_pkg() {
         fi
     done
 
-    tar -tzf "${REMOTE_TARBALL}" >/dev/null
-    record "tarball=$(basename "${REMOTE_TARBALL}")"
 }
 
 rm -rf "${WORK_ROOT}" "${PKG_DIR}" "${REMOTE_TARBALL}"
@@ -302,6 +321,8 @@ fi
 
 validate_pkg
 tar -C /tmp -czf "${REMOTE_TARBALL}" "${PKG_DIR_NAME}"
+tar -tzf "${REMOTE_TARBALL}" >/dev/null
+record "tarball=$(basename "${REMOTE_TARBALL}")"
 record "created_tarball=${REMOTE_TARBALL}"
 EOF
 

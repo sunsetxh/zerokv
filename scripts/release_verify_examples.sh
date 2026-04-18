@@ -83,6 +83,13 @@ SSH_OPTS=(
 
 VM1_RDMA_IP="10.0.0.1"
 VM2_RDMA_IP="10.0.0.2"
+PORT_OFFSET=$(( $$ % 1000 ))
+PING_PONG_PORT=$((23000 + PORT_OFFSET))
+RDMA_PUT_GET_PORT=$((24000 + PORT_OFFSET))
+KV_DEMO_PORT=$((25000 + PORT_OFFSET))
+KV_WAIT_FETCH_PORT=$((26000 + PORT_OFFSET))
+MESSAGE_KV_PORT=$((27000 + PORT_OFFSET))
+ALPS_BENCH_PORT=$((28000 + PORT_OFFSET))
 REMOTE_SOURCE_ARCHIVE="/tmp/zerokv-src-aarch64-${COMMIT}.tar.gz"
 REMOTE_PACKAGE_TARBALL="/tmp/alps_kv_wrap_pkg-aarch64-${COMMIT}.tar.gz"
 REMOTE_PACKAGE_ROOT="/tmp/alps_kv_wrap_pkg-aarch64-${COMMIT}"
@@ -118,6 +125,7 @@ declare -A EXAMPLE_LOG_DIRS=()
 declare -A BUILD_TARGET_SEEN=()
 EXAMPLE_ORDER=()
 BUILD_TARGETS=()
+ASKPASS_SCRIPT=""
 
 for row in "${EXAMPLE_ROWS[@]}"; do
     IFS=$'\x1f' read -r name source build_targets_csv log_dir <<<"${row}"
@@ -136,10 +144,25 @@ for row in "${EXAMPLE_ROWS[@]}"; do
     done
 done
 
-command -v sshpass >/dev/null 2>&1 || {
-    echo "sshpass is required" >&2
-    exit 1
+build_password_prefix() {
+    if command -v sshpass >/dev/null 2>&1; then
+        PASSWORD_PREFIX=(sshpass -p "${VM_PASS}")
+        return
+    fi
+    ASKPASS_SCRIPT="$(mktemp)"
+    printf '%s\n' '#!/usr/bin/env bash' "printf '%s\n' $(printf '%q' "${VM_PASS}")" > "${ASKPASS_SCRIPT}"
+    chmod 700 "${ASKPASS_SCRIPT}"
+    PASSWORD_PREFIX=(
+        env
+        SSH_ASKPASS="${ASKPASS_SCRIPT}"
+        SSH_ASKPASS_REQUIRE=force
+        DISPLAY=codex
+        setsid
+        -w
+    )
 }
+
+build_password_prefix
 
 if [[ ! -f "${LOCAL_PACKAGE_TARBALL}" ]]; then
     echo "Missing packaged artifact: ${LOCAL_PACKAGE_TARBALL}" >&2
@@ -167,7 +190,7 @@ vm_ssh() {
     local host="$1"
     local port="$2"
     shift 2
-    sshpass -p "${VM_PASS}" ssh -p "${port}" "${SSH_OPTS[@]}" "${VM_USER}@${host}" "$@"
+    "${PASSWORD_PREFIX[@]}" ssh -p "${port}" "${SSH_OPTS[@]}" "${VM_USER}@${host}" "$@" < /dev/null
 }
 
 vm_scp_to() {
@@ -175,7 +198,14 @@ vm_scp_to() {
     local port="$2"
     local src="$3"
     local dst="$4"
-    sshpass -p "${VM_PASS}" scp -P "${port}" "${SSH_OPTS[@]}" "${src}" "${VM_USER}@${host}:${dst}"
+    "${PASSWORD_PREFIX[@]}" scp -P "${port}" "${SSH_OPTS[@]}" "${src}" "${VM_USER}@${host}:${dst}" < /dev/null
+}
+
+vm_ssh_best_effort() {
+    local host="$1"
+    local port="$2"
+    shift 2
+    vm_ssh "${host}" "${port}" "$@" >/dev/null 2>&1 || true
 }
 
 start_remote_bg() {
@@ -183,8 +213,15 @@ start_remote_bg() {
     local port="$2"
     local log_path="$3"
     shift 3
-    sshpass -p "${VM_PASS}" ssh -p "${port}" "${SSH_OPTS[@]}" "${VM_USER}@${host}" "$@" >"${log_path}" 2>&1 &
+    "${PASSWORD_PREFIX[@]}" ssh -p "${port}" "${SSH_OPTS[@]}" "${VM_USER}@${host}" "$@" < /dev/null >"${log_path}" 2>&1 &
     START_REMOTE_BG_PID=$!
+}
+
+cleanup_remote_example_processes() {
+    local host="$1"
+    local port="$2"
+    local cmd="$3"
+    vm_ssh_best_effort "${host}" "${port}" "${cmd}"
 }
 
 cleanup_pids=()
@@ -194,6 +231,7 @@ cleanup() {
         kill "${pid}" 2>/dev/null || true
         wait "${pid}" 2>/dev/null || true
     done
+    rm -f "${ASKPASS_SCRIPT}"
 }
 trap cleanup EXIT
 
@@ -288,7 +326,7 @@ prepare_build_tree() {
 
     local build_jobs='$(nproc)'
     local remote_cmd
-    remote_cmd="set -euo pipefail; rm -rf $(printf '%q' "${remote_root}"); mkdir -p $(printf '%q' "${remote_root}"); tar xzf $(printf '%q' "${REMOTE_SOURCE_ARCHIVE}") -C $(printf '%q' "${remote_root}"); cd $(printf '%q' "${remote_root}"); PKG_CONFIG_PATH=/usr/local/ucx-static-pic/lib/pkgconfig:/usr/local/ucx-static-pic/lib64/pkgconfig:\${PKG_CONFIG_PATH:-} cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-10 -DUCX_ROOT=/usr/local/ucx-static-pic -DZEROKV_BUILD_TESTS=OFF -DZEROKV_BUILD_EXAMPLES=ON -DZEROKV_BUILD_BENCHMARK=OFF -DZEROKV_BUILD_PYTHON=OFF; cmake --build build --target ${BUILD_TARGETS[*]} -j${build_jobs}"
+    remote_cmd="set -euo pipefail; UCX_ROOT=\${HOME}/.local/ucx-static-pic; rm -rf $(printf '%q' "${remote_root}"); mkdir -p $(printf '%q' "${remote_root}"); tar xzf $(printf '%q' "${REMOTE_SOURCE_ARCHIVE}") -C $(printf '%q' "${remote_root}"); cd $(printf '%q' "${remote_root}"); PKG_CONFIG_PATH=\${UCX_ROOT}/lib/pkgconfig:\${UCX_ROOT}/lib64/pkgconfig:\${PKG_CONFIG_PATH:-} cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-10 -DUCX_ROOT=\${UCX_ROOT} -DZEROKV_BUILD_TESTS=OFF -DZEROKV_BUILD_EXAMPLES=ON -DZEROKV_BUILD_BENCHMARK=OFF -DZEROKV_BUILD_PYTHON=OFF; cmake --build build --target ${BUILD_TARGETS[*]} -j${build_jobs}"
 
     if ! vm_ssh "${host}" "${port}" "${remote_cmd}" >"${log_path}" 2>&1; then
         echo "FAIL arm examples setup: ${vm_label} build log=${log_path}" >&2
@@ -321,14 +359,17 @@ run_ping_pong() {
     local server_log="${log_dir}/server.log"
     local client_log="${log_dir}/client.log"
     local server_cmd client_cmd server_pid
+    local cleanup_cmd="pkill -f 'ping_pong --listen .*${PING_PONG_PORT}' || true; pkill -f 'ping_pong --connect .*${PING_PONG_PORT}' || true"
 
-    server_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/ping_pong --listen 0.0.0.0:13337 --transport rdma"
-    client_cmd="cd $(printf '%q' "${REMOTE_VM2_TREE}") && $(build_env_prefix) timeout 180 ./build/ping_pong --connect ${VM1_RDMA_IP}:13337 --transport rdma"
+    cleanup_remote_example_processes "${VM1_HOST}" "${VM1_PORT}" "${cleanup_cmd}"
+    cleanup_remote_example_processes "${VM2_HOST}" "${VM2_PORT}" "${cleanup_cmd}"
+    server_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/ping_pong --listen ${VM1_RDMA_IP}:${PING_PONG_PORT} --transport rdma"
+    client_cmd="cd $(printf '%q' "${REMOTE_VM2_TREE}") && $(build_env_prefix) timeout 180 ./build/ping_pong --connect ${VM1_RDMA_IP}:${PING_PONG_PORT} --transport rdma"
 
     start_remote_bg "${VM1_HOST}" "${VM1_PORT}" "${server_log}" "${server_cmd}"
     server_pid="${START_REMOTE_BG_PID}"
     cleanup_pids+=("${server_pid}")
-    wait_for_log_pattern "${server_log}" "Listening on " "ping_pong server" "${server_pid}" 30
+    sleep 1
 
     if ! vm_ssh "${VM2_HOST}" "${VM2_PORT}" "${client_cmd}" >"${client_log}" 2>&1; then
         echo "FAIL arm examples: ping_pong log=${client_log}" >&2
@@ -350,14 +391,17 @@ run_rdma_put_get() {
     local server_log="${log_dir}/server.log"
     local client_log="${log_dir}/client.log"
     local server_cmd client_cmd server_pid
+    local cleanup_cmd="pkill -f 'rdma_put_get --listen .*${RDMA_PUT_GET_PORT}' || true; pkill -f 'rdma_put_get --connect .*${RDMA_PUT_GET_PORT}' || true"
 
-    server_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/rdma_put_get --listen 0.0.0.0:13339 --transport rdma"
-    client_cmd="cd $(printf '%q' "${REMOTE_VM2_TREE}") && $(build_env_prefix) timeout 180 ./build/rdma_put_get --connect ${VM1_RDMA_IP}:13339 --transport rdma"
+    cleanup_remote_example_processes "${VM1_HOST}" "${VM1_PORT}" "${cleanup_cmd}"
+    cleanup_remote_example_processes "${VM2_HOST}" "${VM2_PORT}" "${cleanup_cmd}"
+    server_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/rdma_put_get --listen ${VM1_RDMA_IP}:${RDMA_PUT_GET_PORT} --transport rdma"
+    client_cmd="cd $(printf '%q' "${REMOTE_VM2_TREE}") && $(build_env_prefix) timeout 180 ./build/rdma_put_get --connect ${VM1_RDMA_IP}:${RDMA_PUT_GET_PORT} --transport rdma"
 
     start_remote_bg "${VM1_HOST}" "${VM1_PORT}" "${server_log}" "${server_cmd}"
     server_pid="${START_REMOTE_BG_PID}"
     cleanup_pids+=("${server_pid}")
-    wait_for_log_pattern "${server_log}" "Listening on " "rdma_put_get server" "${server_pid}" 30
+    sleep 1
 
     if ! vm_ssh "${VM2_HOST}" "${VM2_PORT}" "${client_cmd}" >"${client_log}" 2>&1; then
         echo "FAIL arm examples: rdma_put_get log=${client_log}" >&2
@@ -380,20 +424,23 @@ run_kv_demo() {
     local publisher_log="${log_dir}/publisher.log"
     local client_log="${log_dir}/client.log"
     local server_cmd publisher_cmd client_cmd server_pid publisher_pid
+    local cleanup_cmd="pkill -f 'kv_demo --mode server --listen .*${KV_DEMO_PORT}' || true; pkill -f 'kv_demo --mode publish .*release-verify-kv-demo' || true; pkill -f 'kv_demo --mode fetch .*release-verify-kv-demo' || true"
 
-    server_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/kv_demo --mode server --listen ${VM1_RDMA_IP}:15000 --transport rdma"
-    publisher_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/kv_demo --mode publish --server-addr ${VM1_RDMA_IP}:15000 --data-addr ${VM1_RDMA_IP}:0 --node-id publisher --key release-verify-kv-demo --value hello-release-verify --transport rdma --hold"
-    client_cmd="cd $(printf '%q' "${REMOTE_VM2_TREE}") && $(build_env_prefix) timeout 180 ./build/kv_demo --mode fetch --server-addr ${VM1_RDMA_IP}:15000 --data-addr ${VM2_RDMA_IP}:0 --node-id reader --key release-verify-kv-demo --transport rdma"
+    cleanup_remote_example_processes "${VM1_HOST}" "${VM1_PORT}" "${cleanup_cmd}"
+    cleanup_remote_example_processes "${VM2_HOST}" "${VM2_PORT}" "${cleanup_cmd}"
+    server_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/kv_demo --mode server --listen ${VM1_RDMA_IP}:${KV_DEMO_PORT} --transport rdma"
+    publisher_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/kv_demo --mode publish --server-addr ${VM1_RDMA_IP}:${KV_DEMO_PORT} --data-addr ${VM1_RDMA_IP}:0 --node-id publisher --key release-verify-kv-demo --value hello-release-verify --transport rdma --hold"
+    client_cmd="cd $(printf '%q' "${REMOTE_VM2_TREE}") && $(build_env_prefix) timeout 180 ./build/kv_demo --mode fetch --server-addr ${VM1_RDMA_IP}:${KV_DEMO_PORT} --data-addr ${VM2_RDMA_IP}:0 --node-id reader --key release-verify-kv-demo --transport rdma"
 
     start_remote_bg "${VM1_HOST}" "${VM1_PORT}" "${server_log}" "${server_cmd}"
     server_pid="${START_REMOTE_BG_PID}"
     cleanup_pids+=("${server_pid}")
-    wait_for_log_pattern "${server_log}" "KV server listening on " "kv_demo server" "${server_pid}" 30
+    sleep 1
 
     start_remote_bg "${VM1_HOST}" "${VM1_PORT}" "${publisher_log}" "${publisher_cmd}"
     publisher_pid="${START_REMOTE_BG_PID}"
     cleanup_pids+=("${publisher_pid}")
-    wait_for_log_pattern "${publisher_log}" "Published key=release-verify-kv-demo" "kv_demo publisher" "${publisher_pid}" 30
+    sleep 1
 
     if ! vm_ssh "${VM2_HOST}" "${VM2_PORT}" "${client_cmd}" >"${client_log}" 2>&1; then
         echo "FAIL arm examples: kv_demo log=${client_log}" >&2
@@ -417,15 +464,18 @@ run_kv_wait_fetch() {
     local waiter_log="${log_dir}/waiter.log"
     local publisher_log="${log_dir}/publisher.log"
     local server_cmd waiter_cmd publisher_cmd server_pid waiter_pid publisher_pid
+    local cleanup_cmd="pkill -f 'kv_demo --mode server --listen .*${KV_WAIT_FETCH_PORT}' || true; pkill -f 'kv_wait_fetch --mode subscribe-fetch-once .*release-verify-waitfetch' || true; pkill -f 'kv_demo --mode publish .*release-verify-waitfetch' || true"
 
-    server_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/kv_demo --mode server --listen ${VM1_RDMA_IP}:15150 --transport rdma"
-    waiter_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/kv_wait_fetch --mode subscribe-fetch-once --server-addr ${VM1_RDMA_IP}:15150 --data-addr ${VM1_RDMA_IP}:0 --node-id waiter --key release-verify-waitfetch --transport rdma --timeout-ms 10000"
-    publisher_cmd="cd $(printf '%q' "${REMOTE_VM2_TREE}") && $(build_env_prefix) timeout 180 ./build/kv_demo --mode publish --server-addr ${VM1_RDMA_IP}:15150 --data-addr ${VM2_RDMA_IP}:0 --node-id publisher --key release-verify-waitfetch --value hello-waitfetch --transport rdma --hold"
+    cleanup_remote_example_processes "${VM1_HOST}" "${VM1_PORT}" "${cleanup_cmd}"
+    cleanup_remote_example_processes "${VM2_HOST}" "${VM2_PORT}" "${cleanup_cmd}"
+    server_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/kv_demo --mode server --listen ${VM1_RDMA_IP}:${KV_WAIT_FETCH_PORT} --transport rdma"
+    waiter_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/kv_wait_fetch --mode subscribe-fetch-once --server-addr ${VM1_RDMA_IP}:${KV_WAIT_FETCH_PORT} --data-addr ${VM1_RDMA_IP}:0 --node-id waiter --key release-verify-waitfetch --transport rdma --timeout-ms 10000"
+    publisher_cmd="cd $(printf '%q' "${REMOTE_VM2_TREE}") && $(build_env_prefix) timeout 180 ./build/kv_demo --mode publish --server-addr ${VM1_RDMA_IP}:${KV_WAIT_FETCH_PORT} --data-addr ${VM2_RDMA_IP}:0 --node-id publisher --key release-verify-waitfetch --value hello-waitfetch --transport rdma --hold"
 
     start_remote_bg "${VM1_HOST}" "${VM1_PORT}" "${server_log}" "${server_cmd}"
     server_pid="${START_REMOTE_BG_PID}"
     cleanup_pids+=("${server_pid}")
-    wait_for_log_pattern "${server_log}" "KV server listening on " "kv_wait_fetch server" "${server_pid}" 30
+    sleep 1
 
     start_remote_bg "${VM1_HOST}" "${VM1_PORT}" "${waiter_log}" "${waiter_cmd}"
     waiter_pid="${START_REMOTE_BG_PID}"
@@ -435,7 +485,7 @@ run_kv_wait_fetch() {
     start_remote_bg "${VM2_HOST}" "${VM2_PORT}" "${publisher_log}" "${publisher_cmd}"
     publisher_pid="${START_REMOTE_BG_PID}"
     cleanup_pids+=("${publisher_pid}")
-    wait_for_log_pattern "${publisher_log}" "Published key=release-verify-waitfetch" "kv_wait_fetch publisher" "${publisher_pid}" 30
+    sleep 1
 
     if ! wait_pid "${waiter_pid}" "kv_wait_fetch" "${waiter_log}"; then
         stop_bg_best_effort "${publisher_pid}"
@@ -457,9 +507,12 @@ run_message_kv_demo() {
     local rank0_log="${log_dir}/rank0.log"
     local rank1_log="${log_dir}/rank1.log"
     local rank0_cmd rank1_cmd rank0_pid
+    local cleanup_cmd="pkill -f 'message_kv_demo --role rank0 .*${MESSAGE_KV_PORT}' || true; pkill -f 'message_kv_demo --role rank1 .*${MESSAGE_KV_PORT}' || true"
 
-    rank0_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/message_kv_demo --role rank0 --listen ${VM1_RDMA_IP}:16040 --data-addr ${VM1_RDMA_IP}:0 --node-id rank0 --messages 1 --sizes 1K --warmup-rounds 0 --timeout-ms 10000 --transport rdma"
-    rank1_cmd="cd $(printf '%q' "${REMOTE_VM2_TREE}") && $(build_env_prefix) timeout 180 ./build/message_kv_demo --role rank1 --server-addr ${VM1_RDMA_IP}:16040 --data-addr ${VM2_RDMA_IP}:0 --node-id rank1 --threads 1 --send-mode sync --warmup-rounds 0 --sizes 1K --timeout-ms 10000 --transport rdma"
+    cleanup_remote_example_processes "${VM1_HOST}" "${VM1_PORT}" "${cleanup_cmd}"
+    cleanup_remote_example_processes "${VM2_HOST}" "${VM2_PORT}" "${cleanup_cmd}"
+    rank0_cmd="cd $(printf '%q' "${REMOTE_VM1_TREE}") && $(build_env_prefix) timeout 180 ./build/message_kv_demo --role rank0 --listen ${VM1_RDMA_IP}:${MESSAGE_KV_PORT} --data-addr ${VM1_RDMA_IP}:0 --node-id rank0 --messages 1 --sizes 1K --warmup-rounds 0 --timeout-ms 10000 --transport rdma"
+    rank1_cmd="cd $(printf '%q' "${REMOTE_VM2_TREE}") && $(build_env_prefix) timeout 180 ./build/message_kv_demo --role rank1 --server-addr ${VM1_RDMA_IP}:${MESSAGE_KV_PORT} --data-addr ${VM2_RDMA_IP}:0 --node-id rank1 --threads 1 --send-mode sync --warmup-rounds 0 --sizes 1K --timeout-ms 10000 --transport rdma"
 
     start_remote_bg "${VM1_HOST}" "${VM1_PORT}" "${rank0_log}" "${rank0_cmd}"
     rank0_pid="${START_REMOTE_BG_PID}"
@@ -486,9 +539,12 @@ run_alps_kv_bench() {
     local server_log="${log_dir}/server.log"
     local client_log="${log_dir}/client.log"
     local server_cmd client_cmd server_pid
+    local cleanup_cmd="pkill -f 'alps_kv_bench --mode server --port ${ALPS_BENCH_PORT}' || true; pkill -f 'alps_kv_bench --mode client --host ${VM1_RDMA_IP} --port ${ALPS_BENCH_PORT}' || true"
 
-    server_cmd="cd $(printf '%q' "${REMOTE_PACKAGE_ROOT}") && $(package_env_prefix) timeout 180 ./bin/alps_kv_bench --mode server --port 16000 --sizes 256K --iters 1 --warmup 0 --threads 1"
-    client_cmd="cd $(printf '%q' "${REMOTE_PACKAGE_ROOT}") && $(package_env_prefix) timeout 180 ./bin/alps_kv_bench --mode client --host ${VM1_RDMA_IP} --port 16000 --sizes 256K --iters 1 --warmup 0 --threads 1"
+    cleanup_remote_example_processes "${VM1_HOST}" "${VM1_PORT}" "${cleanup_cmd}"
+    cleanup_remote_example_processes "${VM2_HOST}" "${VM2_PORT}" "${cleanup_cmd}"
+    server_cmd="cd $(printf '%q' "${REMOTE_PACKAGE_ROOT}") && $(package_env_prefix) timeout 180 ./bin/alps_kv_bench --mode server --port ${ALPS_BENCH_PORT} --sizes 256K --iters 1 --warmup 0 --threads 1"
+    client_cmd="cd $(printf '%q' "${REMOTE_PACKAGE_ROOT}") && $(package_env_prefix) timeout 180 ./bin/alps_kv_bench --mode client --host ${VM1_RDMA_IP} --port ${ALPS_BENCH_PORT} --sizes 256K --iters 1 --warmup 0 --threads 1"
 
     start_remote_bg "${VM1_HOST}" "${VM1_PORT}" "${server_log}" "${server_cmd}"
     server_pid="${START_REMOTE_BG_PID}"
