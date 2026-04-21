@@ -6,6 +6,10 @@
 
 #include <array>
 #include <cstdint>
+#include <future>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
 #include <vector>
 
 namespace {
@@ -121,6 +125,39 @@ TEST(KvServerIntegrationTest, HandlesRegisterPutLookupAndUnpublish) {
 
     proto::TcpTransport::close_fd(&fd);
     server->stop();
+}
+
+TEST(KvServerIntegrationTest, TcpTransportEnablesNoDelayOnClientAndAcceptedSockets) {
+    std::string bound_address;
+    std::string error;
+    int listen_fd = proto::TcpTransport::listen("127.0.0.1:0", &bound_address, &error);
+    ASSERT_GE(listen_fd, 0) << error;
+    ASSERT_FALSE(bound_address.empty());
+
+    auto accept_future = std::async(std::launch::async, [&]() {
+        std::string accept_error;
+        return proto::TcpTransport::accept(listen_fd, &accept_error);
+    });
+
+    int client_fd = proto::TcpTransport::connect(bound_address, &error);
+    ASSERT_GE(client_fd, 0) << error;
+
+    auto accepted = accept_future.get();
+    ASSERT_GE(accepted.fd, 0);
+
+    auto read_nodelay = [](int fd) {
+        int enabled = 0;
+        socklen_t len = sizeof(enabled);
+        EXPECT_EQ(::getsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &enabled, &len), 0);
+        return enabled;
+    };
+
+    EXPECT_EQ(read_nodelay(client_fd), 1);
+    EXPECT_EQ(read_nodelay(accepted.fd), 1);
+
+    proto::TcpTransport::close_fd(&client_fd);
+    proto::TcpTransport::close_fd(&accepted.fd);
+    proto::TcpTransport::close_fd(&listen_fd);
 }
 
 TEST(KvServerIntegrationTest, ReturnsPushTargetMetadata) {

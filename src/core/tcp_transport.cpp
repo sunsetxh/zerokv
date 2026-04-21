@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <limits>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -60,6 +61,18 @@ bool parse_address(const std::string& address, ParsedAddress* out, std::string* 
 
     out->host = host;
     out->port = static_cast<uint16_t>(port);
+    return true;
+}
+
+bool enable_tcp_nodelay(int fd, std::string* error) {
+    int one = 1;
+    if (::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) != 0) {
+        if (error) {
+            *error = std::strerror(errno);
+        }
+        log_tcp_error(std::string("setsockopt(TCP_NODELAY) failed: ") + std::strerror(errno));
+        return false;
+    }
     return true;
 }
 
@@ -137,6 +150,10 @@ TcpTransport::Connection TcpTransport::accept(int listen_fd, std::string* error)
     if (fd < 0 && error) {
         *error = std::strerror(errno);
     }
+    if (fd >= 0 && !enable_tcp_nodelay(fd, error)) {
+        ::close(fd);
+        fd = -1;
+    }
     conn.fd = fd;
     return conn;
 }
@@ -181,6 +198,10 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
             ::close(fd);
             return -1;
         }
+        if (!enable_tcp_nodelay(fd, error)) {
+            ::close(fd);
+            return -1;
+        }
 
         return fd;
     }
@@ -205,6 +226,10 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
 
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
         (void)::fcntl(fd, F_SETFL, flags);
+        if (!enable_tcp_nodelay(fd, error)) {
+            ::close(fd);
+            return -1;
+        }
         return fd;
     }
 
@@ -267,6 +292,10 @@ int TcpTransport::connect(const std::string& address, std::chrono::milliseconds 
             *error = std::strerror(errno);
         }
         log_tcp_error(std::string("fcntl(F_SETFL,restore) failed: ") + std::strerror(errno));
+        ::close(fd);
+        return -1;
+    }
+    if (!enable_tcp_nodelay(fd, error)) {
         ::close(fd);
         return -1;
     }
