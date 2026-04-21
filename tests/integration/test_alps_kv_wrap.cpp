@@ -150,7 +150,7 @@ TEST(AlpsKvWrapTest, WriteBytesCollectsTimingBreakdown) {
     const auto timing = client->write_timing_stats();
     EXPECT_EQ(timing.write_ops, 1u);
     EXPECT_GT(timing.control_request_grant_us, 0u);
-    EXPECT_GT(timing.write_done_ack_us, 0u);
+    EXPECT_GT(timing.write_done_us, 0u);
 }
 
 TEST(AlpsKvWrapTest, ReusesReceiveRegistrationForSameBufferAcrossReads) {

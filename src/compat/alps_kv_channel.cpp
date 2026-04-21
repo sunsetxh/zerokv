@@ -25,7 +25,6 @@ enum class AlpsControlType : uint16_t {
     kWriteRequest = 1001,
     kWriteGrant = 1002,
     kWriteDone = 1003,
-    kWriteDoneAck = 1004,
 };
 
 struct WriteRequestPayload {
@@ -600,10 +599,6 @@ void AlpsKvChannel::ControlConnectionLoop(int fd) {
             buffered->completed = true;
             TryDeliverBufferedMessage(request->message_tag);
         }
-        const auto ack_payload = EncodeWriteDone(*done);
-        if (!SendControlFrame(fd, AlpsControlType::kWriteDoneAck, header.request_id, ack_payload)) {
-            break;
-        }
     }
 
     zerokv::core::detail::TcpTransport::close_fd(&fd);
@@ -1025,31 +1020,7 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
         std::cerr << "AlpsKvChannel::WriteBytes: failed to send write completion." << std::endl;
         return false;
     }
-
-    zerokv::core::detail::MsgHeader ack_header;
-    std::vector<uint8_t> ack_payload;
-    if (!zerokv::core::detail::recv_frame(state->control_fd, &ack_header, &ack_payload)) {
-        CloseControlFd(&state->control_fd);
-        std::cerr << "AlpsKvChannel::WriteBytes: failed to read write completion ack." << std::endl;
-        return false;
-    }
-    if (ack_header.request_id != request_id) {
-        CloseControlFd(&state->control_fd);
-        std::cerr << "AlpsKvChannel::WriteBytes: mismatched write completion ack id." << std::endl;
-        return false;
-    }
-    if (ack_header.type == static_cast<uint16_t>(zerokv::core::detail::MsgType::kError)) {
-        CloseControlFd(&state->control_fd);
-        std::cerr << "AlpsKvChannel::WriteBytes: completion ack error: "
-                  << DecodeErrorPayload(ack_payload) << std::endl;
-        return false;
-    }
-    if (!IsControlFrameType(ack_header, AlpsControlType::kWriteDoneAck)) {
-        CloseControlFd(&state->control_fd);
-        std::cerr << "AlpsKvChannel::WriteBytes: unexpected write completion ack frame." << std::endl;
-        return false;
-    }
-    write_done_ack_us_.fetch_add(
+    write_done_us_.fetch_add(
         elapsed_us(write_done_begin, SteadyClock::now()), std::memory_order_relaxed);
     write_ops_.fetch_add(1, std::memory_order_relaxed);
 
@@ -1144,7 +1115,7 @@ AlpsKvChannel::WriteTimingStats AlpsKvChannel::write_timing_stats() const {
         .control_request_grant_us = control_request_grant_us_.load(std::memory_order_relaxed),
         .rdma_put_us = rdma_put_us_.load(std::memory_order_relaxed),
         .flush_us = flush_us_.load(std::memory_order_relaxed),
-        .write_done_ack_us = write_done_ack_us_.load(std::memory_order_relaxed),
+        .write_done_us = write_done_us_.load(std::memory_order_relaxed),
     };
 }
 
@@ -1153,7 +1124,7 @@ void AlpsKvChannel::reset_write_timing_stats() {
     control_request_grant_us_.store(0, std::memory_order_relaxed);
     rdma_put_us_.store(0, std::memory_order_relaxed);
     flush_us_.store(0, std::memory_order_relaxed);
-    write_done_ack_us_.store(0, std::memory_order_relaxed);
+    write_done_us_.store(0, std::memory_order_relaxed);
 }
 
 #ifdef ZEROKV_ALPS_TEST_HOOKS

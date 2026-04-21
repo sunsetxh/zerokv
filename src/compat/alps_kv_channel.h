@@ -43,7 +43,7 @@ public:
         uint64_t control_request_grant_us = 0;
         uint64_t rdma_put_us = 0;
         uint64_t flush_us = 0;
-        uint64_t write_done_ack_us = 0;
+        uint64_t write_done_us = 0;
     };
 
 #ifdef ZEROKV_ALPS_TEST_HOOKS
@@ -211,7 +211,7 @@ private:
     std::atomic<uint64_t> control_request_grant_us_{0};
     std::atomic<uint64_t> rdma_put_us_{0};
     std::atomic<uint64_t> flush_us_{0};
-    std::atomic<uint64_t> write_done_ack_us_{0};
+    std::atomic<uint64_t> write_done_us_{0};
 
 #ifdef ZEROKV_ALPS_TEST_HOOKS
     std::atomic<size_t> payload_tag_send_ops_{0};

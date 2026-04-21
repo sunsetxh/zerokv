@@ -11,7 +11,7 @@ struct RoundTimingSummary {
     uint64_t avg_control_request_grant_us = 0;
     uint64_t avg_put_us = 0;
     uint64_t avg_flush_us = 0;
-    uint64_t avg_write_done_ack_us = 0;
+    uint64_t avg_write_done_us = 0;
 };
 std::string render_round_summary(const char* role,
                                  size_t round,
@@ -59,7 +59,7 @@ TEST(AlpsKvBenchHelpersTest, RoundSummaryIncludesWriteTimingWhenProvided) {
         .avg_control_request_grant_us = 123,
         .avg_put_us = 456,
         .avg_flush_us = 789,
-        .avg_write_done_ack_us = 42,
+        .avg_write_done_us = 42,
     };
 
     const auto line = zerokv::examples::alps_kv_bench::render_round_summary(
@@ -67,7 +67,7 @@ TEST(AlpsKvBenchHelpersTest, RoundSummaryIncludesWriteTimingWhenProvided) {
     EXPECT_NE(line.find("avg_control_request_grant_us=123"), std::string::npos);
     EXPECT_NE(line.find("avg_put_us=456"), std::string::npos);
     EXPECT_NE(line.find("avg_flush_us=789"), std::string::npos);
-    EXPECT_NE(line.find("avg_write_done_ack_us=42"), std::string::npos);
+    EXPECT_NE(line.find("avg_write_done_us=42"), std::string::npos);
 }
 
 TEST(AlpsKvBenchHelpersTest, ListenAddressLineIncludesResolvedAddress) {

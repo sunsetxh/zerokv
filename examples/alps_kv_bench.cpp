@@ -16,7 +16,7 @@ struct RoundTimingSummary {
     uint64_t avg_control_request_grant_us = 0;
     uint64_t avg_put_us = 0;
     uint64_t avg_flush_us = 0;
-    uint64_t avg_write_done_ack_us = 0;
+    uint64_t avg_write_done_us = 0;
 };
 
 std::vector<size_t> parse_sizes_csv(const std::string& csv) {
@@ -102,7 +102,7 @@ std::string render_round_summary(const char* role,
         out << " avg_control_request_grant_us=" << timing->avg_control_request_grant_us
             << " avg_put_us=" << timing->avg_put_us
             << " avg_flush_us=" << timing->avg_flush_us
-            << " avg_write_done_ack_us=" << timing->avg_write_done_ack_us;
+            << " avg_write_done_us=" << timing->avg_write_done_us;
     }
     return out.str();
 }
@@ -329,7 +329,7 @@ int main(int argc, char** argv) {
                 .avg_control_request_grant_us = timing.control_request_grant_us / write_ops,
                 .avg_put_us = timing.rdma_put_us / write_ops,
                 .avg_flush_us = timing.flush_us / write_ops,
-                .avg_write_done_ack_us = timing.write_done_ack_us / write_ops,
+                .avg_write_done_us = timing.write_done_us / write_ops,
             };
             std::cout << zerokv::examples::alps_kv_bench::render_round_summary(
                              "client", round_index, size, args.iters, total_bytes, elapsed_us,

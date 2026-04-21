@@ -66,7 +66,7 @@ WriteTimingStats GetWriteTimingStats() {
         .control_request_grant_us = stats.control_request_grant_us,
         .rdma_put_us = stats.rdma_put_us,
         .flush_us = stats.flush_us,
-        .write_done_ack_us = stats.write_done_ack_us,
+        .write_done_us = stats.write_done_us,
     };
 }
 

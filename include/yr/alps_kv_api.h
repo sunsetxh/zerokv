@@ -11,7 +11,7 @@ struct WriteTimingStats {
     uint64_t control_request_grant_us = 0;
     uint64_t rdma_put_us = 0;
     uint64_t flush_us = 0;
-    uint64_t write_done_ack_us = 0;
+    uint64_t write_done_us = 0;
 };
 
 int SetClient(const char* host, int port, int connect_timeout_ms);
