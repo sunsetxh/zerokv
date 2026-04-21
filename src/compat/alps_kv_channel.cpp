@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <limits>
@@ -21,8 +20,6 @@ namespace {
 constexpr std::uint64_t kFnvOffsetBasis = 1469598103934665603ULL;
 constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
 constexpr zerokv::Tag kBootstrapControlPortTag = zerokv::kTagAny - 1U;
-constexpr size_t kLargeMessageStagingWaitBytes = 8u * 1024u * 1024u;
-constexpr auto kDefaultLargeMessageStagingWait = std::chrono::milliseconds(5);
 
 enum class AlpsControlType : uint16_t {
     kWriteRequest = 1001,
@@ -166,20 +163,6 @@ std::optional<WriteDonePayload> DecodeWriteDone(std::span<const uint8_t> data) {
         return std::nullopt;
     }
     return payload;
-}
-
-std::chrono::milliseconds LargeMessageStagingWait(size_t size) {
-    if (size < kLargeMessageStagingWaitBytes) {
-        return std::chrono::milliseconds(0);
-    }
-    if (const char* env = std::getenv("ZEROKV_ALPS_STAGING_WAIT_MS")) {
-        char* end = nullptr;
-        const long parsed = std::strtol(env, &end, 10);
-        if (end != env && end != nullptr && *end == '\0' && parsed >= 0) {
-            return std::chrono::milliseconds(parsed);
-        }
-    }
-    return kDefaultLargeMessageStagingWait;
 }
 
 bool SendControlFrame(int fd, AlpsControlType type, uint64_t request_id,
@@ -510,49 +493,25 @@ void AlpsKvChannel::ControlConnectionLoop(int fd) {
 
         std::shared_ptr<ReceiveSlot> slot;
         std::shared_ptr<BufferedMessage> buffered;
-        bool receive_size_mismatch = false;
         {
-            auto try_reserve_slot_locked =
-                [&](const WriteRequestPayload& req) -> std::shared_ptr<ReceiveSlot> {
-                auto slot_it = receive_slots_.find(req.message_tag);
-                if (slot_it == receive_slots_.end() || !slot_it->second ||
-                    slot_it->second->reserved || slot_it->second->done) {
-                    return nullptr;
-                }
-                if (slot_it->second->size != req.size) {
-                    receive_size_mismatch = true;
-                    return nullptr;
+            std::lock_guard<std::mutex> lock(receive_slots_mutex_);
+            auto slot_it = receive_slots_.find(request->message_tag);
+            if (slot_it != receive_slots_.end() && slot_it->second &&
+                !slot_it->second->reserved && !slot_it->second->done) {
+                if (slot_it->second->size != request->size) {
+                    if (!SendControlError(fd, header.request_id, "receive buffer size mismatch")) {
+                        break;
+                    }
+                    continue;
                 }
                 slot_it->second->reserved = true;
-                return slot_it->second;
-            };
-
-            std::unique_lock<std::mutex> lock(receive_slots_mutex_);
-            slot = try_reserve_slot_locked(*request);
-            if (!slot && !receive_size_mismatch &&
-                staged_messages_.find(request->message_tag) == staged_messages_.end()) {
-                const auto staging_wait = LargeMessageStagingWait(static_cast<size_t>(request->size));
-                if (staging_wait.count() > 0) {
-                    receive_slots_cv_.wait_for(lock, staging_wait, [&]() {
-                        return !running_ ||
-                               receive_slots_.find(request->message_tag) != receive_slots_.end() ||
-                               staged_messages_.find(request->message_tag) != staged_messages_.end();
-                    });
-                    slot = try_reserve_slot_locked(*request);
-                }
-            }
-            if (!slot && staged_messages_.find(request->message_tag) != staged_messages_.end()) {
+                slot = slot_it->second;
+            } else if (staged_messages_.find(request->message_tag) != staged_messages_.end()) {
                 if (!SendControlError(fd, header.request_id, "duplicate outstanding ALPS message")) {
                     break;
                 }
                 continue;
             }
-        }
-        if (receive_size_mismatch) {
-            if (!SendControlError(fd, header.request_id, "receive buffer size mismatch")) {
-                break;
-            }
-            continue;
         }
 
         if (!slot) {
@@ -570,9 +529,6 @@ void AlpsKvChannel::ControlConnectionLoop(int fd) {
             buffered->remote_key = buffered->region->remote_key();
             buffered->size = static_cast<size_t>(request->size);
             buffered->reservation_id = next_reservation_id_.fetch_add(1);
-#ifdef ZEROKV_ALPS_TEST_HOOKS
-            staged_message_alloc_ops_.fetch_add(1, std::memory_order_relaxed);
-#endif
 
             std::lock_guard<std::mutex> lock(receive_slots_mutex_);
             if (staged_messages_.find(request->message_tag) != staged_messages_.end()) {
@@ -1178,7 +1134,6 @@ AlpsKvChannel::DebugStats AlpsKvChannel::debug_stats() const {
         .rma_put_ops = rma_put_ops_.load(),
         .receive_slot_register_ops = receive_slot_register_ops_.load(),
         .remote_rkey_unpack_ops = remote_rkey_unpack_ops_.load(),
-        .staged_message_alloc_ops = staged_message_alloc_ops_.load(),
     };
 }
 #endif

@@ -52,7 +52,6 @@ public:
         size_t rma_put_ops = 0;
         size_t receive_slot_register_ops = 0;
         size_t remote_rkey_unpack_ops = 0;
-        size_t staged_message_alloc_ops = 0;
     };
 #endif
 
@@ -219,7 +218,6 @@ private:
     std::atomic<size_t> rma_put_ops_{0};
     std::atomic<size_t> receive_slot_register_ops_{0};
     std::atomic<size_t> remote_rkey_unpack_ops_{0};
-    std::atomic<size_t> staged_message_alloc_ops_{0};
 #endif
 };
 
