@@ -14,11 +14,21 @@ struct WriteTimingStats {
     uint64_t write_done_us = 0;
 };
 
+struct ReceivePathStats {
+    uint64_t direct_grant_ops = 0;
+    uint64_t staged_grant_ops = 0;
+    uint64_t staged_delivery_ops = 0;
+    uint64_t staged_copy_bytes = 0;
+    uint64_t staged_copy_us = 0;
+};
+
 int SetClient(const char* host, int port, int connect_timeout_ms);
 void ShutdownClient();
 std::string GetLocalAddress();
 WriteTimingStats GetWriteTimingStats();
 void ResetWriteTimingStats();
+ReceivePathStats GetReceivePathStats();
+void ResetReceivePathStats();
 
 int WriteBytes(const void* data, size_t size, int tag, int index, int src, int dst);
 void ReadBytes(void* data, size_t size, int tag, int index, int src, int dst);

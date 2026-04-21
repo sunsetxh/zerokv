@@ -77,6 +77,27 @@ void ResetWriteTimingStats() {
     g_channel->reset_write_timing_stats();
 }
 
+ReceivePathStats GetReceivePathStats() {
+    if (!g_channel) {
+        return {};
+    }
+    const auto stats = g_channel->receive_path_stats();
+    return ReceivePathStats{
+        .direct_grant_ops = stats.direct_grant_ops,
+        .staged_grant_ops = stats.staged_grant_ops,
+        .staged_delivery_ops = stats.staged_delivery_ops,
+        .staged_copy_bytes = stats.staged_copy_bytes,
+        .staged_copy_us = stats.staged_copy_us,
+    };
+}
+
+void ResetReceivePathStats() {
+    if (!g_channel) {
+        return;
+    }
+    g_channel->reset_receive_path_stats();
+}
+
 int WriteBytes(const void* data, size_t size, int tag, int index, int src, int dst) {
     if (!g_channel) {
         std::cerr << "YR::WriteBytes: channel not initialized, call YR::SetClient first." << std::endl;

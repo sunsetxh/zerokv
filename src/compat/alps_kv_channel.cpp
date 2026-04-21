@@ -441,7 +441,12 @@ void AlpsKvChannel::TryDeliverBufferedMessage(zerokv::Tag message_tag) {
         return;
     }
 
+    const auto copy_begin = SteadyClock::now();
     std::memcpy(slot->region->address(), buffered->region->address(), buffered->size);
+    staged_delivery_ops_.fetch_add(1, std::memory_order_relaxed);
+    staged_copy_bytes_.fetch_add(buffered->size, std::memory_order_relaxed);
+    staged_copy_us_.fetch_add(elapsed_us(copy_begin, SteadyClock::now()),
+                              std::memory_order_relaxed);
     FinishReceiveSlot(slot, {});
 }
 
@@ -505,6 +510,7 @@ void AlpsKvChannel::ControlConnectionLoop(int fd) {
                     continue;
                 }
                 slot_it->second->reserved = true;
+                direct_grant_ops_.fetch_add(1, std::memory_order_relaxed);
                 slot = slot_it->second;
             } else if (staged_messages_.find(request->message_tag) != staged_messages_.end()) {
                 if (!SendControlError(fd, header.request_id, "duplicate outstanding ALPS message")) {
@@ -529,6 +535,7 @@ void AlpsKvChannel::ControlConnectionLoop(int fd) {
             buffered->remote_key = buffered->region->remote_key();
             buffered->size = static_cast<size_t>(request->size);
             buffered->reservation_id = next_reservation_id_.fetch_add(1);
+            staged_grant_ops_.fetch_add(1, std::memory_order_relaxed);
 
             std::lock_guard<std::mutex> lock(receive_slots_mutex_);
             if (staged_messages_.find(request->message_tag) != staged_messages_.end()) {
@@ -1125,6 +1132,24 @@ void AlpsKvChannel::reset_write_timing_stats() {
     rdma_put_us_.store(0, std::memory_order_relaxed);
     flush_us_.store(0, std::memory_order_relaxed);
     write_done_us_.store(0, std::memory_order_relaxed);
+}
+
+AlpsKvChannel::ReceivePathStats AlpsKvChannel::receive_path_stats() const {
+    return ReceivePathStats{
+        .direct_grant_ops = direct_grant_ops_.load(std::memory_order_relaxed),
+        .staged_grant_ops = staged_grant_ops_.load(std::memory_order_relaxed),
+        .staged_delivery_ops = staged_delivery_ops_.load(std::memory_order_relaxed),
+        .staged_copy_bytes = staged_copy_bytes_.load(std::memory_order_relaxed),
+        .staged_copy_us = staged_copy_us_.load(std::memory_order_relaxed),
+    };
+}
+
+void AlpsKvChannel::reset_receive_path_stats() {
+    direct_grant_ops_.store(0, std::memory_order_relaxed);
+    staged_grant_ops_.store(0, std::memory_order_relaxed);
+    staged_delivery_ops_.store(0, std::memory_order_relaxed);
+    staged_copy_bytes_.store(0, std::memory_order_relaxed);
+    staged_copy_us_.store(0, std::memory_order_relaxed);
 }
 
 #ifdef ZEROKV_ALPS_TEST_HOOKS

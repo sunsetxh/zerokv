@@ -46,6 +46,14 @@ public:
         uint64_t write_done_us = 0;
     };
 
+    struct ReceivePathStats {
+        uint64_t direct_grant_ops = 0;
+        uint64_t staged_grant_ops = 0;
+        uint64_t staged_delivery_ops = 0;
+        uint64_t staged_copy_bytes = 0;
+        uint64_t staged_copy_us = 0;
+    };
+
 #ifdef ZEROKV_ALPS_TEST_HOOKS
     struct DebugStats {
         size_t payload_tag_send_ops = 0;
@@ -77,6 +85,8 @@ public:
     [[nodiscard]] std::string local_address() const;
     [[nodiscard]] WriteTimingStats write_timing_stats() const;
     void reset_write_timing_stats();
+    [[nodiscard]] ReceivePathStats receive_path_stats() const;
+    void reset_receive_path_stats();
 
 #ifdef ZEROKV_ALPS_TEST_HOOKS
     [[nodiscard]] DebugStats debug_stats() const;
@@ -212,6 +222,11 @@ private:
     std::atomic<uint64_t> rdma_put_us_{0};
     std::atomic<uint64_t> flush_us_{0};
     std::atomic<uint64_t> write_done_us_{0};
+    std::atomic<uint64_t> direct_grant_ops_{0};
+    std::atomic<uint64_t> staged_grant_ops_{0};
+    std::atomic<uint64_t> staged_delivery_ops_{0};
+    std::atomic<uint64_t> staged_copy_bytes_{0};
+    std::atomic<uint64_t> staged_copy_us_{0};
 
 #ifdef ZEROKV_ALPS_TEST_HOOKS
     std::atomic<size_t> payload_tag_send_ops_{0};

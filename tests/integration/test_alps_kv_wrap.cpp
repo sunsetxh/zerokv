@@ -153,6 +153,32 @@ TEST(AlpsKvWrapTest, WriteBytesCollectsTimingBreakdown) {
     EXPECT_GT(timing.write_done_us, 0u);
 }
 
+TEST(AlpsKvWrapTest, ReadBytesCollectsReceivePathStats) {
+    std::unique_ptr<AlpsKvChannel> server;
+    std::unique_ptr<AlpsKvChannel> client;
+    ASSERT_TRUE(MakeConnectedServerClient(&server, &client));
+    ASSERT_NE(server, nullptr);
+    ASSERT_NE(client, nullptr);
+
+    const std::string payload = "receive-path";
+    std::vector<char> recv_buffer(payload.size(), '\0');
+
+    server->reset_receive_path_stats();
+    std::thread reader([&]() {
+        server->ReadBytes(recv_buffer.data(), recv_buffer.size(), 15, 0, 1, 2);
+    });
+
+    ASSERT_TRUE(client->WriteBytes(payload.data(), payload.size(), 15, 0, 1, 2));
+    reader.join();
+
+    const auto stats = server->receive_path_stats();
+    EXPECT_EQ(stats.direct_grant_ops, 1u);
+    EXPECT_EQ(stats.staged_grant_ops, 0u);
+    EXPECT_EQ(stats.staged_delivery_ops, 0u);
+    EXPECT_EQ(stats.staged_copy_bytes, 0u);
+    EXPECT_EQ(stats.staged_copy_us, 0u);
+}
+
 TEST(AlpsKvWrapTest, ReusesReceiveRegistrationForSameBufferAcrossReads) {
     std::unique_ptr<AlpsKvChannel> server;
     std::unique_ptr<AlpsKvChannel> client;

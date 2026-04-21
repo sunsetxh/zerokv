@@ -19,6 +19,14 @@ struct RoundTimingSummary {
     uint64_t avg_write_done_us = 0;
 };
 
+struct RoundReceiveSummary {
+    uint64_t direct_grant_ops = 0;
+    uint64_t staged_grant_ops = 0;
+    uint64_t staged_delivery_ops = 0;
+    uint64_t staged_copy_bytes = 0;
+    uint64_t staged_copy_us = 0;
+};
+
 std::vector<size_t> parse_sizes_csv(const std::string& csv) {
     std::vector<size_t> sizes;
     std::stringstream stream(csv);
@@ -87,7 +95,8 @@ std::string render_round_summary(const char* role,
                                  int iters,
                                  size_t total_bytes,
                                  uint64_t elapsed_us,
-                                 const RoundTimingSummary* timing) {
+                                 const RoundTimingSummary* timing,
+                                 const RoundReceiveSummary* receive) {
     std::ostringstream out;
     out << "ALPS_KV_ROUND"
         << " role=" << role
@@ -103,6 +112,13 @@ std::string render_round_summary(const char* role,
             << " avg_put_us=" << timing->avg_put_us
             << " avg_flush_us=" << timing->avg_flush_us
             << " avg_write_done_us=" << timing->avg_write_done_us;
+    }
+    if (receive != nullptr) {
+        out << " direct_grant_ops=" << receive->direct_grant_ops
+            << " staged_grant_ops=" << receive->staged_grant_ops
+            << " staged_delivery_ops=" << receive->staged_delivery_ops
+            << " staged_copy_bytes=" << receive->staged_copy_bytes
+            << " staged_copy_us=" << receive->staged_copy_us;
     }
     return out.str();
 }
@@ -238,20 +254,29 @@ int main(int argc, char** argv) {
                 recv_iter(i, false);
             }
 
+            YR::ResetReceivePathStats();
             const auto begin = std::chrono::steady_clock::now();
             for (int i = 0; i < args.iters; ++i) {
                 recv_iter(args.warmup + i, true);
             }
             const auto end = std::chrono::steady_clock::now();
+            const auto receive = YR::GetReceivePathStats();
 
             const size_t total_bytes =
                 size * static_cast<size_t>(args.iters) * static_cast<size_t>(args.threads);
             const auto elapsed_us = static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count());
+            const zerokv::examples::alps_kv_bench::RoundReceiveSummary round_receive{
+                .direct_grant_ops = receive.direct_grant_ops,
+                .staged_grant_ops = receive.staged_grant_ops,
+                .staged_delivery_ops = receive.staged_delivery_ops,
+                .staged_copy_bytes = receive.staged_copy_bytes,
+                .staged_copy_us = receive.staged_copy_us,
+            };
 
             std::cout << zerokv::examples::alps_kv_bench::render_round_summary(
                              "server", round_index, size, args.iters, total_bytes, elapsed_us,
-                             nullptr)
+                             nullptr, &round_receive)
                       << " threads=" << args.threads << std::endl;
         }
 
@@ -333,7 +358,7 @@ int main(int argc, char** argv) {
             };
             std::cout << zerokv::examples::alps_kv_bench::render_round_summary(
                              "client", round_index, size, args.iters, total_bytes, elapsed_us,
-                             &round_timing)
+                             &round_timing, nullptr)
                       << " threads=" << args.threads << std::endl;
         }
 

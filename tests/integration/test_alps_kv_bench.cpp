@@ -13,13 +13,21 @@ struct RoundTimingSummary {
     uint64_t avg_flush_us = 0;
     uint64_t avg_write_done_us = 0;
 };
+struct RoundReceiveSummary {
+    uint64_t direct_grant_ops = 0;
+    uint64_t staged_grant_ops = 0;
+    uint64_t staged_delivery_ops = 0;
+    uint64_t staged_copy_bytes = 0;
+    uint64_t staged_copy_us = 0;
+};
 std::string render_round_summary(const char* role,
                                  size_t round,
                                  size_t size,
                                  int iters,
                                  size_t total_bytes,
                                  uint64_t elapsed_us,
-                                 const RoundTimingSummary* timing = nullptr);
+                                 const RoundTimingSummary* timing = nullptr,
+                                 const RoundReceiveSummary* receive = nullptr);
 std::string render_listen_address_line(const std::string& address);
 }  // namespace zerokv::examples::alps_kv_bench
 
@@ -46,7 +54,7 @@ TEST(AlpsKvBenchHelpersTest, MaxSizeUsesLargestConfiguredRound) {
 
 TEST(AlpsKvBenchHelpersTest, RoundSummaryIncludesRoundAndSize) {
     const auto line = zerokv::examples::alps_kv_bench::render_round_summary(
-        "client", 2, 4u * 1024u * 1024u, 10, 40u * 1024u * 1024u, 12345, nullptr);
+        "client", 2, 4u * 1024u * 1024u, 10, 40u * 1024u * 1024u, 12345, nullptr, nullptr);
     EXPECT_NE(line.find("ALPS_KV_ROUND"), std::string::npos);
     EXPECT_NE(line.find("role=client"), std::string::npos);
     EXPECT_NE(line.find("round=2"), std::string::npos);
@@ -63,11 +71,29 @@ TEST(AlpsKvBenchHelpersTest, RoundSummaryIncludesWriteTimingWhenProvided) {
     };
 
     const auto line = zerokv::examples::alps_kv_bench::render_round_summary(
-        "client", 1, 32u * 1024u * 1024u, 4, 128u * 1024u * 1024u, 77777, &timing);
+        "client", 1, 32u * 1024u * 1024u, 4, 128u * 1024u * 1024u, 77777, &timing, nullptr);
     EXPECT_NE(line.find("avg_control_request_grant_us=123"), std::string::npos);
     EXPECT_NE(line.find("avg_put_us=456"), std::string::npos);
     EXPECT_NE(line.find("avg_flush_us=789"), std::string::npos);
     EXPECT_NE(line.find("avg_write_done_us=42"), std::string::npos);
+}
+
+TEST(AlpsKvBenchHelpersTest, RoundSummaryIncludesReceiveStatsWhenProvided) {
+    const zerokv::examples::alps_kv_bench::RoundReceiveSummary receive{
+        .direct_grant_ops = 8,
+        .staged_grant_ops = 2,
+        .staged_delivery_ops = 2,
+        .staged_copy_bytes = 4096,
+        .staged_copy_us = 55,
+    };
+
+    const auto line = zerokv::examples::alps_kv_bench::render_round_summary(
+        "server", 1, 32u * 1024u * 1024u, 4, 128u * 1024u * 1024u, 77777, nullptr, &receive);
+    EXPECT_NE(line.find("direct_grant_ops=8"), std::string::npos);
+    EXPECT_NE(line.find("staged_grant_ops=2"), std::string::npos);
+    EXPECT_NE(line.find("staged_delivery_ops=2"), std::string::npos);
+    EXPECT_NE(line.find("staged_copy_bytes=4096"), std::string::npos);
+    EXPECT_NE(line.find("staged_copy_us=55"), std::string::npos);
 }
 
 TEST(AlpsKvBenchHelpersTest, ListenAddressLineIncludesResolvedAddress) {
