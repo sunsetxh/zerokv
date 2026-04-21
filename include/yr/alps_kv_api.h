@@ -29,6 +29,7 @@ WriteTimingStats GetWriteTimingStats();
 void ResetWriteTimingStats();
 ReceivePathStats GetReceivePathStats();
 void ResetReceivePathStats();
+bool WaitForReceiveSlots(size_t expected, int timeout_ms);
 
 int WriteBytes(const void* data, size_t size, int tag, int index, int src, int dst);
 void ReadBytes(void* data, size_t size, int tag, int index, int src, int dst);

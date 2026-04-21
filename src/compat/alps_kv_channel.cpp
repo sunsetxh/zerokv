@@ -1108,6 +1108,21 @@ void AlpsKvChannel::ReadBytesBatch(std::vector<void*>& data,
     }
 }
 
+bool AlpsKvChannel::WaitForReceiveSlots(size_t expected, int timeout_ms) {
+    if (expected == 0) {
+        return true;
+    }
+    if (timeout_ms < 0) {
+        return false;
+    }
+
+    std::unique_lock<std::mutex> lock(receive_slots_mutex_);
+    return receive_slots_cv_.wait_for(
+        lock, std::chrono::milliseconds(timeout_ms), [this, expected]() {
+            return receive_slots_.size() >= expected;
+        });
+}
+
 // ============================================================================
 // Accessors
 

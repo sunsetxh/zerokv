@@ -53,6 +53,7 @@ endif()
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(UCX REQUIRED IMPORTED_TARGET ucx)
+find_package(MPI QUIET COMPONENTS CXX)
 get_target_property(ZEROKV_UCX_IMPORTED_INCLUDE_DIRS PkgConfig::UCX INTERFACE_INCLUDE_DIRECTORIES)
 if(NOT ZEROKV_UCX_IMPORTED_INCLUDE_DIRS)
     set(ZEROKV_UCX_IMPORTED_INCLUDE_DIRS ${UCX_INCLUDE_DIRS})
@@ -278,6 +279,11 @@ if(ZEROKV_BUILD_EXAMPLES)
 
     add_executable(alps_kv_bench examples/alps_kv_bench.cpp)
     target_link_libraries(alps_kv_bench PRIVATE alps_kv_wrap Threads::Threads)
+
+    if(MPI_CXX_FOUND)
+        add_executable(mpi_send_recv_bench examples/mpi_send_recv_bench.cpp)
+        target_link_libraries(mpi_send_recv_bench PRIVATE MPI::MPI_CXX)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -389,6 +395,14 @@ if(ZEROKV_BUILD_TESTS)
     target_compile_definitions(test_alps_kv_bench PRIVATE ALPS_KV_BENCH_BUILD_TESTS)
     target_link_libraries(test_alps_kv_bench PRIVATE alps_kv_wrap GTest::gtest GTest::gtest_main)
     add_test(NAME IntegrationAlpsKvBench COMMAND test_alps_kv_bench)
+
+    if(MPI_CXX_FOUND)
+        add_executable(test_mpi_send_recv_bench tests/integration/test_mpi_send_recv_bench.cpp)
+        target_sources(test_mpi_send_recv_bench PRIVATE examples/mpi_send_recv_bench.cpp)
+        target_compile_definitions(test_mpi_send_recv_bench PRIVATE MPI_SEND_RECV_BENCH_BUILD_TESTS)
+        target_link_libraries(test_mpi_send_recv_bench PRIVATE MPI::MPI_CXX GTest::gtest GTest::gtest_main)
+        add_test(NAME IntegrationMpiSendRecvBench COMMAND test_mpi_send_recv_bench)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -452,6 +466,9 @@ if(ZEROKV_BUILD_EXAMPLES)
             alps_kv_bench
         RUNTIME DESTINATION bin
     )
+    if(MPI_CXX_FOUND)
+        install(TARGETS mpi_send_recv_bench RUNTIME DESTINATION bin)
+    endif()
 endif()
 install(FILES "${CMAKE_SOURCE_DIR}/README.md"
     DESTINATION .

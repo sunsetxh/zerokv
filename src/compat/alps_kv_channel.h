@@ -81,6 +81,7 @@ public:
                         const std::vector<int>& indices,
                         const std::vector<int>& srcs,
                         const std::vector<int>& dsts);
+    bool WaitForReceiveSlots(size_t expected, int timeout_ms);
 
     [[nodiscard]] std::string local_address() const;
     [[nodiscard]] WriteTimingStats write_timing_stats() const;

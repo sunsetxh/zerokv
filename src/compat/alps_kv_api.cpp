@@ -98,6 +98,13 @@ void ResetReceivePathStats() {
     g_channel->reset_receive_path_stats();
 }
 
+bool WaitForReceiveSlots(size_t expected, int timeout_ms) {
+    if (!g_channel) {
+        return false;
+    }
+    return g_channel->WaitForReceiveSlots(expected, timeout_ms);
+}
+
 int WriteBytes(const void* data, size_t size, int tag, int index, int src, int dst) {
     if (!g_channel) {
         std::cerr << "YR::WriteBytes: channel not initialized, call YR::SetClient first." << std::endl;

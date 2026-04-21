@@ -232,3 +232,36 @@ TEST(AlpsKvWrapTest, ReusesRemoteKeyUnpackForSameReceiveBufferAcrossWrites) {
     const auto stats = client->debug_stats();
     EXPECT_EQ(stats.remote_rkey_unpack_ops, 1u);
 }
+
+TEST(AlpsKvWrapTest, WaitForReceiveSlotsReportsPrepostedBatchReceives) {
+    std::unique_ptr<AlpsKvChannel> server;
+    std::unique_ptr<AlpsKvChannel> client;
+    ASSERT_TRUE(MakeConnectedServerClient(&server, &client));
+    ASSERT_NE(server, nullptr);
+    ASSERT_NE(client, nullptr);
+
+    const std::string payload_a = "prepost-a";
+    const std::string payload_b = "prepost-b";
+    std::vector<char> recv_a(payload_a.size(), '\0');
+    std::vector<char> recv_b(payload_b.size(), '\0');
+
+    std::vector<void*> data{recv_a.data(), recv_b.data()};
+    std::vector<size_t> sizes{recv_a.size(), recv_b.size()};
+    std::vector<int> tags{21, 22};
+    std::vector<int> indices{0, 0};
+    std::vector<int> srcs{1, 1};
+    std::vector<int> dsts{2, 2};
+
+    std::thread reader([&]() {
+        server->ReadBytesBatch(data, sizes, tags, indices, srcs, dsts);
+    });
+
+    EXPECT_TRUE(server->WaitForReceiveSlots(2, 1000));
+
+    ASSERT_TRUE(client->WriteBytes(payload_a.data(), payload_a.size(), 21, 0, 1, 2));
+    ASSERT_TRUE(client->WriteBytes(payload_b.data(), payload_b.size(), 22, 0, 1, 2));
+    reader.join();
+
+    EXPECT_EQ(std::memcmp(recv_a.data(), payload_a.data(), payload_a.size()), 0);
+    EXPECT_EQ(std::memcmp(recv_b.data(), payload_b.data(), payload_b.size()), 0);
+}
