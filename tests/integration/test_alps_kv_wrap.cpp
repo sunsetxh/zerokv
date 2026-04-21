@@ -3,6 +3,7 @@
 #include "compat/alps_kv_channel.h"
 
 #include <cstring>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <thread>
@@ -29,6 +30,30 @@ bool MakeConnectedServerClient(std::unique_ptr<AlpsKvChannel>* server_out,
     *client_out = std::move(client);
     return true;
 }
+
+class ScopedEnvVar {
+public:
+    ScopedEnvVar(const char* key, const char* value) : key_(key) {
+        if (const char* current = std::getenv(key_)) {
+            had_old_ = true;
+            old_value_ = current;
+        }
+        ::setenv(key_, value, 1);
+    }
+
+    ~ScopedEnvVar() {
+        if (had_old_) {
+            ::setenv(key_, old_value_.c_str(), 1);
+        } else {
+            ::unsetenv(key_);
+        }
+    }
+
+private:
+    const char* key_;
+    bool had_old_ = false;
+    std::string old_value_;
+};
 
 }  // namespace
 
@@ -205,4 +230,28 @@ TEST(AlpsKvWrapTest, ReusesRemoteKeyUnpackForSameReceiveBufferAcrossWrites) {
 
     const auto stats = client->debug_stats();
     EXPECT_EQ(stats.remote_rkey_unpack_ops, 1u);
+}
+
+TEST(AlpsKvWrapTest, AvoidsStagingWhenReaderArrivesShortlyAfterWriter) {
+    ScopedEnvVar staging_wait("ZEROKV_ALPS_STAGING_WAIT_MS", "250");
+    std::unique_ptr<AlpsKvChannel> server;
+    std::unique_ptr<AlpsKvChannel> client;
+    ASSERT_TRUE(MakeConnectedServerClient(&server, &client));
+    ASSERT_NE(server, nullptr);
+    ASSERT_NE(client, nullptr);
+
+    const std::string payload(32u * 1024u * 1024u, 'z');
+    std::vector<char> recv_buffer(payload.size(), '\0');
+
+    auto writer = std::async(std::launch::async, [&]() {
+        return client->WriteBytes(payload.data(), payload.size(), 14, 0, 1, 2);
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    server->ReadBytes(recv_buffer.data(), recv_buffer.size(), 14, 0, 1, 2);
+
+    ASSERT_TRUE(writer.get());
+    EXPECT_EQ(std::memcmp(recv_buffer.data(), payload.data(), payload.size()), 0);
+    const auto stats = server->debug_stats();
+    EXPECT_EQ(stats.staged_message_alloc_ops, 0u);
 }
