@@ -333,6 +333,7 @@ build_targets=(
     zerokv
     alps_kv_wrap
     ping_pong
+    mpi_send_recv_bench
     send_recv
     rdma_put_get
     kv_demo
@@ -341,9 +342,6 @@ build_targets=(
     kv_bench
     alps_kv_bench
 )
-if cmake --build build --target help 2>/dev/null | grep -q 'mpi_send_recv_bench'; then
-    build_targets+=(mpi_send_recv_bench)
-fi
 cmake --build build --target "${build_targets[@]}" -j"$(nproc)"
 cmake --install build --prefix "${PKG_DIR}"
 
