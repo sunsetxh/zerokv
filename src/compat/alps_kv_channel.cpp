@@ -333,16 +333,40 @@ void AlpsKvChannel::ReapBootstrapSends() {
 
 std::shared_ptr<AlpsKvChannel::ReceiveSlot> AlpsKvChannel::RegisterReceiveSlot(
     void* data, size_t size, zerokv::Tag message_tag) {
-    auto region = zerokv::transport::MemoryRegion::register_mem(
-        context_, data, size, zerokv::MemoryType::kHost);
-    if (!region) {
-        std::cerr << "AlpsKvChannel: failed to register receive buffer." << std::endl;
-        return nullptr;
+    std::shared_ptr<RegisteredReceiveBuffer> cached;
+    const BufferKey key{data, size};
+    {
+        std::lock_guard<std::mutex> lock(receive_slots_mutex_);
+        auto cached_it = receive_cache_.find(key);
+        if (cached_it != receive_cache_.end()) {
+            cached = cached_it->second;
+        }
+    }
+    if (!cached) {
+        auto region = zerokv::transport::MemoryRegion::register_mem(
+            context_, data, size, zerokv::MemoryType::kHost);
+        if (!region) {
+            std::cerr << "AlpsKvChannel: failed to register receive buffer." << std::endl;
+            return nullptr;
+        }
+        auto registration = std::make_shared<RegisteredReceiveBuffer>();
+        registration->region = std::move(region);
+        registration->remote_key = registration->region->remote_key();
+        {
+            std::lock_guard<std::mutex> lock(receive_slots_mutex_);
+            auto [it, inserted] = receive_cache_.emplace(key, registration);
+            cached = it->second;
+#ifdef ZEROKV_ALPS_TEST_HOOKS
+            if (inserted) {
+                receive_slot_register_ops_.fetch_add(1, std::memory_order_relaxed);
+            }
+#endif
+        }
     }
 
     auto slot = std::make_shared<ReceiveSlot>();
-    slot->region = std::move(region);
-    slot->remote_key = slot->region->remote_key();
+    slot->region = cached->region;
+    slot->remote_key = cached->remote_key;
     slot->size = size;
     slot->reservation_id = next_reservation_id_.fetch_add(1);
 
@@ -805,6 +829,7 @@ void AlpsKvChannel::Shutdown() {
             slots.push_back(slot);
         }
         receive_slots_.clear();
+        receive_cache_.clear();
         staged_messages_.clear();
     }
     for (const auto& slot : slots) {
@@ -961,6 +986,13 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
 
     zerokv::transport::RemoteKey remote_key;
     remote_key.data = grant->rkey;
+#ifdef ZEROKV_ALPS_TEST_HOOKS
+    const std::string rkey_cache_key(
+        reinterpret_cast<const char*>(grant->rkey.data()), grant->rkey.size());
+    if (state->remote_rkey_cache.insert(rkey_cache_key).second) {
+        remote_rkey_unpack_ops_.fetch_add(1, std::memory_order_relaxed);
+    }
+#endif
     const auto put_begin = SteadyClock::now();
     auto put = state->endpoint->put(region, 0, grant->remote_addr, remote_key, size);
     SpinUntilReady(put);
@@ -1129,6 +1161,8 @@ AlpsKvChannel::DebugStats AlpsKvChannel::debug_stats() const {
     return DebugStats{
         .payload_tag_send_ops = payload_tag_send_ops_.load(),
         .rma_put_ops = rma_put_ops_.load(),
+        .receive_slot_register_ops = receive_slot_register_ops_.load(),
+        .remote_rkey_unpack_ops = remote_rkey_unpack_ops_.load(),
     };
 }
 #endif

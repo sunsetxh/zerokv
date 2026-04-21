@@ -9,10 +9,23 @@
 
 #include <ucp/api/ucp.h>
 #include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
 
 namespace zerokv::transport {
 
 namespace {
+
+struct UnpackedRemoteKey {
+    ucp_rkey_h handle = nullptr;
+
+    ~UnpackedRemoteKey() {
+        if (handle != nullptr) {
+            ucp_rkey_destroy(handle);
+        }
+    }
+};
 
 void log_endpoint_error(const std::string& message) {
     ::zerokv::detail::write_log_line(::zerokv::detail::LogLevel::kError,
@@ -22,25 +35,13 @@ void log_endpoint_error(const std::string& message) {
 
 struct RmaRequestState {
     MemoryRegion::Ptr region;
-    ucp_rkey_h rkey = nullptr;
-
-    ~RmaRequestState() {
-        if (rkey != nullptr) {
-            ucp_rkey_destroy(rkey);
-        }
-    }
+    std::shared_ptr<UnpackedRemoteKey> rkey;
 };
 
 struct AtomicRequestState {
     std::shared_ptr<size_t> result;
     uint64_t reply_value = 0;
-    ucp_rkey_h rkey = nullptr;
-
-    ~AtomicRequestState() {
-        if (rkey != nullptr) {
-            ucp_rkey_destroy(rkey);
-        }
-    }
+    std::shared_ptr<UnpackedRemoteKey> rkey;
 };
 
 void atomic_fetch_callback(void* /*request*/, ucs_status_t status, void* user_data) {
@@ -92,6 +93,8 @@ struct Endpoint::Impl {
     Worker::Ptr worker_;
     ucp_ep_h handle_ = nullptr;
     std::function<void(Status)> error_callback_;
+    std::mutex rkey_cache_mutex_;
+    std::unordered_map<std::string, std::weak_ptr<UnpackedRemoteKey>> rkey_cache_;
 
     ~Impl() {
         if (handle_) {
@@ -99,6 +102,41 @@ struct Endpoint::Impl {
         }
     }
 };
+
+std::shared_ptr<UnpackedRemoteKey> unpack_remote_key_cached(
+    Endpoint::Impl* impl, const RemoteKey& rkey, const char* op_name) {
+    const std::string cache_key(reinterpret_cast<const char*>(rkey.bytes()), rkey.size());
+    {
+        std::lock_guard<std::mutex> lock(impl->rkey_cache_mutex_);
+        auto it = impl->rkey_cache_.find(cache_key);
+        if (it != impl->rkey_cache_.end()) {
+            if (auto cached = it->second.lock()) {
+                return cached;
+            }
+            impl->rkey_cache_.erase(it);
+        }
+    }
+
+    ucp_rkey_h ucx_rkey = nullptr;
+    ucs_status_t status = ucp_ep_rkey_unpack(impl->handle_, rkey.bytes(), &ucx_rkey);
+    if (status != UCS_OK) {
+        log_endpoint_error(std::string("ucp_ep_rkey_unpack(") + op_name + ") failed: " +
+                           ucs_status_string(status));
+        return nullptr;
+    }
+
+    auto unpacked = std::make_shared<UnpackedRemoteKey>();
+    unpacked->handle = ucx_rkey;
+    std::lock_guard<std::mutex> lock(impl->rkey_cache_mutex_);
+    auto [it, inserted] = impl->rkey_cache_.emplace(cache_key, unpacked);
+    if (!inserted) {
+        if (auto cached = it->second.lock()) {
+            return cached;
+        }
+        it->second = unpacked;
+    }
+    return unpacked;
+}
 
 // ============================================================================
 // Endpoint
@@ -263,19 +301,16 @@ Future<void> Endpoint::put(const MemoryRegion::Ptr& local, size_t local_offset,
             Status(ErrorCode::kInvalidArgument, "Empty remote key"));
     }
 
-    // Unpack remote key
-    ucp_rkey_h ucx_rkey = nullptr;
-    ucs_status_t status = ucp_ep_rkey_unpack(impl_->handle_, rkey.bytes(), &ucx_rkey);
-    if (status != UCS_OK) {
-        log_endpoint_error(std::string("ucp_ep_rkey_unpack(put) failed: ") + ucs_status_string(status));
+    auto unpacked_rkey = unpack_remote_key_cached(impl_.get(), rkey, "put");
+    if (!unpacked_rkey) {
         return Future<void>::make_error(
             Status(ErrorCode::kInvalidArgument,
-                   std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
+                   "Failed to unpack remote key"));
     }
 
     auto state = std::make_shared<RmaRequestState>();
     state->region = local;
-    state->rkey = ucx_rkey;
+    state->rkey = unpacked_rkey;
 
     ucp_request_param_t params = {};
     params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
@@ -285,7 +320,7 @@ Future<void> Endpoint::put(const MemoryRegion::Ptr& local, size_t local_offset,
         static_cast<char*>(local->address()) + local_offset,
         length,
         remote_addr,
-        ucx_rkey,
+        unpacked_rkey->handle,
         &params);
 
     if (req == nullptr) {
@@ -322,19 +357,16 @@ Future<void> Endpoint::get(const MemoryRegion::Ptr& local, size_t local_offset,
             Status(ErrorCode::kInvalidArgument, "Empty remote key"));
     }
 
-    // Unpack remote key
-    ucp_rkey_h ucx_rkey = nullptr;
-    ucs_status_t status = ucp_ep_rkey_unpack(impl_->handle_, rkey.bytes(), &ucx_rkey);
-    if (status != UCS_OK) {
-        log_endpoint_error(std::string("ucp_ep_rkey_unpack(get) failed: ") + ucs_status_string(status));
+    auto unpacked_rkey = unpack_remote_key_cached(impl_.get(), rkey, "get");
+    if (!unpacked_rkey) {
         return Future<void>::make_error(
             Status(ErrorCode::kInvalidArgument,
-                   std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
+                   "Failed to unpack remote key"));
     }
 
     auto state = std::make_shared<RmaRequestState>();
     state->region = local;
-    state->rkey = ucx_rkey;
+    state->rkey = unpacked_rkey;
 
     ucp_request_param_t params = {};
     params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL;
@@ -344,7 +376,7 @@ Future<void> Endpoint::get(const MemoryRegion::Ptr& local, size_t local_offset,
         static_cast<char*>(local->address()) + local_offset,
         length,
         remote_addr,
-        ucx_rkey,
+        unpacked_rkey->handle,
         &params);
 
     if (req == nullptr) {
@@ -400,19 +432,16 @@ Future<uint64_t> Endpoint::atomic_fadd(uint64_t remote_addr,
             Status(ErrorCode::kInvalidArgument, "Empty remote key"));
     }
 
-    // Unpack remote key
-    ucp_rkey_h ucx_rkey = nullptr;
-    ucs_status_t status = ucp_ep_rkey_unpack(impl_->handle_, rkey.bytes(), &ucx_rkey);
-    if (status != UCS_OK) {
-        log_endpoint_error(std::string("ucp_ep_rkey_unpack(fadd) failed: ") + ucs_status_string(status));
+    auto unpacked_rkey = unpack_remote_key_cached(impl_.get(), rkey, "fadd");
+    if (!unpacked_rkey) {
         return Future<uint64_t>::make_error(
             Status(ErrorCode::kInvalidArgument,
-                   std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
+                   "Failed to unpack remote key"));
     }
 
     auto state = std::make_shared<AtomicRequestState>();
     state->result = std::make_shared<size_t>(0);
-    state->rkey = ucx_rkey;
+    state->rkey = unpacked_rkey;
 
     uint64_t add_value = value;
 
@@ -431,7 +460,7 @@ Future<uint64_t> Endpoint::atomic_fadd(uint64_t remote_addr,
         &add_value,
         1,
         remote_addr,
-        ucx_rkey,
+        unpacked_rkey->handle,
         &params);
 
     if (req == nullptr) {
@@ -469,19 +498,16 @@ Future<uint64_t> Endpoint::atomic_cswap(uint64_t remote_addr,
             Status(ErrorCode::kInvalidArgument, "Empty remote key"));
     }
 
-    // Unpack remote key
-    ucp_rkey_h ucx_rkey = nullptr;
-    ucs_status_t status = ucp_ep_rkey_unpack(impl_->handle_, rkey.bytes(), &ucx_rkey);
-    if (status != UCS_OK) {
-        log_endpoint_error(std::string("ucp_ep_rkey_unpack(cswap) failed: ") + ucs_status_string(status));
+    auto unpacked_rkey = unpack_remote_key_cached(impl_.get(), rkey, "cswap");
+    if (!unpacked_rkey) {
         return Future<uint64_t>::make_error(
             Status(ErrorCode::kInvalidArgument,
-                   std::string("Failed to unpack remote key: ") + ucs_status_string(status)));
+                   "Failed to unpack remote key"));
     }
 
     auto state = std::make_shared<AtomicRequestState>();
     state->result = std::make_shared<size_t>(0);
-    state->rkey = ucx_rkey;
+    state->rkey = unpacked_rkey;
 
     // For CSWAP, buffer layout: [expected, desired]
     uint64_t cswap_buf[2] = {expected, desired};
@@ -501,7 +527,7 @@ Future<uint64_t> Endpoint::atomic_cswap(uint64_t remote_addr,
         cswap_buf,
         2,
         remote_addr,
-        ucx_rkey,
+        unpacked_rkey->handle,
         &params);
 
     if (req == nullptr) {

@@ -152,3 +152,57 @@ TEST(AlpsKvWrapTest, WriteBytesCollectsTimingBreakdown) {
     EXPECT_GT(timing.control_request_grant_us, 0u);
     EXPECT_GT(timing.write_done_ack_us, 0u);
 }
+
+TEST(AlpsKvWrapTest, ReusesReceiveRegistrationForSameBufferAcrossReads) {
+    std::unique_ptr<AlpsKvChannel> server;
+    std::unique_ptr<AlpsKvChannel> client;
+    ASSERT_TRUE(MakeConnectedServerClient(&server, &client));
+    ASSERT_NE(server, nullptr);
+    ASSERT_NE(client, nullptr);
+
+    const std::string payload_a = "reuse-recv-a";
+    const std::string payload_b = "reuse-recv-b";
+    ASSERT_EQ(payload_a.size(), payload_b.size());
+    std::vector<char> recv_buffer(payload_a.size(), '\0');
+
+    std::thread reader_a([&]() {
+        server->ReadBytes(recv_buffer.data(), recv_buffer.size(), 10, 0, 1, 2);
+    });
+    ASSERT_TRUE(client->WriteBytes(payload_a.data(), payload_a.size(), 10, 0, 1, 2));
+    reader_a.join();
+
+    std::thread reader_b([&]() {
+        server->ReadBytes(recv_buffer.data(), recv_buffer.size(), 11, 0, 1, 2);
+    });
+    ASSERT_TRUE(client->WriteBytes(payload_b.data(), payload_b.size(), 11, 0, 1, 2));
+    reader_b.join();
+
+    const auto stats = server->debug_stats();
+    EXPECT_EQ(stats.receive_slot_register_ops, 1u);
+}
+
+TEST(AlpsKvWrapTest, ReusesRemoteKeyUnpackForSameReceiveBufferAcrossWrites) {
+    std::unique_ptr<AlpsKvChannel> server;
+    std::unique_ptr<AlpsKvChannel> client;
+    ASSERT_TRUE(MakeConnectedServerClient(&server, &client));
+    ASSERT_NE(server, nullptr);
+    ASSERT_NE(client, nullptr);
+
+    const std::string payload = "reuse-remote-rkey";
+    std::vector<char> recv_buffer(payload.size(), '\0');
+
+    std::thread reader_a([&]() {
+        server->ReadBytes(recv_buffer.data(), recv_buffer.size(), 12, 0, 1, 2);
+    });
+    ASSERT_TRUE(client->WriteBytes(payload.data(), payload.size(), 12, 0, 1, 2));
+    reader_a.join();
+
+    std::thread reader_b([&]() {
+        server->ReadBytes(recv_buffer.data(), recv_buffer.size(), 13, 0, 1, 2);
+    });
+    ASSERT_TRUE(client->WriteBytes(payload.data(), payload.size(), 13, 0, 1, 2));
+    reader_b.join();
+
+    const auto stats = client->debug_stats();
+    EXPECT_EQ(stats.remote_rkey_unpack_ops, 1u);
+}

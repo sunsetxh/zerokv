@@ -50,6 +50,8 @@ public:
     struct DebugStats {
         size_t payload_tag_send_ops = 0;
         size_t rma_put_ops = 0;
+        size_t receive_slot_register_ops = 0;
+        size_t remote_rkey_unpack_ops = 0;
     };
 #endif
 
@@ -97,6 +99,13 @@ private:
     using SendCache = std::unordered_map<BufferKey,
                                          zerokv::transport::MemoryRegion::Ptr,
                                          BufferKeyHash>;
+    struct RegisteredReceiveBuffer {
+        zerokv::transport::MemoryRegion::Ptr region;
+        zerokv::transport::RemoteKey remote_key;
+    };
+    using ReceiveCache = std::unordered_map<BufferKey,
+                                            std::shared_ptr<RegisteredReceiveBuffer>,
+                                            BufferKeyHash>;
 
     static zerokv::Tag MakeMessageTag(int tag, int index, int src, int dst);
     zerokv::transport::MemoryRegion::Ptr GetOrRegisterSendRegion(
@@ -152,6 +161,7 @@ private:
     mutable std::mutex receive_slots_mutex_;
     std::condition_variable receive_slots_cv_;
     std::unordered_map<zerokv::Tag, std::shared_ptr<ReceiveSlot>> receive_slots_;
+    ReceiveCache receive_cache_;
     struct BufferedMessage {
         zerokv::transport::MemoryRegion::Ptr region;
         zerokv::transport::RemoteKey remote_key;
@@ -183,6 +193,7 @@ private:
         zerokv::transport::Worker::Ptr worker;
         zerokv::transport::Endpoint::Ptr endpoint;
         SendCache send_cache;
+        std::unordered_set<std::string> remote_rkey_cache;
         std::string control_address;
         int control_fd = -1;
         uint64_t next_request_id = 1;
@@ -205,6 +216,8 @@ private:
 #ifdef ZEROKV_ALPS_TEST_HOOKS
     std::atomic<size_t> payload_tag_send_ops_{0};
     std::atomic<size_t> rma_put_ops_{0};
+    std::atomic<size_t> receive_slot_register_ops_{0};
+    std::atomic<size_t> remote_rkey_unpack_ops_{0};
 #endif
 };
 
