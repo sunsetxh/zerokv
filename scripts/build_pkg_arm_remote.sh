@@ -329,18 +329,22 @@ cmake -S . -B build \
     -DZEROKV_BUILD_PYTHON=OFF \
     -DCMAKE_SHARED_LINKER_FLAGS='-static-libstdc++ -static-libgcc' \
     -DCMAKE_EXE_LINKER_FLAGS='-static-libstdc++ -static-libgcc'
-cmake --build build --target \
-    zerokv \
-    alps_kv_wrap \
-    ping_pong \
-    send_recv \
-    rdma_put_get \
-    kv_demo \
-    kv_wait_fetch \
-    message_kv_demo \
-    kv_bench \
-    alps_kv_bench \
-    -j"$(nproc)"
+build_targets=(
+    zerokv
+    alps_kv_wrap
+    ping_pong
+    send_recv
+    rdma_put_get
+    kv_demo
+    kv_wait_fetch
+    message_kv_demo
+    kv_bench
+    alps_kv_bench
+)
+if cmake --build build --target help 2>/dev/null | grep -q 'mpi_send_recv_bench'; then
+    build_targets+=(mpi_send_recv_bench)
+fi
+cmake --build build --target "${build_targets[@]}" -j"$(nproc)"
 cmake --install build --prefix "${PKG_DIR}"
 
 stage_ucx_runtime
