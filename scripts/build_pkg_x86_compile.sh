@@ -156,6 +156,71 @@ copy_ucx_runtime() {
     fi
 }
 
+copy_shared_with_soname_links() {
+    local src="$1"
+    local resolved
+    local dir
+    local base
+    local stem
+    local candidate
+
+    resolved="$(readlink -f "${src}")"
+    [[ -f "${resolved}" ]] || return
+
+    mkdir -p "${PKG_ROOT}/lib"
+    cp -a "${resolved}" "${PKG_ROOT}/lib/"
+
+    dir="$(dirname "${resolved}")"
+    base="$(basename "${resolved}")"
+    stem="${base%%.so*}"
+
+    shopt -s nullglob
+    for candidate in "${dir}/${stem}".so*; do
+        [[ -e "${candidate}" ]] || continue
+        cp -a "${candidate}" "${PKG_ROOT}/lib/"
+    done
+    shopt -u nullglob
+}
+
+collect_abs_deps() {
+    local target="$1"
+    ldd "${target}" 2>/dev/null | awk '/=> \// {print $3} /^[[:space:]]*\/[^[:space:]]+/ {print $1}' | sort -u
+}
+
+stage_mpi_runtime() {
+    [[ -x "${PKG_ROOT}/bin/mpi_send_recv_bench" ]] || return
+
+    local current
+    local dep
+    local base
+    local queue=("${PKG_ROOT}/bin/mpi_send_recv_bench")
+    declare -A seen=()
+
+    while [[ ${#queue[@]} -gt 0 ]]; do
+        current="${queue[0]}"
+        queue=("${queue[@]:1}")
+        [[ -n "${seen[${current}]+x}" ]] && continue
+        seen["${current}"]=1
+
+        while IFS= read -r dep; do
+            [[ -n "${dep}" && -e "${dep}" ]] || continue
+            base="$(basename "${dep}")"
+            case "${base}" in
+                libc.so.*|ld-linux-*.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*|libresolv.so.*|libutil.so.*|libgcc_s.so.*)
+                    continue
+                    ;;
+            esac
+            if [[ "${dep}" == "${UCX_PREFIX}/"* ]]; then
+                continue
+            fi
+            copy_shared_with_soname_links "${dep}"
+            if [[ -z "${seen[${dep}]+x}" ]]; then
+                queue+=("${dep}")
+            fi
+        done < <(collect_abs_deps "${current}")
+    done
+}
+
 rm -rf "${BUILD_ROOT}" "${PKG_ROOT}" "${OUTPUT_TARBALL}" /tmp/ucx-1.20.0
 mkdir -p "${BUILD_ROOT}"
 
@@ -211,6 +276,7 @@ cmake --build build --target "${build_targets[@]}" -j"$(nproc)" \
 cmake --install build --prefix "${PKG_ROOT}" >/tmp/alps-x86-install.log 2>&1
 
 copy_ucx_runtime
+stage_mpi_runtime
 printf '%s\n' "${COMMIT_ID}" > "${PKG_ROOT}/COMMIT_ID"
 printf '%s\n' "${ARCH}" > "${PKG_ROOT}/ARCH"
 cp "${UCX_PREFIX}/bin/ucx_info" "${PKG_ROOT}/bin/ucx_info"
@@ -293,6 +359,10 @@ for file in \
     echo "-- ${file}"
     check_no_missing_runtime_deps "${file}"
 done
+if [[ -x "${PKG_ROOT}/bin/mpi_send_recv_bench" ]]; then
+    echo "-- ${PKG_ROOT}/bin/mpi_send_recv_bench"
+    check_no_missing_runtime_deps "${PKG_ROOT}/bin/mpi_send_recv_bench"
+fi
 check_no_dynamic_ucx "${PKG_ROOT}/lib/libzerokv.so"
 
 echo "== UCX runtime verification =="

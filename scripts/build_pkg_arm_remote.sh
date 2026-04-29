@@ -182,6 +182,37 @@ max_glibcxx() {
     objdump -T "${file}" 2>/dev/null | sed -n 's/.*\(GLIBCXX_[0-9.]*\).*/\1/p' | sort -Vu | tail -n 1
 }
 
+copy_shared_with_soname_links() {
+    local src="$1"
+    local resolved
+    local dir
+    local base
+    local stem
+    local candidate
+
+    resolved="$(readlink -f "${src}")"
+    [[ -f "${resolved}" ]] || return
+
+    mkdir -p "${PKG_DIR}/lib"
+    cp -a "${resolved}" "${PKG_DIR}/lib/"
+
+    dir="$(dirname "${resolved}")"
+    base="$(basename "${resolved}")"
+    stem="${base%%.so*}"
+
+    shopt -s nullglob
+    for candidate in "${dir}/${stem}".so*; do
+        [[ -e "${candidate}" ]] || continue
+        cp -a "${candidate}" "${PKG_DIR}/lib/"
+    done
+    shopt -u nullglob
+}
+
+collect_abs_deps() {
+    local target="$1"
+    ldd "${target}" 2>/dev/null | awk '/=> \// {print $3} /^[[:space:]]*\/[^[:space:]]+/ {print $1}' | sort -u
+}
+
 stage_ucx_runtime() {
     mkdir -p "${PKG_DIR}/lib" "${PKG_DIR}/lib/ucx"
     shopt -s nullglob
@@ -209,6 +240,40 @@ stage_ucx_runtime() {
     fi
 }
 
+stage_mpi_runtime() {
+    [[ -x "${PKG_DIR}/bin/mpi_send_recv_bench" ]] || return
+
+    local current
+    local dep
+    local base
+    local queue=("${PKG_DIR}/bin/mpi_send_recv_bench")
+    declare -A seen=()
+
+    while [[ ${#queue[@]} -gt 0 ]]; do
+        current="${queue[0]}"
+        queue=("${queue[@]:1}")
+        [[ -n "${seen[${current}]+x}" ]] && continue
+        seen["${current}"]=1
+
+        while IFS= read -r dep; do
+            [[ -n "${dep}" && -e "${dep}" ]] || continue
+            base="$(basename "${dep}")"
+            case "${base}" in
+                libc.so.*|ld-linux-*.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*|libresolv.so.*|libutil.so.*|libgcc_s.so.*)
+                    continue
+                    ;;
+            esac
+            if [[ "${dep}" == "${UCX_PREFIX}/"* ]]; then
+                continue
+            fi
+            copy_shared_with_soname_links "${dep}"
+            if [[ -z "${seen[${dep}]+x}" ]]; then
+                queue+=("${dep}")
+            fi
+        done < <(collect_abs_deps "${current}")
+    done
+}
+
 validate_pkg() {
     local rel
     for rel in \
@@ -226,6 +291,7 @@ validate_pkg() {
         bin/kv_wait_fetch \
         bin/message_kv_demo \
         bin/kv_bench \
+        bin/mpi_send_recv_bench \
         bin/ucx_info \
         lib/libalps_kv_wrap.so \
         lib/libzerokv.so
@@ -276,7 +342,8 @@ validate_pkg() {
         "${PKG_DIR}/bin/kv_demo" \
         "${PKG_DIR}/bin/kv_wait_fetch" \
         "${PKG_DIR}/bin/message_kv_demo" \
-        "${PKG_DIR}/bin/kv_bench"
+        "${PKG_DIR}/bin/kv_bench" \
+        "${PKG_DIR}/bin/mpi_send_recv_bench"
     do
         local glibcxx
         glibcxx="$(max_glibcxx "${file}")"
@@ -289,6 +356,15 @@ validate_pkg() {
             fi
         fi
     done
+
+    local mpi_ldd
+    mpi_ldd="$(LD_LIBRARY_PATH="${PKG_DIR}/lib:${LD_LIBRARY_PATH:-}" ldd "${PKG_DIR}/bin/mpi_send_recv_bench" 2>&1)" || true
+    if grep -q 'not found' <<<"${mpi_ldd}"; then
+        printf '%s\n' "${mpi_ldd}" >&2
+        echo "Missing MPI runtime dependency in packaged mpi_send_recv_bench" >&2
+        exit 1
+    fi
+    record "mpi_runtime=ok"
 
 }
 
@@ -346,6 +422,7 @@ cmake --build build --target "${build_targets[@]}" -j"$(nproc)"
 cmake --install build --prefix "${PKG_DIR}"
 
 stage_ucx_runtime
+stage_mpi_runtime
 printf '%s\n' "${COMMIT_ID}" > "${PKG_DIR}/COMMIT_ID"
 printf '%s\n' "${ARCH}" > "${PKG_DIR}/ARCH"
 cp "${UCX_PREFIX}/bin/ucx_info" "${PKG_DIR}/bin/ucx_info"
