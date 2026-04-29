@@ -372,7 +372,7 @@ rm -rf "${WORK_ROOT}" "${PKG_DIR}" "${REMOTE_TARBALL}"
 mkdir -p "${WORK_ROOT}"
 printf '' > "${REMOTE_PACKAGE_TXT}"
 
-if [[ ! -x "${UCX_PREFIX}/bin/ucp_info" ]] || ! "${UCX_PREFIX}/bin/ucp_info" -v 2>/dev/null | grep -q '1.20.0'; then
+if [[ ! -x "${UCX_PREFIX}/bin/ucx_info" ]] || ! "${UCX_PREFIX}/bin/ucx_info" -v 2>/dev/null | grep -q '1.20.0'; then
     cd /tmp
     rm -rf /tmp/ucx-1.20.0
     tar xzf "${REMOTE_UCX_TARBALL}"

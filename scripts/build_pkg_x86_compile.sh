@@ -224,9 +224,9 @@ stage_mpi_runtime() {
 rm -rf "${BUILD_ROOT}" "${PKG_ROOT}" "${OUTPUT_TARBALL}" /tmp/ucx-1.20.0
 mkdir -p "${BUILD_ROOT}"
 
-if [[ ! -x "${UCX_PREFIX}/bin/ucp_info" ]] || \
+if [[ ! -x "${UCX_PREFIX}/bin/ucx_info" ]] || \
    ! LD_LIBRARY_PATH="${UCX_PREFIX}/lib:${UCX_PREFIX}/lib64:${LD_LIBRARY_PATH:-}" \
-        "${UCX_PREFIX}/bin/ucp_info" -v 2>/dev/null | grep -q "${UCX_VERSION}"; then
+        "${UCX_PREFIX}/bin/ucx_info" -v 2>/dev/null | grep -q "${UCX_VERSION}"; then
     cd /tmp
     tar xzf "${CONTAINER_UCX}"
     cd /tmp/ucx-1.20.0
