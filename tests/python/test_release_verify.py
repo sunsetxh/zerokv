@@ -489,6 +489,19 @@ class ReleaseVerifyLibTests(unittest.TestCase):
         self.assertIn("stop_bg_best_effort()", script_text)
         self.assertIn('sleep 1', script_text)
 
+    def test_x86_package_script_stages_packaged_mpirun(self):
+        script_text = (ROOT / "scripts" / "build_pkg_x86_compile.sh").read_text()
+
+        self.assertIn("openmpi-devel", script_text)
+        self.assertIn("mpi_send_recv_bench", script_text)
+        self.assertIn("build_help=", script_text)
+        self.assertNotIn("--target help 2>/dev/null | grep -q", script_text)
+        self.assertIn("mpirun mpiexec orterun orted ompi_info", script_text)
+        self.assertIn("lib/openmpi", script_text)
+        self.assertIn("lib/pmix", script_text)
+        self.assertIn("share/pmix/help-pmix-runtime.txt", script_text)
+        self.assertIn("lib/libmpi.so.40", script_text)
+
     def test_release_verify_examples_script_runs_fake_vm_matrix(self):
         script_path = ROOT / "scripts" / "release_verify_examples.sh"
         commit = "deadbee"

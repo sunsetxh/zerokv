@@ -257,6 +257,7 @@ Installed artifacts:
 - `include/yr/alps_kv_api.h`
 - `lib/libalps_kv_wrap.so`
 - `bin/alps_kv_bench`
+- `bin/mpi_send_recv_bench`, `bin/mpirun`/`bin/mpiexec` when MPI is available at package build time
 - `bin/ping_pong`, `bin/send_recv`, `bin/rdma_put_get`
 - `bin/kv_demo`, `bin/kv_wait_fetch`, `bin/message_kv_demo`, `bin/kv_bench`
 - `README.md`
@@ -353,6 +354,33 @@ For dual-rail comparison set
 `UCX_MAX_RMA_RAILS=2`, and `UCX_MAX_RNDV_RAILS=2`, or use
 `scripts/perf_experiments.py run-alps-matrix --strict-prepost` as documented in
 [docs/alps_kv_wrap/README.md](docs/alps_kv_wrap/README.md).
+
+MPI comparison can use the packaged Open MPI launcher when present. Start with a
+single-node smoke, then move to two hosts:
+
+```bash
+# single-node package smoke
+export OPAL_PREFIX=${PKG}
+export PMIX_MCA_mca_base_component_path=${PKG}/lib/pmix
+${PKG}/bin/mpirun -np 2 \
+  --mca pml ucx --mca btl ^openib \
+  -x LD_LIBRARY_PATH -x UCX_MODULE_DIR -x PMIX_MCA_mca_base_component_path -x UCX_TLS -x UCX_NET_DEVICES -x UCX_PROTO_ENABLE \
+  ${PKG}/bin/mpi_send_recv_bench --sizes 256K,1M,4M,16M,64M --iters 100 --warmup 10
+
+# two-node comparison; use SSH-reachable hostnames/IPs for --host.
+export SERVER_SSH_HOST=<server_ssh_ip_or_name>
+export CLIENT_SSH_HOST=<client_ssh_ip_or_name>
+${PKG}/bin/mpirun -np 2 --host ${SERVER_SSH_HOST}:1,${CLIENT_SSH_HOST}:1 \
+  --mca plm_rsh_agent ssh --mca pml ucx --mca btl ^openib \
+  --mca oob_tcp_if_include <management_iface> \
+  -x LD_LIBRARY_PATH -x UCX_MODULE_DIR -x PMIX_MCA_mca_base_component_path -x UCX_TLS -x UCX_NET_DEVICES -x UCX_PROTO_ENABLE \
+  ${PKG}/bin/mpi_send_recv_bench --sizes 256K,1M,4M,16M,64M --iters 100 --warmup 10
+```
+
+If `mpirun` appears stuck, first distinguish SSH/OOB launch from UCX data-path
+selection by adding `--mca plm_base_verbose 10 --mca oob_base_verbose 10` for
+launch debugging, or `--mca pml_base_verbose 10 -x UCX_LOG_LEVEL=info` for UCX
+transport selection.
 
 ### KV two-node demo
 

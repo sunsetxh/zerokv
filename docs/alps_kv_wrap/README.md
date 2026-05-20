@@ -319,6 +319,71 @@ For a repeatable matrix run from a controller machine:
     --out-dir out/alps-real-rdma/$(date +%Y%m%d-%H%M%S)
 ```
 
+### MPI comparison with packaged `mpirun`
+
+The release package includes `bin/mpi_send_recv_bench` plus `bin/mpirun` /
+`bin/mpiexec` when Open MPI is available during package build.  Use it as the
+apples-to-apples comparison case for the same payload sizes, warmup, UCX env,
+and rail settings used by `alps_kv_bench`.
+
+First verify the package on one node:
+
+```bash
+export PKG=/opt/zerokv-<arch>-<commit>
+export RDMA_DEV=mlx5_0:1
+export UCX_TLS=rc,self
+export UCX_NET_DEVICES=${RDMA_DEV}
+export UCX_PROTO_ENABLE=n
+export LD_LIBRARY_PATH=${PKG}/lib:${LD_LIBRARY_PATH:-}
+export UCX_MODULE_DIR=${PKG}/lib/ucx
+export OPAL_PREFIX=${PKG}
+export PMIX_MCA_mca_base_component_path=${PKG}/lib/pmix
+
+${PKG}/bin/mpirun -np 2 \
+    --mca pml ucx --mca btl ^openib \
+    -x LD_LIBRARY_PATH -x UCX_MODULE_DIR -x PMIX_MCA_mca_base_component_path -x UCX_TLS -x UCX_NET_DEVICES -x UCX_PROTO_ENABLE \
+    ${PKG}/bin/mpi_send_recv_bench \
+    --sizes 256K,1M,4M,16M,64M --iters 100 --warmup 10
+```
+
+Then run rank 0 and rank 1 on two physical hosts.  `--host` uses the
+SSH/management address that `mpirun` can log in to; `UCX_NET_DEVICES` and
+`SERVER_RDMA_IP` still describe the RDMA data path.
+
+```bash
+export PKG=/opt/zerokv-<arch>-<commit>
+export SERVER_SSH_HOST=<server_ssh_ip_or_name>
+export CLIENT_SSH_HOST=<client_ssh_ip_or_name>
+export MGMT_IFACE=<ssh_management_iface>
+export UCX_TLS=rc,self
+export UCX_NET_DEVICES=mlx5_0:1
+export UCX_PROTO_ENABLE=n
+export LD_LIBRARY_PATH=${PKG}/lib:${LD_LIBRARY_PATH:-}
+export UCX_MODULE_DIR=${PKG}/lib/ucx
+export OPAL_PREFIX=${PKG}
+export PMIX_MCA_mca_base_component_path=${PKG}/lib/pmix
+
+${PKG}/bin/mpirun -np 2 --host ${SERVER_SSH_HOST}:1,${CLIENT_SSH_HOST}:1 \
+    --mca plm_rsh_agent ssh \
+    --mca pml ucx --mca btl ^openib \
+    --mca oob_tcp_if_include ${MGMT_IFACE} \
+    -x LD_LIBRARY_PATH -x UCX_MODULE_DIR -x PMIX_MCA_mca_base_component_path -x UCX_TLS -x UCX_NET_DEVICES \
+    -x UCX_PROTO_ENABLE -x UCX_MAX_RMA_RAILS -x UCX_MAX_RNDV_RAILS \
+    ${PKG}/bin/mpi_send_recv_bench \
+    --sizes 256K,1M,4M,16M,64M --iters 100 --warmup 10
+```
+
+Hang triage:
+
+- If nothing starts on the remote host, debug the launch/OOB path with
+  `--mca plm_base_verbose 10 --mca oob_base_verbose 10` and verify passwordless
+  SSH from the launcher node to every `--host` entry.
+- If ranks start but no `MPI_SEND_RECV_ROUND` is printed, debug UCX selection
+  with `--mca pml_base_verbose 10 -x UCX_LOG_LEVEL=info` and first reduce to a
+  single rail (`UCX_NET_DEVICES=mlx5_0:1`, no `UCX_MAX_*_RAILS`).
+- Do not use `UCX_TLS=tcp` with `UCX_NET_DEVICES=mlx5_*`; use `rc,self` for the
+  RDMA comparison.
+
 To prove lane selection when dual-rail is expected, add logging on both nodes:
 
 ```bash

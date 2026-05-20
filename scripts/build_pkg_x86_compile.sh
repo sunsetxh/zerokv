@@ -113,6 +113,7 @@ dnf install -y \
     tar \
     gzip \
     which \
+    findutils \
     file \
     perl \
     python3 \
@@ -122,11 +123,18 @@ dnf install -y \
     numactl-devel \
     libnl3-devel \
     rdma-core-devel \
+    openmpi \
+    openmpi-devel \
     >/tmp/alps-dnf-install.log 2>&1
 
 source /opt/rh/gcc-toolset-12/enable
 export CC=gcc
 export CXX=g++
+OPENMPI_PREFIX="/usr/lib64/openmpi"
+export OPENMPI_PREFIX
+export PATH="${OPENMPI_PREFIX}/bin:${PATH}"
+export LD_LIBRARY_PATH="${OPENMPI_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
+export PKG_CONFIG_PATH="${OPENMPI_PREFIX}/lib/pkgconfig:/usr/lib64/pkgconfig:${PKG_CONFIG_PATH:-}"
 
 copy_ucx_runtime() {
     mkdir -p "${PKG_ROOT}/lib" "${PKG_ROOT}/lib/ucx"
@@ -190,15 +198,53 @@ collect_abs_deps() {
 stage_mpi_runtime() {
     [[ -x "${PKG_ROOT}/bin/mpi_send_recv_bench" ]] || return 0
 
+    local openmpi_prefix="${OPENMPI_PREFIX:-/usr/lib64/openmpi}"
     local current
     local dep
     local base
+    local mpi_bin
+    local resolved
     local queue=("${PKG_ROOT}/bin/mpi_send_recv_bench")
     declare -A seen=()
+
+    mkdir -p "${PKG_ROOT}/bin" "${PKG_ROOT}/lib"
+
+    if [[ -d "${openmpi_prefix}/bin" ]]; then
+        for mpi_bin in mpirun mpiexec orterun orted ompi_info; do
+            if [[ -e "${openmpi_prefix}/bin/${mpi_bin}" ]]; then
+                cp -a "${openmpi_prefix}/bin/${mpi_bin}" "${PKG_ROOT}/bin/"
+                resolved="$(readlink -f "${openmpi_prefix}/bin/${mpi_bin}")"
+                [[ -x "${resolved}" ]] && queue+=("${resolved}")
+            fi
+        done
+    fi
+    if [[ -d "${openmpi_prefix}/lib/openmpi" ]]; then
+        mkdir -p "${PKG_ROOT}/lib/openmpi"
+        cp -a "${openmpi_prefix}/lib/openmpi/." "${PKG_ROOT}/lib/openmpi/"
+        while IFS= read -r dep; do
+            queue+=("${dep}")
+        done < <(find "${PKG_ROOT}/lib/openmpi" -type f -name '*.so' | sort)
+    fi
+    if [[ -d "${openmpi_prefix}/share/openmpi" ]]; then
+        mkdir -p "${PKG_ROOT}/share"
+        cp -a "${openmpi_prefix}/share/openmpi" "${PKG_ROOT}/share/"
+    fi
+    if [[ -d /usr/lib64/pmix ]]; then
+        mkdir -p "${PKG_ROOT}/lib/pmix"
+        cp -a /usr/lib64/pmix/. "${PKG_ROOT}/lib/pmix/"
+        while IFS= read -r dep; do
+            queue+=("${dep}")
+        done < <(find "${PKG_ROOT}/lib/pmix" -type f \( -name '*.so' -o -name '*.so.*' \) | sort)
+    fi
+    if [[ -d /usr/share/pmix ]]; then
+        mkdir -p "${PKG_ROOT}/share"
+        cp -a /usr/share/pmix "${PKG_ROOT}/share/"
+    fi
 
     while [[ ${#queue[@]} -gt 0 ]]; do
         current="${queue[0]}"
         queue=("${queue[@]:1}")
+        [[ -e "${current}" ]] || continue
         [[ -n "${seen[${current}]+x}" ]] && continue
         seen["${current}"]=1
 
@@ -206,7 +252,7 @@ stage_mpi_runtime() {
             [[ -n "${dep}" && -e "${dep}" ]] || continue
             base="$(basename "${dep}")"
             case "${base}" in
-                libc.so.*|ld-linux-*.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*|libresolv.so.*|libutil.so.*|libgcc_s.so.*)
+                libc.so.*|ld-linux-*.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*|libresolv.so.*|libutil.so.*|libgcc_s.so.*|libucp.so*|libucs.so*|libucs_signal.so*|libuct.so*|libucm.so*)
                     continue
                     ;;
             esac
@@ -268,11 +314,16 @@ build_targets=(
     kv_bench
     alps_kv_bench
 )
-if cmake --build build --target help 2>/dev/null | grep -q 'mpi_send_recv_bench'; then
+build_help="$(cmake --build build --target help 2>/dev/null || true)"
+if grep -q 'mpi_send_recv_bench' <<<"${build_help}"; then
     build_targets+=(mpi_send_recv_bench)
 fi
-cmake --build build --target "${build_targets[@]}" -j"$(nproc)" \
-    >/tmp/alps-x86-build.log 2>&1
+: > /tmp/alps-x86-build.log
+for target in "${build_targets[@]}"; do
+    echo "== building ${target} ==" >>/tmp/alps-x86-build.log
+    cmake --build build --target "${target}" -j"$(nproc)" \
+        >>/tmp/alps-x86-build.log 2>&1
+done
 cmake --install build --prefix "${PKG_ROOT}" >/tmp/alps-x86-install.log 2>&1
 
 copy_ucx_runtime
@@ -310,6 +361,24 @@ for rel in \
         exit 1
     }
 done
+
+if [[ -x "${PKG_ROOT}/bin/mpi_send_recv_bench" ]]; then
+    for rel in \
+        bin/mpi_send_recv_bench \
+        bin/mpirun \
+        bin/mpiexec \
+        bin/orted \
+        lib/libmpi.so.40 \
+        lib/libopen-pal.so.40 \
+        lib/libopen-rte.so.40 \
+        lib/pmix/mca_psec_native.so \
+        share/pmix/help-pmix-runtime.txt; do
+        [[ -e "${PKG_ROOT}/${rel}" ]] || {
+            echo "Missing required MPI package file: ${rel}" >&2
+            exit 1
+        }
+    done
+fi
 
 check_no_dynamic_ucx() {
     local file="$1"
@@ -360,8 +429,13 @@ for file in \
     check_no_missing_runtime_deps "${file}"
 done
 if [[ -x "${PKG_ROOT}/bin/mpi_send_recv_bench" ]]; then
-    echo "-- ${PKG_ROOT}/bin/mpi_send_recv_bench"
-    check_no_missing_runtime_deps "${PKG_ROOT}/bin/mpi_send_recv_bench"
+    for file in \
+        "${PKG_ROOT}/bin/mpi_send_recv_bench" \
+        "${PKG_ROOT}/bin/mpirun" \
+        "${PKG_ROOT}/bin/orted"; do
+        echo "-- ${file}"
+        check_no_missing_runtime_deps "${file}"
+    done
 fi
 check_no_dynamic_ucx "${PKG_ROOT}/lib/libzerokv.so"
 
@@ -386,6 +460,14 @@ for file in \
     "${PKG_ROOT}/bin/kv_bench"; do
     check_glibc_floor "${file}"
 done
+if [[ -x "${PKG_ROOT}/bin/mpi_send_recv_bench" ]]; then
+    for file in \
+        "${PKG_ROOT}/bin/mpi_send_recv_bench" \
+        "${PKG_ROOT}/bin/mpirun" \
+        "${PKG_ROOT}/bin/orted"; do
+        check_glibc_floor "${file}"
+    done
+fi
 
 tar -C /tmp -czf "${OUTPUT_TARBALL}" "${PKG_DIR_NAME}"
 ls -lh "${OUTPUT_TARBALL}"
