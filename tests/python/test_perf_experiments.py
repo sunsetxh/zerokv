@@ -98,6 +98,38 @@ class PerfExperimentsTest(unittest.TestCase):
 
         self.assertTrue(command.startswith("cd /tmp/alps-tree && "))
 
+    def test_alps_commands_can_enable_strict_prepost(self):
+        module = load_module()
+
+        server = module.alps_server_command(
+            binary="./bin/alps_kv_bench",
+            port=16000,
+            sizes="256K",
+            iters=10,
+            warmup=1,
+            threads=1,
+            timeout_ms=5000,
+            env={},
+            workdir="/tmp/pkg",
+            strict_prepost=True,
+        )
+        client = module.alps_client_command(
+            binary="./bin/alps_kv_bench",
+            server_host="10.0.0.1",
+            port=16000,
+            sizes="256K",
+            iters=10,
+            warmup=1,
+            threads=1,
+            timeout_ms=5000,
+            env={},
+            workdir="/tmp/pkg",
+            strict_prepost=True,
+        )
+
+        self.assertIn("--strict-prepost", server)
+        self.assertIn("--strict-prepost", client)
+
 
 if __name__ == "__main__":
     unittest.main()

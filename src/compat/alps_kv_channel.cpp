@@ -3,6 +3,8 @@
 #include "core/tcp_framing.h"
 #include "core/tcp_transport.h"
 
+#include <ucp/api/ucp.h>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -15,31 +17,23 @@
 
 namespace zerokv::compat {
 
+using detail::WriteDonePayload;
+using detail::WriteGrantPayload;
+using detail::WriteRequestPayload;
+
 namespace {
 
 constexpr std::uint64_t kFnvOffsetBasis = 1469598103934665603ULL;
 constexpr std::uint64_t kFnvPrime = 1099511628211ULL;
 constexpr zerokv::Tag kBootstrapControlPortTag = zerokv::kTagAny - 1U;
+constexpr unsigned kAlpsControlAmId = 0x4b56;  // "KV"
 
 enum class AlpsControlType : uint16_t {
     kWriteRequest = 1001,
     kWriteGrant = 1002,
     kWriteDone = 1003,
-};
-
-struct WriteRequestPayload {
-    zerokv::Tag message_tag = 0;
-    uint64_t size = 0;
-};
-
-struct WriteGrantPayload {
-    uint64_t reservation_id = 0;
-    uint64_t remote_addr = 0;
-    std::vector<uint8_t> rkey;
-};
-
-struct WriteDonePayload {
-    uint64_t reservation_id = 0;
+    kWriteError = 1004,
+    kWriteAbort = 1005,
 };
 
 using SteadyClock = std::chrono::steady_clock;
@@ -47,6 +41,10 @@ using SteadyClock = std::chrono::steady_clock;
 uint64_t elapsed_us(SteadyClock::time_point begin, SteadyClock::time_point end) {
     return static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count());
+}
+
+uint64_t elapsed_us_nonzero(SteadyClock::time_point begin, SteadyClock::time_point end) {
+    return std::max<uint64_t>(1, elapsed_us(begin, end));
 }
 
 // Spin-wait on a future without calling ucp_worker_progress().
@@ -165,6 +163,44 @@ std::optional<WriteDonePayload> DecodeWriteDone(std::span<const uint8_t> data) {
     return payload;
 }
 
+std::vector<uint8_t> EncodeAmFrame(AlpsControlType type,
+                                   uint64_t request_id,
+                                   std::span<const uint8_t> payload) {
+    std::vector<uint8_t> bytes;
+    bytes.reserve((sizeof(uint64_t) * 2U) + payload.size());
+    AppendU64(&bytes, static_cast<uint16_t>(type));
+    AppendU64(&bytes, request_id);
+    bytes.insert(bytes.end(), payload.begin(), payload.end());
+    return bytes;
+}
+
+struct AmFrame {
+    AlpsControlType type = AlpsControlType::kWriteError;
+    uint64_t request_id = 0;
+    std::span<const uint8_t> payload;
+};
+
+std::optional<AmFrame> DecodeAmFrame(std::span<const uint8_t> data) {
+    size_t offset = 0;
+    uint64_t wire_type = 0;
+    uint64_t request_id = 0;
+    if (!ReadU64(data, &offset, &wire_type) || !ReadU64(data, &offset, &request_id)) {
+        return std::nullopt;
+    }
+    if (wire_type > std::numeric_limits<uint16_t>::max()) {
+        return std::nullopt;
+    }
+    return AmFrame{
+        .type = static_cast<AlpsControlType>(static_cast<uint16_t>(wire_type)),
+        .request_id = request_id,
+        .payload = data.subspan(offset),
+    };
+}
+
+std::vector<uint8_t> EncodeError(const std::string& error) {
+    return std::vector<uint8_t>(error.begin(), error.end());
+}
+
 bool SendControlFrame(int fd, AlpsControlType type, uint64_t request_id,
                       std::span<const uint8_t> payload) {
     return zerokv::core::detail::send_frame(
@@ -186,6 +222,48 @@ bool IsControlFrameType(const zerokv::core::detail::MsgHeader& header, AlpsContr
 
 std::string DecodeErrorPayload(std::span<const uint8_t> payload) {
     return std::string(payload.begin(), payload.end());
+}
+
+zerokv::transport::Future<void> StartAmControlSend(ucp_worker_h worker,
+                                                   ucp_ep_h endpoint,
+                                                   AlpsControlType type,
+                                                   uint64_t request_id,
+                                                   std::span<const uint8_t> payload,
+                                                   bool request_reply_endpoint) {
+    if (worker == nullptr || endpoint == nullptr) {
+        return zerokv::transport::Future<void>::make_error(
+            zerokv::Status(zerokv::ErrorCode::kInvalidArgument, "missing UCX worker/endpoint"));
+    }
+
+    auto frame = std::make_shared<std::vector<uint8_t>>(
+        EncodeAmFrame(type, request_id, payload));
+    ucp_request_param_t params = {};
+    params.op_attr_mask = UCP_OP_ATTR_FLAG_NO_IMM_CMPL | UCP_OP_ATTR_FIELD_FLAGS;
+    params.flags = UCP_AM_SEND_FLAG_EAGER;
+    if (request_reply_endpoint) {
+        params.flags |= UCP_AM_SEND_FLAG_REPLY;
+    }
+
+    ucs_status_ptr_t status = ucp_am_send_nbx(endpoint,
+                                              kAlpsControlAmId,
+                                              nullptr,
+                                              0,
+                                              frame->data(),
+                                              frame->size(),
+                                              &params);
+    if (status == nullptr) {
+        return zerokv::transport::Future<void>::make_ready();
+    }
+    if (UCS_PTR_IS_ERR(status)) {
+        const auto err = UCS_PTR_STATUS(status);
+        return zerokv::transport::Future<void>::make_error(
+            zerokv::Status(zerokv::ErrorCode::kTransportError,
+                           std::string("ucp_am_send_nbx failed: ") + ucs_status_string(err)));
+    }
+
+    auto req = zerokv::transport::Request::create(
+        status, worker, 0, std::shared_ptr<void>(frame, frame.get()));
+    return zerokv::transport::Future<void>::make_request(std::move(req));
 }
 
 }  // namespace
@@ -271,6 +349,263 @@ bool AlpsKvChannel::InitContext() {
         return false;
     }
     return true;
+}
+
+bool AlpsKvChannel::InstallAmHandler(const zerokv::transport::Worker::Ptr& worker,
+                                     AmHandlerContext* context) {
+    if (!worker || worker->native_handle() == nullptr || context == nullptr) {
+        return false;
+    }
+
+    ucp_am_handler_param_t params = {};
+    params.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID |
+                        UCP_AM_HANDLER_PARAM_FIELD_FLAGS |
+                        UCP_AM_HANDLER_PARAM_FIELD_CB |
+                        UCP_AM_HANDLER_PARAM_FIELD_ARG;
+    params.id = kAlpsControlAmId;
+    params.flags = UCP_AM_FLAG_WHOLE_MSG;
+    params.cb = &AlpsKvChannel::AmRecvCallback;
+    params.arg = context;
+
+    const auto status = ucp_worker_set_am_recv_handler(
+        static_cast<ucp_worker_h>(worker->native_handle()), &params);
+    if (status != UCS_OK) {
+        std::cerr << "AlpsKvChannel: failed to install UCX AM handler: "
+                  << ucs_status_string(status) << std::endl;
+        return false;
+    }
+    return true;
+}
+
+ucs_status_t AlpsKvChannel::AmRecvCallback(void* arg,
+                                           const void* header,
+                                           size_t header_length,
+                                           void* data,
+                                           size_t length,
+                                           const ucp_am_recv_param_t* param) {
+    auto* context = static_cast<AmHandlerContext*>(arg);
+    if (context == nullptr || context->channel == nullptr) {
+        return UCS_ERR_INVALID_PARAM;
+    }
+    if (param != nullptr && (param->recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV) != 0) {
+        return UCS_ERR_UNSUPPORTED;
+    }
+
+    const auto* bytes = static_cast<const uint8_t*>(data != nullptr ? data : header);
+    const size_t bytes_length = (data != nullptr) ? length : header_length;
+    context->channel->HandleAmMessage(
+        context, std::span<const uint8_t>(bytes, bytes_length), param);
+    return UCS_OK;
+}
+
+void AlpsKvChannel::HandleAmMessage(AmHandlerContext* context,
+                                    std::span<const uint8_t> message,
+                                    const ucp_am_recv_param_t* param) {
+    if (context == nullptr) {
+        return;
+    }
+    auto frame = DecodeAmFrame(message);
+    if (!frame.has_value()) {
+        return;
+    }
+
+    if (!context->server) {
+        if (context->state == nullptr) {
+            return;
+        }
+        if (frame->type == AlpsControlType::kWriteGrant) {
+            auto grant = DecodeWriteGrant(frame->payload);
+            if (!grant.has_value()) {
+                return;
+            }
+            {
+                std::lock_guard<std::mutex> lock(context->state->am_mutex);
+                context->state->am_grants[frame->request_id] = std::move(*grant);
+            }
+            context->state->am_cv.notify_all();
+            return;
+        }
+        if (frame->type == AlpsControlType::kWriteError) {
+            {
+                std::lock_guard<std::mutex> lock(context->state->am_mutex);
+                context->state->am_errors[frame->request_id] = DecodeErrorPayload(frame->payload);
+            }
+            context->state->am_cv.notify_all();
+        }
+        return;
+    }
+
+    if (frame->type == AlpsControlType::kWriteRequest) {
+        auto request = DecodeWriteRequest(frame->payload);
+        if (!request.has_value()) {
+            if (param != nullptr && (param->recv_attr & UCP_AM_RECV_ATTR_FIELD_REPLY_EP) != 0) {
+                const auto error = EncodeError("failed to decode ALPS AM write request");
+                QueueAmControlFrame(param->reply_ep,
+                                    static_cast<uint16_t>(AlpsControlType::kWriteError),
+                                    frame->request_id,
+                                    error);
+            }
+            return;
+        }
+        if (param == nullptr || (param->recv_attr & UCP_AM_RECV_ATTR_FIELD_REPLY_EP) == 0 ||
+            param->reply_ep == nullptr) {
+            return;
+        }
+
+        std::shared_ptr<ReceiveSlot> slot;
+        std::shared_ptr<BufferedMessage> buffered;
+        std::string error;
+        {
+            std::lock_guard<std::mutex> lock(receive_slots_mutex_);
+            auto slot_it = receive_slots_.find(request->message_tag);
+            if (slot_it != receive_slots_.end() && slot_it->second &&
+                !slot_it->second->reserved && !slot_it->second->done) {
+                if (slot_it->second->size != request->size) {
+                    error = "receive buffer size mismatch";
+                } else {
+                    slot_it->second->reserved = true;
+                    direct_grant_ops_.fetch_add(1, std::memory_order_relaxed);
+                    slot = slot_it->second;
+                    pending_direct_reservations_[slot->reservation_id] = slot;
+                }
+            } else if (staged_messages_.find(request->message_tag) != staged_messages_.end()) {
+                error = "duplicate outstanding ALPS message";
+            }
+        }
+
+        if (error.empty() && !slot) {
+            auto region = zerokv::transport::MemoryRegion::allocate(
+                context_, static_cast<size_t>(request->size));
+            if (!region) {
+                error = "failed to allocate ALPS staging buffer";
+            } else {
+                buffered = std::make_shared<BufferedMessage>();
+                buffered->region = std::move(region);
+                buffered->remote_key = buffered->region->remote_key();
+                buffered->message_tag = request->message_tag;
+                buffered->size = static_cast<size_t>(request->size);
+                buffered->reservation_id = next_reservation_id_.fetch_add(1);
+                staged_grant_ops_.fetch_add(1, std::memory_order_relaxed);
+
+                std::lock_guard<std::mutex> lock(receive_slots_mutex_);
+                if (staged_messages_.find(request->message_tag) != staged_messages_.end()) {
+                    error = "duplicate outstanding ALPS message";
+                } else {
+                    staged_messages_.emplace(request->message_tag, buffered);
+                    pending_staged_reservations_[buffered->reservation_id] = buffered;
+                }
+            }
+        }
+
+        if (!error.empty()) {
+            const auto payload = EncodeError(error);
+            QueueAmControlFrame(param->reply_ep,
+                                static_cast<uint16_t>(AlpsControlType::kWriteError),
+                                frame->request_id,
+                                payload);
+            return;
+        }
+
+        WriteGrantPayload grant;
+        grant.reservation_id = slot ? slot->reservation_id : buffered->reservation_id;
+        grant.remote_addr = reinterpret_cast<uint64_t>(
+            slot ? slot->region->address() : buffered->region->address());
+        grant.rkey = slot ? slot->remote_key.data : buffered->remote_key.data;
+        const auto grant_payload = EncodeWriteGrant(grant);
+        if (!QueueAmControlFrame(param->reply_ep,
+                                 static_cast<uint16_t>(AlpsControlType::kWriteGrant),
+                                 frame->request_id,
+                                 grant_payload)) {
+            if (slot) {
+                {
+                    std::lock_guard<std::mutex> lock(receive_slots_mutex_);
+                    pending_direct_reservations_.erase(slot->reservation_id);
+                }
+                FinishReceiveSlot(slot, "failed to send ALPS AM write grant");
+            } else if (buffered) {
+                std::lock_guard<std::mutex> lock(receive_slots_mutex_);
+                staged_messages_.erase(buffered->message_tag);
+                pending_staged_reservations_.erase(buffered->reservation_id);
+            }
+        }
+        return;
+    }
+
+    if (frame->type == AlpsControlType::kWriteDone || frame->type == AlpsControlType::kWriteAbort) {
+        const bool aborting = frame->type == AlpsControlType::kWriteAbort;
+        auto done = DecodeWriteDone(frame->payload);
+        if (!done.has_value()) {
+            return;
+        }
+
+        std::shared_ptr<ReceiveSlot> slot;
+        std::shared_ptr<BufferedMessage> buffered;
+        zerokv::Tag staged_tag = 0;
+        {
+            std::lock_guard<std::mutex> lock(receive_slots_mutex_);
+            auto direct_it = pending_direct_reservations_.find(done->reservation_id);
+            if (direct_it != pending_direct_reservations_.end()) {
+                slot = direct_it->second;
+                pending_direct_reservations_.erase(direct_it);
+            } else {
+                auto staged_it = pending_staged_reservations_.find(done->reservation_id);
+                if (staged_it != pending_staged_reservations_.end()) {
+                    buffered = staged_it->second;
+                    pending_staged_reservations_.erase(staged_it);
+                    if (buffered) {
+                        buffered->completed = true;
+                        staged_tag = buffered->message_tag;
+                    }
+                }
+            }
+        }
+        if (slot) {
+            FinishReceiveSlot(slot, aborting ? "writer aborted ALPS AM transfer" : "");
+        } else if (buffered) {
+            if (aborting) {
+                std::lock_guard<std::mutex> lock(receive_slots_mutex_);
+                staged_messages_.erase(staged_tag);
+            } else {
+                TryDeliverBufferedMessage(staged_tag);
+            }
+        }
+    }
+}
+
+bool AlpsKvChannel::QueueAmControlFrame(ucp_ep_h endpoint,
+                                        uint16_t type,
+                                        uint64_t request_id,
+                                        std::span<const uint8_t> payload) {
+    if (!recv_worker_ || recv_worker_->native_handle() == nullptr) {
+        return false;
+    }
+    ReapAmSends();
+    auto future = StartAmControlSend(static_cast<ucp_worker_h>(recv_worker_->native_handle()),
+                                     endpoint,
+                                     static_cast<AlpsControlType>(type),
+                                     request_id,
+                                     payload,
+                                     false);
+    if (!future.status().ok() && future.status().code() != zerokv::ErrorCode::kInProgress) {
+        std::cerr << "AlpsKvChannel: failed to send UCX AM control frame: "
+                  << future.status().message() << std::endl;
+        return false;
+    }
+    if (!future.ready()) {
+        std::lock_guard<std::mutex> lock(pending_am_sends_mutex_);
+        pending_am_sends_.push_back(PendingAmSend{.future = std::move(future)});
+    }
+    return true;
+}
+
+void AlpsKvChannel::ReapAmSends() {
+    std::lock_guard<std::mutex> lock(pending_am_sends_mutex_);
+    pending_am_sends_.erase(
+        std::remove_if(pending_am_sends_.begin(), pending_am_sends_.end(),
+                       [](PendingAmSend& pending) {
+                           return pending.future.ready();
+                       }),
+        pending_am_sends_.end());
 }
 
 bool AlpsKvChannel::InitControlListener(const std::string& bind_address) {
@@ -404,6 +739,9 @@ void AlpsKvChannel::RemoveReceiveSlot(zerokv::Tag message_tag,
     auto it = receive_slots_.find(message_tag);
     if (it != receive_slots_.end() && it->second == slot) {
         receive_slots_.erase(it);
+    }
+    if (slot) {
+        pending_direct_reservations_.erase(slot->reservation_id);
     }
     receive_slots_cv_.notify_all();
 }
@@ -634,20 +972,24 @@ bool AlpsKvChannel::Listen(const std::string& bind_address, int connect_timeout_
         return false;
     }
 
+    listen_am_context_ = std::make_unique<AmHandlerContext>();
+    listen_am_context_->channel = this;
+    listen_am_context_->server = true;
+    if (!InstallAmHandler(recv_worker_, listen_am_context_.get())) {
+        recv_worker_.reset();
+        context_.reset();
+        return false;
+    }
+
     running_ = true;
     mode_ = Mode::kListen;
     recv_worker_->start_progress_thread();
-
-    if (!InitControlListener(bind_address)) {
-        Shutdown();
-        return false;
-    }
 
     listener_ = recv_worker_->listen(bind_address, [this](zerokv::transport::Endpoint::Ptr ep) {
         if (!ep) {
             return;
         }
-        QueueBootstrapControlPort(ep);
+        ReapAmSends();
         std::lock_guard<std::mutex> lock(endpoints_mutex_);
         endpoints_.push_back(std::move(ep));
         endpoints_cv_.notify_all();
@@ -765,51 +1107,37 @@ AlpsKvChannel::PerThreadState* AlpsKvChannel::GetOrCreateThreadState() {
         }
     }
 
-    auto worker = zerokv::transport::Worker::create(context_);
-    if (!worker) {
+    auto state = std::make_shared<PerThreadState>();
+    state->worker = zerokv::transport::Worker::create(context_);
+    if (!state->worker) {
         std::cerr << "AlpsKvChannel: failed to create worker for thread." << std::endl;
         return nullptr;
     }
-    worker->start_progress_thread();
+    state->am_context.channel = this;
+    state->am_context.state = state.get();
+    state->am_context.server = false;
+    if (!InstallAmHandler(state->worker, &state->am_context)) {
+        return nullptr;
+    }
+    state->worker->start_progress_thread();
 
-    auto future = worker->connect(remote_address_);
+    auto future = state->worker->connect(remote_address_);
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::milliseconds(connect_timeout_ms_);
 
     if (!SpinUntilReady(future, deadline)) {
         std::cerr << "AlpsKvChannel: timed out connecting to " << remote_address_ << std::endl;
-        worker->stop_progress_thread();
+        state->worker->stop_progress_thread();
         return nullptr;
     }
     auto conn_result = future.get();
     if (!future.status().ok() || conn_result == nullptr) {
         std::cerr << "AlpsKvChannel: connect failed: " << future.status().message() << std::endl;
-        worker->stop_progress_thread();
-        return nullptr;
-    }
-
-    auto flush = conn_result->flush();
-    if (!SpinUntilReady(flush, deadline)) {
-        std::cerr << "AlpsKvChannel: endpoint flush timed out." << std::endl;
-        worker->stop_progress_thread();
-        return nullptr;
-    }
-    if (!flush.status().ok()) {
-        std::cerr << "AlpsKvChannel: endpoint flush failed: " << flush.status().message()
-                  << std::endl;
-        worker->stop_progress_thread();
-        return nullptr;
-    }
-
-    auto state = std::make_shared<PerThreadState>();
-    state->worker = std::move(worker);
-    state->endpoint = std::move(conn_result);
-    if (!BootstrapControlAddress(state.get(), deadline)) {
-        auto close = state->endpoint->close();
-        close.get(std::chrono::milliseconds(200));
         state->worker->stop_progress_thread();
         return nullptr;
     }
+
+    state->endpoint = std::move(conn_result);
 
     std::lock_guard<std::mutex> lock(per_thread_mutex_);
     per_thread_states_[tid] = state;
@@ -823,6 +1151,14 @@ void AlpsKvChannel::Shutdown() {
     running_ = false;
     endpoints_cv_.notify_all();
     receive_slots_cv_.notify_all();
+    {
+        std::lock_guard<std::mutex> lock(per_thread_mutex_);
+        for (const auto& [tid, state] : per_thread_states_) {
+            if (state) {
+                state->am_cv.notify_all();
+            }
+        }
+    }
 
     std::vector<std::shared_ptr<ReceiveSlot>> slots;
     {
@@ -833,6 +1169,8 @@ void AlpsKvChannel::Shutdown() {
         receive_slots_.clear();
         receive_cache_.clear();
         staged_messages_.clear();
+        pending_direct_reservations_.clear();
+        pending_staged_reservations_.clear();
     }
     for (const auto& slot : slots) {
         FinishReceiveSlot(slot, "channel shutdown");
@@ -869,6 +1207,10 @@ void AlpsKvChannel::Shutdown() {
             eps = std::move(endpoints_);
             pending_bootstrap_sends_.clear();
         }
+        {
+            std::lock_guard<std::mutex> lock(pending_am_sends_mutex_);
+            pending_am_sends_.clear();
+        }
         for (auto& ep : eps) {
             auto f = ep->close();
             f.get(std::chrono::milliseconds(200));
@@ -881,6 +1223,7 @@ void AlpsKvChannel::Shutdown() {
             recv_worker_->stop_progress_thread();
             recv_worker_.reset();
         }
+        listen_am_context_.reset();
     } else if (mode_ == Mode::kConnect) {
         std::map<std::thread::id, std::shared_ptr<PerThreadState>> states;
         {
@@ -928,9 +1271,6 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
         std::cerr << "AlpsKvChannel::WriteBytes: no endpoint for thread." << std::endl;
         return false;
     }
-    if (!EnsureControlConnection(state)) {
-        return false;
-    }
 
     const auto message_tag = MakeMessageTag(tag, index, src, dst);
     const auto request_id = state->next_request_id++;
@@ -938,56 +1278,96 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
         .message_tag = message_tag,
         .size = size,
     });
+    const auto deadline =
+        SteadyClock::now() + std::chrono::milliseconds(connect_timeout_ms_);
     const auto control_request_begin = SteadyClock::now();
-    if (!SendControlFrame(state->control_fd, AlpsControlType::kWriteRequest,
-                          request_id, write_request)) {
-        CloseControlFd(&state->control_fd);
-        std::cerr << "AlpsKvChannel::WriteBytes: failed to send control write request." << std::endl;
+    auto request_send = StartAmControlSend(
+        static_cast<ucp_worker_h>(state->worker->native_handle()),
+        static_cast<ucp_ep_h>(state->endpoint->native_handle()),
+        AlpsControlType::kWriteRequest,
+        request_id,
+        write_request,
+        true);
+    if (!request_send.status().ok() &&
+        request_send.status().code() != zerokv::ErrorCode::kInProgress) {
+        std::cerr << "AlpsKvChannel::WriteBytes: failed to send AM write request: "
+                  << request_send.status().message() << std::endl;
+        return false;
+    }
+    auto send_timeout = std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - SteadyClock::now());
+    if (send_timeout.count() <= 0) {
+        send_timeout = std::chrono::milliseconds(1);
+    }
+    if (!request_send.ready() && !request_send.get(send_timeout)) {
+        std::cerr << "AlpsKvChannel::WriteBytes: failed to complete AM write request send: "
+                  << request_send.status().message() << std::endl;
         return false;
     }
 
-    zerokv::core::detail::MsgHeader grant_header;
-    std::vector<uint8_t> grant_payload;
-    if (!zerokv::core::detail::recv_frame(state->control_fd, &grant_header, &grant_payload)) {
-        CloseControlFd(&state->control_fd);
-        std::cerr << "AlpsKvChannel::WriteBytes: failed to read control write grant." << std::endl;
+    std::optional<WriteGrantPayload> grant;
+    std::string control_error;
+    {
+        std::unique_lock<std::mutex> lock(state->am_mutex);
+        const bool ready = state->am_cv.wait_until(lock, deadline, [&]() {
+            return !running_ ||
+                   state->am_grants.find(request_id) != state->am_grants.end() ||
+                   state->am_errors.find(request_id) != state->am_errors.end();
+        });
+        if (!ready) {
+            std::cerr << "AlpsKvChannel::WriteBytes: timed out waiting for AM write grant."
+                      << std::endl;
+            return false;
+        }
+        auto error_it = state->am_errors.find(request_id);
+        if (error_it != state->am_errors.end()) {
+            control_error = std::move(error_it->second);
+            state->am_errors.erase(error_it);
+        } else {
+            auto grant_it = state->am_grants.find(request_id);
+            if (grant_it != state->am_grants.end()) {
+                grant = std::move(grant_it->second);
+                state->am_grants.erase(grant_it);
+            }
+        }
+    }
+    if (!control_error.empty()) {
+        std::cerr << "AlpsKvChannel::WriteBytes: AM control error: "
+                  << control_error << std::endl;
         return false;
     }
-    if (grant_header.request_id != request_id) {
-        CloseControlFd(&state->control_fd);
-        std::cerr << "AlpsKvChannel::WriteBytes: mismatched control request id." << std::endl;
-        return false;
-    }
-    if (grant_header.type == static_cast<uint16_t>(zerokv::core::detail::MsgType::kError)) {
-        CloseControlFd(&state->control_fd);
-        std::cerr << "AlpsKvChannel::WriteBytes: control error: "
-                  << DecodeErrorPayload(grant_payload) << std::endl;
-        return false;
-    }
-    if (!IsControlFrameType(grant_header, AlpsControlType::kWriteGrant)) {
-        CloseControlFd(&state->control_fd);
-        std::cerr << "AlpsKvChannel::WriteBytes: unexpected control write grant frame." << std::endl;
-        return false;
-    }
-
-    auto grant = DecodeWriteGrant(grant_payload);
     if (!grant.has_value()) {
-        CloseControlFd(&state->control_fd);
-        std::cerr << "AlpsKvChannel::WriteBytes: failed to decode write grant." << std::endl;
+        std::cerr << "AlpsKvChannel::WriteBytes: channel stopped before AM write grant."
+                  << std::endl;
         return false;
     }
     control_request_grant_us_.fetch_add(
-        elapsed_us(control_request_begin, SteadyClock::now()), std::memory_order_relaxed);
+        elapsed_us_nonzero(control_request_begin, SteadyClock::now()), std::memory_order_relaxed);
 
     auto region = GetOrRegisterSendRegion(state->send_cache, data, size);
     if (!region) {
-        CloseControlFd(&state->control_fd);
         std::cerr << "AlpsKvChannel::WriteBytes: failed to register send buffer." << std::endl;
         return false;
     }
 
     zerokv::transport::RemoteKey remote_key;
     remote_key.data = grant->rkey;
+    auto send_abort = [&]() {
+        const auto abort_payload = EncodeWriteDone(WriteDonePayload{
+            .reservation_id = grant->reservation_id,
+        });
+        auto abort_send = StartAmControlSend(
+            static_cast<ucp_worker_h>(state->worker->native_handle()),
+            static_cast<ucp_ep_h>(state->endpoint->native_handle()),
+            AlpsControlType::kWriteAbort,
+            request_id,
+            abort_payload,
+            false);
+        if (abort_send.status().ok() ||
+            abort_send.status().code() == zerokv::ErrorCode::kInProgress) {
+            SpinUntilReady(abort_send, SteadyClock::now() + std::chrono::milliseconds(200));
+        }
+    };
 #ifdef ZEROKV_ALPS_TEST_HOOKS
     const std::string rkey_cache_key(
         reinterpret_cast<const char*>(grant->rkey.data()), grant->rkey.size());
@@ -999,7 +1379,7 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
     auto put = state->endpoint->put(region, 0, grant->remote_addr, remote_key, size);
     SpinUntilReady(put);
     if (!put.status().ok()) {
-        CloseControlFd(&state->control_fd);
+        send_abort();
         std::cerr << "AlpsKvChannel::WriteBytes: put failed: " << put.status().message()
                   << std::endl;
         return false;
@@ -1010,7 +1390,7 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
     auto flush = state->endpoint->flush();
     SpinUntilReady(flush);
     if (!flush.status().ok()) {
-        CloseControlFd(&state->control_fd);
+        send_abort();
         std::cerr << "AlpsKvChannel::WriteBytes: flush failed: " << flush.status().message()
                   << std::endl;
         return false;
@@ -1021,14 +1401,22 @@ bool AlpsKvChannel::WriteBytes(const void* data, size_t size, int tag, int index
         .reservation_id = grant->reservation_id,
     });
     const auto write_done_begin = SteadyClock::now();
-    if (!SendControlFrame(state->control_fd, AlpsControlType::kWriteDone,
-                          request_id, write_done)) {
-        CloseControlFd(&state->control_fd);
-        std::cerr << "AlpsKvChannel::WriteBytes: failed to send write completion." << std::endl;
+    auto done_send = StartAmControlSend(
+        static_cast<ucp_worker_h>(state->worker->native_handle()),
+        static_cast<ucp_ep_h>(state->endpoint->native_handle()),
+        AlpsControlType::kWriteDone,
+        request_id,
+        write_done,
+        false);
+    if (!done_send.status().ok() &&
+        done_send.status().code() != zerokv::ErrorCode::kInProgress) {
+        std::cerr << "AlpsKvChannel::WriteBytes: failed to send AM write completion: "
+                  << done_send.status().message() << std::endl;
         return false;
     }
+    SpinUntilReady(done_send);
     write_done_us_.fetch_add(
-        elapsed_us(write_done_begin, SteadyClock::now()), std::memory_order_relaxed);
+        elapsed_us_nonzero(write_done_begin, SteadyClock::now()), std::memory_order_relaxed);
     write_ops_.fetch_add(1, std::memory_order_relaxed);
 
 #ifdef ZEROKV_ALPS_TEST_HOOKS

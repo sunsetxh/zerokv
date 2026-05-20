@@ -224,3 +224,105 @@ The benchmark uses unique `index` values for each iteration so it does not rely
 on duplicate tuple handling.
 You can still pass larger sizes such as `128M` manually when the runtime
 environment has enough memory.
+
+### Real-RDMA validation recipe
+
+Use this checklist when validating the packaged artifact on two physical
+RoCE/IB hosts.  The ALPS wrapper sends control messages through UCX Active
+Messages and moves the payload with UCX RMA `put`; `--strict-prepost` forces the
+server to pre-post matching receive buffers so the run validates the direct
+RMA path (`direct_grant_ops > 0`, `staged_grant_ops = 0`).
+
+On both nodes, unpack the same package and identify the RDMA device/IP pair:
+
+```bash
+tar xzf zerokv-<arch>-<commit>.tar.gz -C /opt
+export PKG=/opt/zerokv-<arch>-<commit>
+
+ibv_devices
+ibdev2netdev
+rdma link show
+ip -br addr
+"${PKG}/bin/ucx_info" -d | grep -E 'Memory domain:|Transport:|Device:'
+```
+
+Single-rail direct-RMA validation:
+
+```bash
+# Node A / server.  SERVER_RDMA_IP must be configured on the same NIC as RDMA_DEV.
+export SERVER_RDMA_IP=<server_rdma_ip>
+export RDMA_DEV=mlx5_0:1
+export UCX_TLS=rc,self
+export UCX_NET_DEVICES=${RDMA_DEV}
+export UCX_PROTO_ENABLE=n
+export LD_LIBRARY_PATH=${PKG}/lib:${LD_LIBRARY_PATH:-}
+export UCX_MODULE_DIR=${PKG}/lib/ucx
+
+cd "${PKG}"
+./bin/alps_kv_bench --mode server --port 16000 \
+    --sizes 256K,1M,4M,16M,64M --iters 100 --warmup 10 \
+    --threads 1 --strict-prepost
+```
+
+```bash
+# Node B / client.  Use the same RDMA_DEV value if both hosts expose the same
+# UCX device name; otherwise set it to the local device that reaches SERVER_RDMA_IP.
+export SERVER_RDMA_IP=<server_rdma_ip>
+export RDMA_DEV=mlx5_0:1
+export UCX_TLS=rc,self
+export UCX_NET_DEVICES=${RDMA_DEV}
+export UCX_PROTO_ENABLE=n
+export LD_LIBRARY_PATH=${PKG}/lib:${LD_LIBRARY_PATH:-}
+export UCX_MODULE_DIR=${PKG}/lib/ucx
+
+cd "${PKG}"
+./bin/alps_kv_bench --mode client --host "${SERVER_RDMA_IP}" --port 16000 \
+    --sizes 256K,1M,4M,16M,64M --iters 100 --warmup 10 \
+    --threads 1 --strict-prepost
+```
+
+Expected success signals:
+
+- client prints `ALPS_KV_ROUND ... avg_control_request_grant_us=... avg_put_us=...`
+- server prints `ALPS_KV_ROUND ... direct_grant_ops=<iters> staged_grant_ops=0`
+- no `UCX  ERROR` appears before the round output
+
+Dual-rail comparison on hosts with two reachable RDMA ports:
+
+```bash
+export UCX_NET_DEVICES=mlx5_0:1,mlx5_1:1
+export UCX_MAX_RMA_RAILS=2
+export UCX_MAX_RNDV_RAILS=2
+```
+
+For a repeatable matrix run from a controller machine:
+
+```bash
+./scripts/perf_experiments.py run-alps-matrix \
+    --server-target user@node-a \
+    --client-target user@node-b \
+    --server-workdir "${PKG}" \
+    --client-workdir "${PKG}" \
+    --alps-binary ./bin/alps_kv_bench \
+    --server-rdma-ip <server_rdma_ip> \
+    --rdma-device mlx5_0:1 \
+    --ucx-tls rc,self \
+    --proto-modes n \
+    --rma-rails 1,2 \
+    --sizes 256K,1M,4M,16M,64M \
+    --iters 100 \
+    --warmup 10 \
+    --threads 1 \
+    --strict-prepost \
+    --extra-env "LD_LIBRARY_PATH=${PKG}/lib" \
+    --extra-env "UCX_MODULE_DIR=${PKG}/lib/ucx" \
+    --out-dir out/alps-real-rdma/$(date +%Y%m%d-%H%M%S)
+```
+
+To prove lane selection when dual-rail is expected, add logging on both nodes:
+
+```bash
+export UCX_LOG_LEVEL=debug
+export UCX_LOG_FILE=ucx-%h-%p.log
+grep -Ei 'lane|rail|rma|rndv|ep_cfg|mlx5_0|mlx5_1|reachable|unreachable' ucx-*.log
+```

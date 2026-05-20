@@ -222,7 +222,7 @@ def compose_env(base_env: Dict[str, str], case: ExperimentCase, extra_env: Dict[
 
 def alps_server_command(binary: str, port: int, sizes: str, iters: int, warmup: int,
                         threads: int, timeout_ms: int, env: Dict[str, str],
-                        workdir: str) -> str:
+                        workdir: str, strict_prepost: bool = False) -> str:
     cmd = [
         binary,
         "--mode", "server",
@@ -233,12 +233,15 @@ def alps_server_command(binary: str, port: int, sizes: str, iters: int, warmup: 
         "--threads", str(threads),
         "--timeout-ms", str(timeout_ms),
     ]
+    if strict_prepost:
+        cmd.append("--strict-prepost")
     return f"cd {shlex.quote(workdir)} && {build_env_exports(env)} {shell_join(cmd)}"
 
 
 def alps_client_command(binary: str, server_host: str, port: int, sizes: str, iters: int,
                         warmup: int, threads: int, timeout_ms: int,
-                        env: Dict[str, str], workdir: str) -> str:
+                        env: Dict[str, str], workdir: str,
+                        strict_prepost: bool = False) -> str:
     cmd = [
         binary,
         "--mode", "client",
@@ -250,6 +253,8 @@ def alps_client_command(binary: str, server_host: str, port: int, sizes: str, it
         "--threads", str(threads),
         "--timeout-ms", str(timeout_ms),
     ]
+    if strict_prepost:
+        cmd.append("--strict-prepost")
     return f"cd {shlex.quote(workdir)} && {build_env_exports(env)} {shell_join(cmd)}"
 
 
@@ -323,6 +328,7 @@ def run_alps_matrix(args: argparse.Namespace) -> int:
                 timeout_ms=args.timeout_ms,
                 env=case_env,
                 workdir=args.server_workdir,
+                strict_prepost=args.strict_prepost,
             )
             client_cmd = alps_client_command(
                 binary=args.alps_binary,
@@ -335,6 +341,7 @@ def run_alps_matrix(args: argparse.Namespace) -> int:
                 timeout_ms=args.timeout_ms,
                 env=case_env,
                 workdir=args.client_workdir,
+                strict_prepost=args.strict_prepost,
             )
             if args.dry_run:
                 write_json(
@@ -540,6 +547,8 @@ def build_parser() -> argparse.ArgumentParser:
     alps.add_argument("--threads", type=int, default=1)
     alps.add_argument("--timeout-ms", type=int, default=5000)
     alps.add_argument("--server-ready-timeout-s", type=float, default=20.0)
+    alps.add_argument("--strict-prepost", action="store_true",
+                      help="pre-post matching receives before each write; use this to validate the direct RMA put path")
     alps.set_defaults(func=run_alps_matrix)
 
     ucx = subparsers.add_parser("run-ucx-matrix", help="run ucx_perftest matrix")

@@ -188,7 +188,7 @@ collect_abs_deps() {
 }
 
 stage_mpi_runtime() {
-    [[ -x "${PKG_ROOT}/bin/mpi_send_recv_bench" ]] || return
+    [[ -x "${PKG_ROOT}/bin/mpi_send_recv_bench" ]] || return 0
 
     local current
     local dep

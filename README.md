@@ -325,6 +325,35 @@ UCX_NET_DEVICES=rocep23s0f0:1 UCX_TLS=rc,sm,self \
 > as `rc,sm,self`. Also make sure `<server_rdma_ip>` is the IP configured on
 > the same NIC selected by `UCX_NET_DEVICES`.
 
+For physical RDMA validation, prefer the packaged binary and add
+`--strict-prepost` to prove the direct RMA path:
+
+```bash
+# Both nodes
+export PKG=/opt/zerokv-<arch>-<commit>
+export SERVER_RDMA_IP=<server_rdma_ip>
+export UCX_NET_DEVICES=mlx5_0:1
+export UCX_TLS=rc,self
+export UCX_PROTO_ENABLE=n
+export LD_LIBRARY_PATH=${PKG}/lib:${LD_LIBRARY_PATH:-}
+export UCX_MODULE_DIR=${PKG}/lib/ucx
+
+# Server
+cd "${PKG}" && ./bin/alps_kv_bench --mode server --port 16000 \
+  --sizes 256K,1M,4M,16M,64M --iters 100 --warmup 10 --strict-prepost
+
+# Client
+cd "${PKG}" && ./bin/alps_kv_bench --mode client --host "${SERVER_RDMA_IP}" --port 16000 \
+  --sizes 256K,1M,4M,16M,64M --iters 100 --warmup 10 --strict-prepost
+```
+
+The server should report `direct_grant_ops > 0` and `staged_grant_ops=0`.
+For dual-rail comparison set
+`UCX_NET_DEVICES=mlx5_0:1,mlx5_1:1`,
+`UCX_MAX_RMA_RAILS=2`, and `UCX_MAX_RNDV_RAILS=2`, or use
+`scripts/perf_experiments.py run-alps-matrix --strict-prepost` as documented in
+[docs/alps_kv_wrap/README.md](docs/alps_kv_wrap/README.md).
+
 ### KV two-node demo
 
 `message_kv_demo` sweeps message sizes with `--sizes` across the two-node

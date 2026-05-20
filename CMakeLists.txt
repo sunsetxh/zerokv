@@ -219,7 +219,7 @@ target_include_directories(alps_kv_wrap_core
     PRIVATE ${CMAKE_SOURCE_DIR}/src
 )
 target_compile_features(alps_kv_wrap_core PUBLIC cxx_std_20)
-target_link_libraries(alps_kv_wrap_core PUBLIC zerokv Threads::Threads)
+target_link_libraries(alps_kv_wrap_core PUBLIC zerokv zerokv_ucx Threads::Threads)
 if(ZEROKV_BUILD_TESTS)
     target_compile_definitions(alps_kv_wrap_core PUBLIC ZEROKV_ALPS_TEST_HOOKS)
 endif()

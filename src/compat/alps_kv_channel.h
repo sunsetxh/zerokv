@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -22,6 +23,23 @@
 #include <vector>
 
 namespace zerokv::compat {
+
+namespace detail {
+
+struct WriteRequestPayload {
+    zerokv::Tag message_tag = 0;
+    uint64_t size = 0;
+};
+struct WriteGrantPayload {
+    uint64_t reservation_id = 0;
+    uint64_t remote_addr = 0;
+    std::vector<uint8_t> rkey;
+};
+struct WriteDonePayload {
+    uint64_t reservation_id = 0;
+};
+
+}  // namespace detail
 
 // AlpsKvChannel supports two roles:
 //
@@ -136,6 +154,37 @@ private:
     std::string local_address_;
     std::string control_address_;
 
+    // ---- UCX AM control path -----------------------------------------------
+    struct PerThreadState;
+    struct AmHandlerContext {
+        AlpsKvChannel* channel = nullptr;
+        PerThreadState* state = nullptr;
+        bool server = false;
+    };
+    struct PendingAmSend {
+        zerokv::transport::Future<void> future;
+    };
+    std::mutex pending_am_sends_mutex_;
+    std::vector<PendingAmSend> pending_am_sends_;
+    std::unique_ptr<AmHandlerContext> listen_am_context_;
+
+    bool InstallAmHandler(const zerokv::transport::Worker::Ptr& worker,
+                          AmHandlerContext* context);
+    static ucs_status_t AmRecvCallback(void* arg,
+                                       const void* header,
+                                       size_t header_length,
+                                       void* data,
+                                       size_t length,
+                                       const ucp_am_recv_param_t* param);
+    void HandleAmMessage(AmHandlerContext* context,
+                         std::span<const uint8_t> message,
+                         const ucp_am_recv_param_t* param);
+    bool QueueAmControlFrame(ucp_ep_h endpoint,
+                             uint16_t type,
+                             uint64_t request_id,
+                             std::span<const uint8_t> payload);
+    void ReapAmSends();
+
     // ---- listen-mode state (RANK0) -----------------------------------------
     // One worker drives UCX progress for all accepted connections.
     // tag_recv is worker-level, so it matches incoming messages from any peer.
@@ -176,11 +225,14 @@ private:
     struct BufferedMessage {
         zerokv::transport::MemoryRegion::Ptr region;
         zerokv::transport::RemoteKey remote_key;
+        zerokv::Tag message_tag = 0;
         size_t size = 0;
         uint64_t reservation_id = 0;
         bool completed = false;
     };
     std::unordered_map<zerokv::Tag, std::shared_ptr<BufferedMessage>> staged_messages_;
+    std::unordered_map<uint64_t, std::shared_ptr<ReceiveSlot>> pending_direct_reservations_;
+    std::unordered_map<uint64_t, std::shared_ptr<BufferedMessage>> pending_staged_reservations_;
     std::atomic<uint64_t> next_reservation_id_{1};
     int control_listen_fd_ = -1;
     std::thread control_accept_thread_;
@@ -208,6 +260,11 @@ private:
         std::string control_address;
         int control_fd = -1;
         uint64_t next_request_id = 1;
+        AmHandlerContext am_context;
+        std::mutex am_mutex;
+        std::condition_variable am_cv;
+        std::unordered_map<uint64_t, detail::WriteGrantPayload> am_grants;
+        std::unordered_map<uint64_t, std::string> am_errors;
     };
     mutable std::mutex per_thread_mutex_;
     std::map<std::thread::id, std::shared_ptr<PerThreadState>> per_thread_states_;

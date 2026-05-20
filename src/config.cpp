@@ -215,8 +215,10 @@ Context::Ptr Context::create(const Config& config) {
                        UCP_PARAM_FIELD_REQUEST_SIZE |
                        UCP_PARAM_FIELD_MT_WORKERS_SHARED;  // Allow workers to be shared across threads
 
-    // Enable RMA (Remote Memory Access), TAG matching, and AMO (Atomic Operations)
-    params.features = UCP_FEATURE_TAG | UCP_FEATURE_STREAM | UCP_FEATURE_RMA | UCP_FEATURE_AMO64;
+    // Enable RMA (Remote Memory Access), TAG matching, Active Messages, and AMO.
+    // ALPS uses AM for latency-sensitive control messages and keeps RMA for payloads.
+    params.features = UCP_FEATURE_TAG | UCP_FEATURE_STREAM | UCP_FEATURE_RMA |
+                      UCP_FEATURE_AM | UCP_FEATURE_AMO64;
 
     params.request_size = 0;  // Use UCX default
     params.mt_workers_shared = 1;  // Enable multi-threaded worker access
